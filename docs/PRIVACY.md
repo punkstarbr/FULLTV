@@ -22,13 +22,16 @@ may be third parties — that is your provider's choice, not ours.
 
 ## Cleartext HTTP
 
-The app allows plain HTTP (`usesCleartextTraffic="true"`). The overwhelming majority of IPTV
-panels are HTTP-only; refusing them would make the app useless to most of the people it is for.
+The app rejects plain HTTP (`usesCleartextTraffic="false"`) and requires provider, EPG, logo,
+poster and stream URLs to use HTTPS. This prevents provider credentials and media requests from
+being read or modified by an observer on the network. Older HTTP-only IPTV panels are not
+supported by the hardened build; use the HTTPS endpoint supplied by the provider.
 
-Be aware of what that means: **on an HTTP connection, your provider username and password are
-sent unencrypted**, and anyone able to observe the network between you and your provider can
-read them. This is a property of how these services are built, not of OpenTV. If your provider
-offers an HTTPS endpoint, use it.
+Phone pairing and device sync use short-lived, LAN-only sockets. They are inbound local services,
+not internet endpoints, and are stopped automatically when their session ends.
+
+Provider credentials remain in the app's private storage and Android backup is disabled so they
+are not copied to cloud or device backups.
 
 ## Uninstalling
 

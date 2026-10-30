@@ -90,6 +90,9 @@ configurado.
 - A checagem de atualização automática fica **desativada** até o maintainer configurar
   `UPDATE_REPO_SLUG` em `app/build.gradle.kts` com o repositório deste fork. Assim o app nunca
   oferece o APK oficial do OpenTV por engano.
+- O build endurecido exige URLs HTTPS para provedores, EPG, logos, posters e streams. Painéis
+  antigos que oferecem apenas HTTP não funcionam, porque o app não envia credenciais em texto
+  claro.
 - O applicationId e o nome do pacote ainda são os do upstream (`app.opentv`), para facilitar o
   acompanhamento das mudanças. Um build de release independente deve trocar o applicationId.
 

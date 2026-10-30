@@ -105,12 +105,11 @@ class ManagerServer(
         }
 
         val random = SecureRandom()
-        // A short token, not a long one, so the "camera won't scan the QR?" fallback URL the TV
-        // shows is actually typeable into a laptop browser. It only gates a LAN-only, private-IP-only
-        // server on a random high port that closes on idle and is shown solely on this TV screen, so
-        // ~40 bits is ample — brute-forcing it on the local network inside the session window isn't
-        // realistic.
-        token = ByteArray(5).also(random::nextBytes).joinToString("") { "%02x".format(it) }
+        // Use the same 192-bit token strength as phone pairing. The manager can modify channels,
+        // provider credentials and recording targets, so a short token would make an online LAN
+        // guess materially more damaging. QR remains the normal transport; the typed fallback is
+        // intentionally longer because the security boundary matters more than convenience.
+        token = ByteArray(24).also(random::nextBytes).joinToString("") { "%02x".format(it) }
 
         val socket = try {
             // Port 0 asks the OS for a free one. A fixed port would be predictable and would
