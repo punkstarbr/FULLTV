@@ -8,6 +8,7 @@ package app.opentv.update
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,6 +27,8 @@ import java.io.File
  */
 class ApkInstaller(private val http: OkHttpClient) {
 
+    class InstallPermissionRequiredException : Exception()
+
     /** Progress as a 0f..1f fraction, or -1f when the total size is unknown. */
     fun interface Progress {
         fun onProgress(fraction: Float)
@@ -41,6 +44,19 @@ class ApkInstaller(private val http: OkHttpClient) {
         expectedBytes: Long,
         progress: Progress,
     ): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            !context.packageManager.canRequestPackageInstalls()
+        ) {
+            // Fire OS uses the same Android setting. It must be enabled once for the sideloaded
+            // FullTV app; Android deliberately never permits silent APK installation.
+            context.startActivity(
+                Intent(
+                    android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                    Uri.parse("package:${context.packageName}"),
+                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+            throw InstallPermissionRequiredException()
+        }
         val apk = download(context, url, expectedBytes, progress)
         launchInstaller(context, apk)
         return true

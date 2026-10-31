@@ -87,7 +87,11 @@ fun UpdateGate(viewModel: UpdateViewModel = viewModel()) {
             confirmButton = { TextButton(onClick = viewModel::install) { Text("Retry") } },
             dismissButton = { TextButton(onClick = viewModel::dismiss) { Text("Close") } },
             title = { Text("Update failed") },
-            text = { Text("Could not download the update. Check the connection and try again.") },
+            text = {
+                Text(
+                    s.reason ?: "Could not download the update. Check the connection and try again.",
+                )
+            },
         )
     }
 }
@@ -96,7 +100,7 @@ sealed interface UpdateUiState {
     data object Idle : UpdateUiState
     data class Available(val update: UpdateChecker.Update) : UpdateUiState
     data class Downloading(val update: UpdateChecker.Update, val fraction: Float) : UpdateUiState
-    data class Failed(val update: UpdateChecker.Update) : UpdateUiState
+    data class Failed(val update: UpdateChecker.Update, val reason: String? = null) : UpdateUiState
 }
 
 /**
@@ -156,8 +160,15 @@ class UpdateViewModel(app: Application) : AndroidViewModel(app) {
             }.onSuccess {
                 // The system installer is now front-and-centre; step our dialog aside.
                 _state.value = UpdateUiState.Idle
-            }.onFailure {
-                _state.value = UpdateUiState.Failed(update)
+            }.onFailure { error ->
+                _state.value = UpdateUiState.Failed(
+                    update,
+                    if (error is ApkInstaller.InstallPermissionRequiredException) {
+                        "Allow FullTV to install unknown apps in the next screen, then tap Retry."
+                    } else {
+                        null
+                    },
+                )
             }
         }
     }

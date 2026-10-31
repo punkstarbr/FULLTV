@@ -65,7 +65,8 @@ class UpdateChecker(
                 val release = json.decodeFromString<GitHubRelease>(body)
                 if (release.draft || release.prerelease) return@withContext null
 
-                val asset = release.apkAsset() ?: return@withContext null
+                val asset = release.apkAsset(preferDebug = BuildConfig.APPLICATION_ID.endsWith(".debug"))
+                    ?: return@withContext null
                 if (!isNewer(release.tagName, currentVersionName)) return@withContext null
 
                 Update(

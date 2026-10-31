@@ -25,8 +25,17 @@ data class GitHubRelease(
     @SerialName("html_url") val htmlUrl: String = "",
     val assets: List<GitHubAsset> = emptyList(),
 ) {
-    /** The first attached `.apk`, which is the thing we can actually install. */
-    fun apkAsset(): GitHubAsset? = assets.firstOrNull { it.name.endsWith(".apk", ignoreCase = true) }
+    /**
+     * Selects the APK matching the installed application id. Debug builds have the
+     * `.debug` suffix and cannot be upgraded to the release package id (or vice versa).
+     */
+    fun apkAsset(preferDebug: Boolean = false): GitHubAsset? {
+        val apks = assets.filter { it.name.endsWith(".apk", ignoreCase = true) }
+        if (preferDebug) {
+            apks.firstOrNull { it.name.contains("debug", ignoreCase = true) }?.let { return it }
+        }
+        return apks.firstOrNull { !it.name.contains("debug", ignoreCase = true) } ?: apks.firstOrNull()
+    }
 }
 
 @Serializable

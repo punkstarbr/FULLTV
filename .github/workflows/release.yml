@@ -49,17 +49,21 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: ./gradlew assembleRelease
 
+      - name: Assemble debug APK for existing debug installations
+        run: ./gradlew assembleDebug
+
       - name: Name the artifact
         run: |
           TAG="${GITHUB_REF_NAME}"
-          SOURCE=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
-          if [ -z "$SOURCE" ]; then
-            echo "::error::No APK was produced by assembleRelease"
+          RELEASE_APK=$(find app/build/outputs/apk/release -name '*.apk' | head -1)
+          DEBUG_APK=$(find app/build/outputs/apk/debug -name '*.apk' | head -1)
+          if [ -z "$RELEASE_APK" ] || [ -z "$DEBUG_APK" ]; then
+            echo "::error::Release and debug APKs were not produced"
             exit 1
           fi
           mkdir -p dist
-          cp "$SOURCE" "dist/fulltv-${TAG}.apk"
-          cp "$SOURCE" "dist/fulltv.apk"
+          cp "$RELEASE_APK" "dist/fulltv-${TAG}.apk"
+          cp "$DEBUG_APK" "dist/fulltv-${TAG}-debug.apk"
 
       - name: Release notes from CHANGELOG
         run: |
@@ -76,5 +80,7 @@ jobs:
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
         with:
           files: dist/*.apk
+          fail_on_unmatched_files: true
+          make_latest: true
           generate_release_notes: false
           body_path: release-notes.md

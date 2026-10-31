@@ -7,8 +7,14 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-`.github/workflows/release.yml` runs the tests, assembles the release APK and attaches it to a
-GitHub release.
+`.github/workflows/release.yml` runs the tests, assembles the release and debug APKs, and attaches
+both to a new GitHub Release. Each version must use a new tag; GitHub keeps previous Releases and
+their APKs, so a new release never replaces an older version.
+
+The app is configured to check `punkstarbr/FULLTV` automatically every six hours. When a newer
+Release is found, it asks the user before downloading and opening Android's installer. Debug
+installations receive the debug APK, while release installations receive the release APK; this
+avoids an Android package/signature mismatch.
 
 ## Signing
 
@@ -52,4 +58,10 @@ Losing the keystore is unrecoverable. There is no reset.
 ## Version numbers
 
 Bump `versionCode` and `versionName` in `app/build.gradle.kts`. `versionCode` must increase on
-every release; Android uses it, not `versionName`, to decide what counts as an upgrade.
+every release; Android uses it, not `versionName`, to decide what counts as an upgrade. Then create
+a new tag instead of reusing an existing one:
+
+```bash
+git tag v0.11.12
+git push origin v0.11.12
+```

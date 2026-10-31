@@ -16,11 +16,10 @@ android {
         applicationId = "app.opentv"
         minSdk = 23
         targetSdk = 35
-        versionCode = 22
-        versionName = "0.11.10"
-        // Empty on purpose: a fork must not offer the upstream OpenTV APK as an update.
-        // Set to "owner/repo" once this fork publishes its own GitHub releases.
-        buildConfigField("String", "UPDATE_REPO_SLUG", "\"\"")
+        versionCode = 23
+        versionName = "0.11.11"
+        // FullTV publishes versioned GitHub Releases; older releases remain available there.
+        buildConfigField("String", "UPDATE_REPO_SLUG", "\"punkstarbr/FULLTV\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

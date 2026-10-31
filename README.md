@@ -50,6 +50,10 @@ própria, tema laranja, português do Brasil, importação automática de EPG e 
 2. Autorize a instalação de apps de fontes desconhecidas no aparelho.
 3. Instale o APK.
 
+As versões antigas ficam preservadas na página de Releases. O aplicativo verifica novas versões
+periodicamente e pergunta antes de baixar e abrir o instalador do Android. A variante debug recebe
+um APK debug compatível; a variante release recebe o APK release correspondente.
+
 O build de desenvolvimento usa o applicationId `app.opentv.debug`, então ele **instala ao lado**
 do OpenTV oficial sem substituí-lo.
 
@@ -87,9 +91,8 @@ configurado.
   em TS, sem perda.
 - Em USB/NAS, a conversão usa o cache do aparelho como área temporária; gravações muito longas
   precisam de espaço livre proporcional.
-- A checagem de atualização automática fica **desativada** até o maintainer configurar
-  `UPDATE_REPO_SLUG` em `app/build.gradle.kts` com o repositório deste fork. Assim o app nunca
-  oferece o APK oficial do OpenTV por engano.
+- A atualização automática depende de conexão com a internet e da permissão do Android para
+  instalar aplicativos desconhecidos. Ela nunca instala silenciosamente: sempre pede confirmação.
 - O build endurecido exige URLs HTTPS para provedores, EPG, logos, posters e streams. Painéis
   antigos que oferecem apenas HTTP não funcionam, porque o app não envia credenciais em texto
   claro.
