@@ -191,6 +191,8 @@ data class EpgFeed(
     val url: String? = null,
     /** Set when this feed belongs to a provider source. */
     val providerSourceId: Long? = null,
+    /** Set only for URL feeds discovered from a specific M3U playlist; null means manual/global. */
+    val playlistSourceId: Long? = null,
     /** Shipped with the app (as opposed to user-added). Used only for display. */
     val builtIn: Boolean = false,
     val enabled: Boolean = true,

@@ -96,7 +96,7 @@ class SyncWorker(
         }
 
         fun schedule(context: Context) {
-            val request = PeriodicWorkRequestBuilder<SyncWorker>(6, TimeUnit.HOURS)
+            val request = PeriodicWorkRequestBuilder<SyncWorker>(1, TimeUnit.HOURS)
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -109,7 +109,11 @@ class SyncWorker(
                 )
                 .build()
 
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            val workManager = WorkManager.getInstance(context)
+            // WorkManager 2.9 has no UPDATE policy. Cancelling first ensures an already-installed
+            // app does not keep the old six-hour schedule after this hourly policy ships.
+            workManager.cancelUniqueWork(WORK_NAME)
+            workManager.enqueueUniquePeriodicWork(
                 WORK_NAME,
                 ExistingPeriodicWorkPolicy.KEEP,
                 request,

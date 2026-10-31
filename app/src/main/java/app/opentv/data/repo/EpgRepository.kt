@@ -103,7 +103,9 @@ class EpgRepository(
      * Real lists advertise one guide per country — often dozens — and repeating the attribute is
      * the only signal they give. Without this the user had to discover and paste each URL by hand.
      * [skipUrl] is the one already adopted as the provider guide, so it is not duplicated.
-     * Insert-if-absent, so a re-sync never resets a feed the user disabled.
+     * On every playlist refresh, feeds previously discovered by that same playlist but no longer
+     * declared are removed together with their aliases/programmes. Manual and built-in feeds are
+     * never touched.
      */
     suspend fun importDiscoveredFeeds(
         source: Source,
@@ -111,13 +113,30 @@ class EpgRepository(
         skipUrl: String? = null,
     ) {
         val skip = skipUrl?.trim()
-        for (raw in urls) {
+        val discoveredUrls = urls.map { it.trim() }
+            .filter { it.isNotEmpty() && it != skip }
+            .filter { it.startsWith("http://", true) || it.startsWith("https://", true) }
+            .toSet()
+        val owned = feedDao.discoveredForPlaylist(source.id)
+        owned.filter { it.url !in discoveredUrls }.forEach { removeFeed(it) }
+        for (raw in discoveredUrls) {
             val url = raw.trim()
-            if (url.isEmpty() || url == skip) continue
-            if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) continue
-            if (feedDao.byUrl(url) != null) continue
+            val existing = feedDao.byUrl(url)
+            if (existing != null) {
+                if (existing.playlistSourceId == source.id) {
+                    // Keep the user's enabled/disabled choice, but refresh the display name.
+                    feedDao.update(existing.copy(name = feedName(source, url)))
+                }
+                continue
+            }
             feedDao.insert(
-                EpgFeed(name = feedName(source, url), url = url, builtIn = false, enabled = true),
+                EpgFeed(
+                    name = feedName(source, url),
+                    url = url,
+                    builtIn = false,
+                    enabled = true,
+                    playlistSourceId = source.id,
+                ),
             )
         }
     }
@@ -221,6 +240,11 @@ class EpgRepository(
         var written = 0
 
         try {
+            // A playlist/provider is authoritative on each hourly refresh. Remove stale rows from
+            // the previous snapshot before writing the new snapshot, so programmes from channels
+            // that disappeared from the same source cannot remain matched forever.
+            programmeDao.deleteForFeed(feed.id)
+            aliasDao.deleteForFeed(feed.id)
             openFeedStream(feed).use { stream ->
                 val stats = XmltvParser.parse(
                     input = stream,
@@ -394,7 +418,7 @@ class EpgRepository(
         val RETENTION_PAST_MILLIS: Long = TimeUnit.DAYS.toMillis(1)
 
         /** Feeds publish rolling windows; refreshing more often than this is rude. */
-        val REFRESH_INTERVAL_MILLIS: Long = TimeUnit.HOURS.toMillis(6)
+        val REFRESH_INTERVAL_MILLIS: Long = TimeUnit.HOURS.toMillis(1)
 
         /**
          * The curated built-in list. Criteria for being here: free, no key or signup,

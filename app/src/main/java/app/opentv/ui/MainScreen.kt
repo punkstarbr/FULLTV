@@ -178,6 +178,7 @@ fun MainScreen(
                     hasSources = hasSources,
                     isSyncing = isSyncing,
                     onPlayChannel = onPlayChannel,
+                    onPlayRecording = onPlayRecording,
                     onAddSource = onAddSource,
                     onRefresh = onRefresh,
                     onPlayCatchup = onPlayCatchup,

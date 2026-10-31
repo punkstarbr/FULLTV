@@ -112,6 +112,7 @@ fun HomeScreen(
     hasSources: Boolean,
     isSyncing: Boolean,
     onPlayChannel: (Channel) -> Unit,
+    onPlayRecording: (app.opentv.data.model.Recording) -> Unit = {},
     onAddSource: () -> Unit,
     onRefresh: () -> Unit,
     onPlayCatchup: (mediaKey: String, url: String, title: String, ua: String) -> Unit = { _, _, _, _ -> },
@@ -717,15 +718,34 @@ fun HomeScreen(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
+                if (recordingThis != null) {
+                    Text(
+                        stringResource(R.string.guide_recording_active),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(top = 6.dp),
+                    )
+                }
                 Spacer(Modifier.height(14.dp))
 
                 Column(
                     Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
-                    RecordActionRow(stringResource(R.string.guide_watch)) {
+                    RecordActionRow(
+                        stringResource(
+                            if (recordingThis != null) R.string.guide_watch_recording
+                            else R.string.guide_watch,
+                        ),
+                    ) {
                         channelMenu = null
-                        requestLive(channel)
+                        if (recordingThis != null) {
+                            // Reuse the bytes already being captured. Opening the provider again
+                            // would consume a second connection and can stop the recording.
+                            onPlayRecording(recordingThis)
+                        } else {
+                            requestLive(channel)
+                        }
                     }
                     RecordActionRow(stringResource(R.string.guide_open_external)) {
                         channelMenu = null

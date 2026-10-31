@@ -331,6 +331,9 @@ interface EpgFeedDao {
     @Query("SELECT * FROM epg_feeds WHERE url = :url")
     suspend fun byUrl(url: String): EpgFeed?
 
+    @Query("SELECT * FROM epg_feeds WHERE playlistSourceId = :sourceId")
+    suspend fun discoveredForPlaylist(sourceId: Long): List<EpgFeed>
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insert(feed: EpgFeed): Long
 

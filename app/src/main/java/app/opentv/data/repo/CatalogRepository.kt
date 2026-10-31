@@ -782,11 +782,12 @@ class CatalogRepository(
             listOfNotNull(parsed.declaredEpgUrl)
         }
         if (discovered.isNotEmpty()) {
-            val updated = if (source.epgUrl.isNullOrBlank()) {
+            // For M3U sources the playlist header is authoritative. If its first declared guide
+            // changes while the playlist URL stays the same, move the provider feed with it
+            // instead of retaining yesterday's EPG forever.
+            val updated = if (source.epgUrl != discovered.first()) {
                 source.copy(epgUrl = discovered.first()).also { sourceDao.update(it) }
-            } else {
-                source
-            }
+            } else source
             epgRepository.importDiscoveredFeeds(updated, discovered, skipUrl = updated.epgUrl)
         }
 

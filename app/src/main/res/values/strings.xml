@@ -46,6 +46,8 @@
     <string name="guide_watch_channel">Watch channel</string>
     <string name="guide_now_title">Now: %1$s</string>
     <string name="guide_watch">▶  Watch</string>
+    <string name="guide_watch_recording">▶  Watch recording in progress</string>
+    <string name="guide_recording_active">●  This channel is already recording</string>
     <string name="guide_open_external">Open in external player</string>
     <string name="guide_play_channel_with">Play channel with</string>
     <string name="guide_no_external_player">No external player installed</string>
