@@ -32,10 +32,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -57,6 +59,7 @@ import androidx.navigation.compose.rememberNavController
 import app.opentv.core.AppSettings
 import app.opentv.core.ServiceLocator
 import app.opentv.data.parser.displayTitle
+import app.opentv.data.work.SyncWorker
 import app.opentv.ui.MainScreen
 import app.opentv.ui.ProfilesViewModel
 import app.opentv.ui.SourcesViewModel
@@ -252,6 +255,9 @@ private fun OpenTvApp(isTelevision: Boolean) {
     // Runs once; backing out returns to the guide and doesn't re-trigger.
     val bootContext = androidx.compose.ui.platform.LocalContext.current
     val bootSettings = remember { ServiceLocator.get(bootContext).settings }
+    var showRefreshPrompt by remember(start) {
+        mutableStateOf(start == Routes.HOME && bootSettings.catalogAskOnStart.value)
+    }
     LaunchedEffect(start) {
         if (start == Routes.HOME && bootSettings.resumeLastChannel.value && bootSettings.lastChannelId != 0L) {
             navController.navigate(Routes.player(bootSettings.lastChannelId))
@@ -298,6 +304,25 @@ private fun OpenTvApp(isTelevision: Boolean) {
                 }
             }
         }
+    }
+
+    if (showRefreshPrompt) {
+        AlertDialog(
+            onDismissRequest = { showRefreshPrompt = false },
+            title = { Text(stringResource(R.string.startup_refresh_title)) },
+            text = { Text(stringResource(R.string.startup_refresh_message)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showRefreshPrompt = false
+                    SyncWorker.refreshNow(bootContext, force = true)
+                }) { Text(stringResource(R.string.startup_refresh_now)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRefreshPrompt = false }) {
+                    Text(stringResource(R.string.startup_refresh_later))
+                }
+            },
+        )
     }
 
     Box(Modifier.fillMaxSize()) {

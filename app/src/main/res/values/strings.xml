@@ -22,6 +22,10 @@
     <string name="common_keep_typing">Keep typing…</string>
     <string name="common_channels">Channels</string>
     <string name="common_try_again">Try again</string>
+    <string name="startup_refresh_title">Update channels and guide?</string>
+    <string name="startup_refresh_message">FullTV can reload the saved playlists and all enabled EPGs now. Your sources, favourites, recordings and settings stay saved.</string>
+    <string name="startup_refresh_now">Update now</string>
+    <string name="startup_refresh_later">Not now</string>
 
     <!-- ============================ Navigation rail ============================ -->
     <string name="nav_live_tv">Live TV</string>
@@ -177,6 +181,13 @@
     <string name="settings_content_series_subtitle">The series library.</string>
     <string name="settings_content_refresh">Refresh</string>
     <string name="settings_content_refreshing">Refreshing…</string>
+    <string name="settings_catalog_refresh_title">Channels and guide update</string>
+    <string name="settings_catalog_refresh_enabled">Automatic update</string>
+    <string name="settings_catalog_refresh_enabled_desc">Refresh saved channels and all enabled EPGs in the background.</string>
+    <string name="settings_catalog_refresh_interval">Update interval</string>
+    <string name="settings_catalog_refresh_every_hours">Every %1$d hour(s)</string>
+    <string name="settings_catalog_refresh_ask">Ask at app start</string>
+    <string name="settings_catalog_refresh_ask_desc">Ask whether to reload channels and guides when FullTV opens.</string>
     <string name="settings_section_language">Language</string>
     <string name="settings_language_system">System default</string>
     <string name="settings_language_english">English</string>

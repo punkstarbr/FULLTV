@@ -68,6 +68,9 @@ fun AppSettingsScreen(onBack: () -> Unit) {
     val liveEnabled by settings.liveEnabled.collectAsState()
     val moviesEnabled by settings.moviesEnabled.collectAsState()
     val seriesEnabled by settings.seriesEnabled.collectAsState()
+    val catalogAutoRefresh by settings.catalogAutoRefresh.collectAsState()
+    val catalogRefreshHours by settings.catalogRefreshIntervalHours.collectAsState()
+    val catalogAskOnStart by settings.catalogAskOnStart.collectAsState()
 
     // A refresh next to each content toggle kicks a full catalogue re-sync (which now honours the
     // toggles, so a type just switched on is fetched). Runs as background work so it isn't cut short
@@ -139,6 +142,41 @@ fun AppSettingsScreen(onBack: () -> Unit) {
                 checked = seriesEnabled,
                 onToggle = settings::setSeriesEnabled,
                 onRefresh = onRefreshContent,
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        SettingsSection(stringResource(R.string.settings_catalog_refresh_title)) {
+            ToggleRow(
+                title = stringResource(R.string.settings_catalog_refresh_enabled),
+                subtitle = stringResource(R.string.settings_catalog_refresh_enabled_desc),
+                checked = catalogAutoRefresh,
+                onToggle = {
+                    settings.setCatalogAutoRefresh(it)
+                    SyncWorker.schedule(context)
+                },
+            )
+            if (catalogAutoRefresh) {
+                Text(
+                    stringResource(R.string.settings_catalog_refresh_interval),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                listOf(1, 3, 6, 12, 24).forEach { hours ->
+                    ThemeOption(
+                        stringResource(R.string.settings_catalog_refresh_every_hours, hours),
+                        catalogRefreshHours == hours,
+                    ) {
+                        settings.setCatalogRefreshIntervalHours(hours)
+                        SyncWorker.schedule(context)
+                    }
+                }
+            }
+            ToggleRow(
+                title = stringResource(R.string.settings_catalog_refresh_ask),
+                subtitle = stringResource(R.string.settings_catalog_refresh_ask_desc),
+                checked = catalogAskOnStart,
+                onToggle = settings::setCatalogAskOnStart,
             )
         }
 

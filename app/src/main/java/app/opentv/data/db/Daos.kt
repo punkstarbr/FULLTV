@@ -417,6 +417,9 @@ interface ProgrammeDao {
     @Query("DELETE FROM programmes WHERE endUtcMillis < :beforeUtcMillis")
     suspend fun deleteEndedBefore(beforeUtcMillis: Long)
 
+    @Query("DELETE FROM programmes WHERE endUtcMillis < :pastCutoffMillis OR startUtcMillis > :futureCutoffMillis")
+    suspend fun deleteOutsideWindow(pastCutoffMillis: Long, futureCutoffMillis: Long)
+
     @Query("DELETE FROM programmes WHERE feedId = :feedId")
     suspend fun deleteForFeed(feedId: Long)
 }

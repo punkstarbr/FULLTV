@@ -16,8 +16,8 @@ android {
         applicationId = "app.opentv"
         minSdk = 23
         targetSdk = 35
-        versionCode = 24
-        versionName = "0.11.12"
+        versionCode = 25
+        versionName = "0.11.13"
         // FullTV publishes versioned GitHub Releases; older releases remain available there.
         buildConfigField("String", "UPDATE_REPO_SLUG", "\"punkstarbr/FULLTV\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

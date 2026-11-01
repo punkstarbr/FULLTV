@@ -15,6 +15,7 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,7 +28,7 @@ class OpenTvApp : Application(), ImageLoaderFactory {
      * The app-wide Coil loader, tuned for a poster-and-logo heavy UI on a low-end TV box. The
      * default loader keeps a small memory cache and no disk cache, so scrolling back through a
      * shelf — or reopening Movies — re-downloads and re-decodes every image. Here:
-     *  - a generous memory cache and a 256 MB disk cache mean art you've already seen paints from
+     *  - a bounded memory cache and a 64 MB disk cache mean art you've already seen paints from
      *    cache, instantly, instead of hitting the network;
      *  - no crossfade — an immediate swap reads as snappier on a d-pad grid than a fade, and skips
      *    a frame of blending per image;
@@ -44,7 +45,7 @@ class OpenTvApp : Application(), ImageLoaderFactory {
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(256L * 1024 * 1024)
+                    .maxSizeBytes(64L * 1024 * 1024)
                     .build()
             }
             .crossfade(false)
@@ -60,6 +61,13 @@ class OpenTvApp : Application(), ImageLoaderFactory {
         super.onCreate()
         val graph = ServiceLocator.get(this)
         SyncWorker.schedule(this)
+        // A killed MP4 conversion can leave its local input/output pair behind. These are only
+        // staging files; completed recordings live in the configured recording target.
+        File(cacheDir, "remux").listFiles()?.forEach { file ->
+            if (System.currentTimeMillis() - file.lastModified() > 60 * 60 * 1000L) {
+                runCatching { file.delete() }
+            }
+        }
 
         // When the normaliser has moved on since the catalogue was last processed, re-clean
         // the stored channels and re-run the guide matcher — locally, no re-download. This
@@ -107,7 +115,23 @@ class OpenTvApp : Application(), ImageLoaderFactory {
             // refresh window are skipped), but it is what makes the free regional guide turn
             // itself on and download the first time — without waiting for the user to find
             // the refresh button. ensureFeeds + auto-enable-by-region + matcher all live here.
-            graph.epgRepository.syncAll(System.currentTimeMillis(), force = false)
+            val now = System.currentTimeMillis()
+            graph.epgRepository.syncAll(now, force = false)
+
+            // Older builds could retain many days of every one of a playlist's EPG feeds. Prune
+            // first, then reclaim SQLite pages once after upgrading; this is deliberately not run
+            // every hour because VACUUM is I/O-heavy on a Fire TV.
+            graph.database.programmes().deleteOutsideWindow(
+                now - app.opentv.data.repo.EpgRepository.RETENTION_PAST_MILLIS,
+                now + app.opentv.data.repo.EpgRepository.RETENTION_FUTURE_MILLIS,
+            )
+            if (!prefs.getBoolean("storage_cleanup_v2", false)) {
+                val compacted = runCatching {
+                    graph.database.openHelper.writableDatabase.execSQL("PRAGMA wal_checkpoint(TRUNCATE)")
+                    graph.database.openHelper.writableDatabase.execSQL("VACUUM")
+                }.isSuccess
+                if (compacted) prefs.edit().putBoolean("storage_cleanup_v2", true).apply()
+            }
         }
     }
 }

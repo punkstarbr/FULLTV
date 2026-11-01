@@ -8,6 +8,7 @@ package app.opentv.data.work
 import android.content.Context
 import android.util.Log
 import androidx.work.Constraints
+import androidx.work.Data
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.ExistingWorkPolicy
@@ -35,6 +36,7 @@ class SyncWorker(
     override suspend fun doWork(): Result {
         val graph = ServiceLocator.get(applicationContext)
         val now = System.currentTimeMillis()
+        val force = inputData.getBoolean(KEY_FORCE, false)
         val sources = graph.sourceRepository.enabled()
         if (sources.isEmpty()) return Result.success()
 
@@ -54,7 +56,7 @@ class SyncWorker(
 
         // Guides sync as one pass across every enabled feed — provider guides, built-in
         // free sources and user URLs merge into a single guide, then the matcher runs.
-        val summary = graph.epgRepository.syncAll(now)
+        val summary = graph.epgRepository.syncAll(now, force = force)
         if (summary.feedsFailed > 0) anyFailed = true
         Log.i(
             TAG,
@@ -80,8 +82,9 @@ class SyncWorker(
          * it survives the user navigating away from the screen that triggered it (unlike a refresh
          * tied to a screen's ViewModel scope). REPLACE so repeated taps coalesce into one run.
          */
-        fun refreshNow(context: Context) {
+        fun refreshNow(context: Context, force: Boolean = true) {
             val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setInputData(Data.Builder().putBoolean(KEY_FORCE, force).build())
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -96,7 +99,16 @@ class SyncWorker(
         }
 
         fun schedule(context: Context) {
-            val request = PeriodicWorkRequestBuilder<SyncWorker>(1, TimeUnit.HOURS)
+            val settings = app.opentv.core.AppSettings.get(context)
+            val workManager = WorkManager.getInstance(context)
+            if (!settings.catalogAutoRefresh.value) {
+                workManager.cancelUniqueWork(WORK_NAME)
+                return
+            }
+            val request = PeriodicWorkRequestBuilder<SyncWorker>(
+                settings.catalogRefreshIntervalHours.value.toLong(),
+                TimeUnit.HOURS,
+            )
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -109,7 +121,6 @@ class SyncWorker(
                 )
                 .build()
 
-            val workManager = WorkManager.getInstance(context)
             // WorkManager 2.9 has no UPDATE policy. Cancelling first ensures an already-installed
             // app does not keep the old six-hour schedule after this hourly policy ships.
             workManager.cancelUniqueWork(WORK_NAME)
@@ -119,5 +130,7 @@ class SyncWorker(
                 request,
             )
         }
+
+        private const val KEY_FORCE = "force_refresh"
     }
 }

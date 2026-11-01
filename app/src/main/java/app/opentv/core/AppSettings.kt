@@ -162,6 +162,38 @@ class AppSettings private constructor(context: Context) {
         _resumeLastChannel.value = enabled
     }
 
+    // ---- Catalogue and guide refresh ---------------------------------------------------------
+
+    /** Whether channels and guides are refreshed automatically in the background. */
+    private val _catalogAutoRefresh = MutableStateFlow(prefs.getBoolean(KEY_CATALOG_AUTO_REFRESH, true))
+    val catalogAutoRefresh: StateFlow<Boolean> = _catalogAutoRefresh.asStateFlow()
+
+    /** Period between background refreshes; WorkManager applies its minimum platform interval. */
+    private val _catalogRefreshIntervalHours = MutableStateFlow(
+        prefs.getInt(KEY_CATALOG_REFRESH_HOURS, 1).coerceIn(1, 24),
+    )
+    val catalogRefreshIntervalHours: StateFlow<Int> = _catalogRefreshIntervalHours.asStateFlow()
+
+    /** When enabled, the user is asked at startup whether to reset channels and guides now. */
+    private val _catalogAskOnStart = MutableStateFlow(prefs.getBoolean(KEY_CATALOG_ASK_ON_START, true))
+    val catalogAskOnStart: StateFlow<Boolean> = _catalogAskOnStart.asStateFlow()
+
+    fun setCatalogAutoRefresh(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_CATALOG_AUTO_REFRESH, enabled).apply()
+        _catalogAutoRefresh.value = enabled
+    }
+
+    fun setCatalogRefreshIntervalHours(hours: Int) {
+        val h = hours.coerceIn(1, 24)
+        prefs.edit().putInt(KEY_CATALOG_REFRESH_HOURS, h).apply()
+        _catalogRefreshIntervalHours.value = h
+    }
+
+    fun setCatalogAskOnStart(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_CATALOG_ASK_ON_START, enabled).apply()
+        _catalogAskOnStart.value = enabled
+    }
+
     // ---- Recording behaviour -----------------------------------------------------------------
 
     /** Minutes to start a scheduled recording early, so a late start isn't clipped. */
@@ -482,6 +514,9 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_HIDDEN_CATS = "hidden_categories"
         private const val KEY_ACTIVE_PROFILE = "active_profile_id"
         private const val KEY_RESUME_LAST = "resume_last_channel"
+        private const val KEY_CATALOG_AUTO_REFRESH = "catalog_auto_refresh"
+        private const val KEY_CATALOG_REFRESH_HOURS = "catalog_refresh_hours"
+        private const val KEY_CATALOG_ASK_ON_START = "catalog_ask_on_start"
         private const val KEY_CONTENT_LIVE = "content_live"
         private const val KEY_CONTENT_MOVIES = "content_movies"
         private const val KEY_CONTENT_SERIES = "content_series"

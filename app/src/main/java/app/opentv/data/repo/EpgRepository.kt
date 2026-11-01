@@ -223,6 +223,10 @@ class EpgRepository(
 
             if (succeeded > 0) {
                 programmeDao.deleteEndedBefore(nowUtcMillis - RETENTION_PAST_MILLIS)
+                programmeDao.deleteOutsideWindow(
+                    pastCutoffMillis = nowUtcMillis - RETENTION_PAST_MILLIS,
+                    futureCutoffMillis = nowUtcMillis + RETENTION_FUTURE_MILLIS,
+                )
             }
 
             val (matched, total) = runMatcher()
@@ -260,7 +264,9 @@ class EpgRepository(
                     onProgramme = { programme ->
                         // Skip anything that finished before the retention cut-off; no point
                         // writing rows we are about to prune.
-                        if (programme.endUtcMillis >= nowUtcMillis - RETENTION_PAST_MILLIS) {
+                        if (programme.endUtcMillis >= nowUtcMillis - RETENTION_PAST_MILLIS &&
+                            programme.startUtcMillis <= nowUtcMillis + RETENTION_FUTURE_MILLIS
+                        ) {
                             batch += programme
                             if (batch.size >= BATCH_SIZE) {
                                 programmeDao.upsertAll(batch)
@@ -416,6 +422,9 @@ class EpgRepository(
 
         /** Keep finished programmes for a day so "what was on" still works. */
         val RETENTION_PAST_MILLIS: Long = TimeUnit.DAYS.toMillis(1)
+
+        /** Keep two days ahead: enough for the guide and short scheduled recordings, not whole archives. */
+        val RETENTION_FUTURE_MILLIS: Long = TimeUnit.DAYS.toMillis(2)
 
         /** Feeds publish rolling windows; refreshing more often than this is rude. */
         val REFRESH_INTERVAL_MILLIS: Long = TimeUnit.HOURS.toMillis(1)
