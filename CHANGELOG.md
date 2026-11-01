@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.11.18
+
+- **Terminology:** Use “Live TV” in Portuguese navigation, recordings and settings instead of “TV em direto”.
+
 ## 0.11.17
 
 - **YouTube Live Search:** add a public `/results` URL as a source; the bundled yt-dlp extractor

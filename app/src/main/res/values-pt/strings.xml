@@ -16,7 +16,7 @@
     <string name="common_keep_typing">Continue a escrever…</string>
     <string name="common_channels">Canais</string>
     <string name="common_try_again">Tentar novamente</string>
-    <string name="nav_live_tv">TV em direto</string>
+    <string name="nav_live_tv">Live TV</string>
     <string name="nav_movies">Filmes</string>
     <string name="nav_shows">Séries</string>
     <string name="nav_recordings">Gravações</string>
@@ -80,7 +80,7 @@
     <string name="rec_record_series_named">Gravar série completa — %1$s</string>
     <string name="rec_series_recording_set">Gravação de série definida para \"%1$s\"</string>
     <string name="rec_screen_title">Gravações e lembretes</string>
-    <string name="rec_screen_desc">Grave TV em direto para esta box ou para o seu NAS, e defina lembretes para o que aí vem.</string>
+    <string name="rec_screen_desc">Grave Live TV para esta box ou para o seu NAS, e defina lembretes para o que aí vem.</string>
     <string name="rec_empty_state">Ainda nada aqui. Prima Gravar no leitor, ou abra um canal no guia para agendar uma gravação ou definir um lembrete.</string>
     <string name="rec_upcoming_reminders">Próximos lembretes</string>
     <string name="rec_reminder_autoswitch">Mudança automática</string>
@@ -180,7 +180,7 @@
     <string name="settings_sleep_off">Desligado</string>
     <string name="settings_sleep_minutes">%1$d minutos</string>
     <string name="parental_hidden_categories">Categorias ocultas</string>
-    <string name="parental_hidden_desc">Tudo o que ativar aqui é removido da TV em direto até ativar “Mostrar ocultos agora” abaixo. Com um PIN definido, este ecrã permanece bloqueado, por isso o que está oculto continua oculto.</string>
+    <string name="parental_hidden_desc">Tudo o que ativar aqui é removido da Live TV até ativar “Mostrar ocultos agora” abaixo. Com um PIN definido, este ecrã permanece bloqueado, por isso o que está oculto continua oculto.</string>
     <string name="parental_show_hidden_title">Mostrar ocultos agora (esta sessão)</string>
     <string name="parental_show_hidden_subtitle">Revela as categorias ocultas até a aplicação ser reiniciada.</string>
     <string name="parental_no_categories">Ainda sem categorias — adicione primeiro um fornecedor.</string>
@@ -249,8 +249,8 @@
     <string name="recset_minutes_short">min</string>
     <string name="recset_autoswitch">Mudança automática quando a gravação começa</string>
     <string name="recset_autoswitch_desc">Num fornecedor de ligação única, muda o ecrã para uma gravação assim que esta começa (com um aviso de 30 segundos) para que a sua transmissão em direto não seja cortada</string>
-    <string name="recset_livepause">Pausar e retroceder TV em direto</string>
-    <string name="recset_livepause_desc">Mantém alguns minutos de TV em direto na memória para que possa pausar e retroceder (experimental — usa mais memória)</string>
+    <string name="recset_livepause">Pausar e retroceder Live TV</string>
+    <string name="recset_livepause_desc">Mantém alguns minutos de Live TV na memória para que possa pausar e retroceder (experimental — usa mais memória)</string>
     <string name="recset_storage_title">Armazenamento</string>
     <string name="recset_storage_reading">A ler…</string>
     <string name="recset_storage_used">%1$s usados · %2$d gravações</string>
