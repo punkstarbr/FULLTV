@@ -778,8 +778,8 @@ class CatalogRepository(
         channelDao.replaceCatalogue(source.id, normalized(parsed.channels, categoryNames), nowUtcMillis)
 
         // A playlist can advertise dozens of guides (one url-tvg per country). Adopt the first
-        // as the provider guide so the existing feed keeps working, then register every other
-        // one as its own feed. Manual feeds added in Guide settings are untouched.
+        // as the provider guide so it keeps working; every other unique URL is imported and
+        // enabled automatically. Manual feeds added in Guide settings are untouched.
         val discovered = parsed.declaredEpgUrls.ifEmpty {
             listOfNotNull(parsed.declaredEpgUrl)
         }

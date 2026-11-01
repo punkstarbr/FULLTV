@@ -9,6 +9,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import app.opentv.core.ServiceLocator
+import app.opentv.core.VodRefreshPolicy
 import app.opentv.data.model.Category
 import app.opentv.data.model.Channel
 import app.opentv.data.model.EpgFeed
@@ -687,6 +688,15 @@ class EpgViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { graph.epgRepository.removeFeed(feed) }
     }
 
+    fun disableDiscoveredFeedsAndClearData() {
+        viewModelScope.launch {
+            val count = graph.epgRepository.disableDiscoveredFeedsAndClearData()
+            _ui.value = _ui.value.copy(
+                statusLine = getApplication<Application>().getString(R.string.epg_paused_extra_guides, count),
+            )
+        }
+    }
+
     fun refresh() {
         if (_ui.value.syncing) return
         viewModelScope.launch {
@@ -844,22 +854,26 @@ class VodViewModel(app: Application) : AndroidViewModel(app) {
     private data class HomeFeedsKey(val profileId: Long, val movieCount: Int, val seriesCount: Int)
 
     @Volatile private var loadedHomeFeeds: HomeFeedsKey? = null
+    @Volatile private var homeFeedsRequested = false
 
-    /** Serialises [loadHomeFeeds] so two near-simultaneous calls (screen open + the profile emit in
-     *  `init`) can't both start the heavy scan — the second waits, sees the guard satisfied, returns.
+    /** Serialises [loadHomeFeeds] so two near-simultaneous calls (screen open + profile change)
+     *  can't both start the heavy scan — the second waits, sees the guard satisfied, returns.
      *  MUST be declared before the `init` block below: `activeProfileId` is a StateFlow, so its
      *  `collect` fires synchronously during construction, and Kotlin initialises properties top to
      *  bottom — declared after `init`, this mutex would still be null when the first collect runs. */
     private val homeFeedsMutex = Mutex()
 
     init {
-        // The home feeds are per profile (Recommended) and per catalogue (the genre rows). Rebuild
-        // them when the active profile changes — and once at start. Routed through the guarded
-        // [loadHomeFeeds] so a profile switch triggers exactly one library scan, and re-opening the
-        // tab with the same profile and an unchanged catalogue triggers none. Reads an empty result
-        // until a VOD sync has populated the catalogue; [ensureVodLoaded] re-runs it once one has.
+        // Invalidate shelves on a profile change, but do not read every VOD row during app startup.
+        // The first full scan is deferred until Movies/Shows actually requests the shelves.
         viewModelScope.launch {
-            settings.activeProfileId.collect { loadHomeFeeds() }
+            settings.activeProfileId.collect {
+                loadedHomeFeeds = null
+                _recommendedMovies.value = emptyList()
+                _movieGenreRows.value = emptyList()
+                _seriesGenreRows.value = emptyList()
+                if (homeFeedsRequested) loadHomeFeeds()
+            }
         }
     }
 
@@ -875,6 +889,7 @@ class VodViewModel(app: Application) : AndroidViewModel(app) {
      * so re-opening Movies/Shows is free and a post-sync refresh still fills the rows in.
      */
     fun loadHomeFeeds() {
+        homeFeedsRequested = true
         viewModelScope.launch {
             homeFeedsMutex.withLock {
                 val profileId = settings.activeProfileId.value
@@ -916,9 +931,6 @@ class VodViewModel(app: Application) : AndroidViewModel(app) {
 
     @Volatile private var vodRequested = false
 
-    /** How long a fetched VOD catalogue is trusted before a warm launch re-syncs it. */
-    private val VOD_TTL_MILLIS = 12L * 60 * 60 * 1000  // 12 hours
-
     fun ensureVodLoaded() {
         if (vodRequested) return
         vodRequested = true
@@ -948,7 +960,7 @@ class VodViewModel(app: Application) : AndroidViewModel(app) {
                 graph.catalogRepository.movieCount() + graph.catalogRepository.seriesCount()
             }.getOrDefault(0) > 0
             val last = settings.vodSyncedAtMillis
-            val fresh = last > 0 && now - last < VOD_TTL_MILLIS
+            val fresh = !VodRefreshPolicy.shouldRefresh(last, now)
             if (haveCatalogue && fresh) {
                 loadHomeFeeds()
                 return

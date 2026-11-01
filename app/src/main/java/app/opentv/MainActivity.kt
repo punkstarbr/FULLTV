@@ -61,6 +61,7 @@ import app.opentv.core.ServiceLocator
 import app.opentv.data.parser.displayTitle
 import app.opentv.data.work.SyncWorker
 import app.opentv.ui.MainScreen
+import app.opentv.ui.PersistentLocalClock
 import app.opentv.ui.ProfilesViewModel
 import app.opentv.ui.SourcesViewModel
 import app.opentv.ui.channels.ChannelManagerScreen
@@ -78,6 +79,7 @@ import app.opentv.ui.settings.StremioAddonsScreen
 import app.opentv.ui.settings.RecordingSettingsScreen
 import app.opentv.ui.settings.SyncScreen
 import app.opentv.ui.settings.SettingsHubScreen
+import app.opentv.ui.settings.StorageSettingsScreen
 import app.opentv.ui.settings.WebManagerScreen
 import app.opentv.ui.theme.OpenTvTheme
 import app.opentv.ui.vod.MovieDetailScreen
@@ -103,6 +105,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             val settings = remember { ServiceLocator.get(this).settings }
             val themeMode by settings.themeMode.collectAsState()
+            val persistentClock by settings.persistentClock.collectAsState()
             val darkTheme = when (themeMode) {
                 AppSettings.ThemeMode.DARK -> true
                 AppSettings.ThemeMode.LIGHT -> false
@@ -114,7 +117,10 @@ class MainActivity : ComponentActivity() {
                     modifier = Modifier.fillMaxSize(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    OpenTvApp(isTelevision = isTelevision)
+                    Box(Modifier.fillMaxSize()) {
+                        OpenTvApp(isTelevision = isTelevision)
+                        PersistentLocalClock(enabled = persistentClock)
+                    }
                 }
             }
         }
@@ -200,6 +206,7 @@ object Routes {
     const val PROFILES = "profiles"
     const val PARENTAL = "parental"
     const val SYNC = "sync"
+    const val STORAGE = "storage-settings"
     const val REC_SETTINGS = "recording-settings"
     const val ABOUT = "about"
     const val SERIES_DETAIL = "series/{seriesId}"
@@ -439,6 +446,7 @@ private fun OpenTvApp(isTelevision: Boolean) {
                     onOpenParental = { navController.navigate(Routes.PARENTAL) },
                     onOpenSync = { navController.navigate(Routes.SYNC) },
                     onOpenRecordings = { navController.navigate(Routes.REC_SETTINGS) },
+                    onOpenStorage = { navController.navigate(Routes.STORAGE) },
                     onOpenAbout = { navController.navigate(Routes.ABOUT) },
                     onBack = { navController.popBackStack() },
                 )
@@ -446,6 +454,10 @@ private fun OpenTvApp(isTelevision: Boolean) {
 
             composable(Routes.SYNC) {
                 SyncScreen(onBack = { navController.popBackStack() })
+            }
+
+            composable(Routes.STORAGE) {
+                StorageSettingsScreen(onBack = { navController.popBackStack() })
             }
 
             composable(Routes.REC_SETTINGS) {

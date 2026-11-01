@@ -18,11 +18,13 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import app.opentv.core.ServiceLocator
+import app.opentv.core.VodRefreshPolicy
 import app.opentv.data.repo.CatalogRepository
 import java.util.concurrent.TimeUnit
 
 /**
- * Background refresh of the catalogue and the guide.
+ * Background refresh of live channels and the guide. Large VOD catalogues are fetched only by
+ * explicit/manual refreshes when stale or when the user opens Movies/Shows.
  *
  * Runs on WorkManager rather than a foreground timer so it survives the app being killed,
  * which on a TV box happens constantly. Failures return [Result.retry] with WorkManager's
@@ -41,9 +43,19 @@ class SyncWorker(
         if (sources.isEmpty()) return Result.success()
 
         var anyFailed = false
+        // A periodic worker must never download a potentially huge VOD catalogue just because
+        // the device is online. Manual refresh can fetch it when stale; opening Movies/Shows
+        // also performs the same TTL check on demand.
+        val refreshVod = force && VodRefreshPolicy.shouldRefresh(graph.settings.vodSyncedAtMillis, now)
+        var attemptedVodRefresh = false
 
         for (source in sources) {
-            when (val result = graph.catalogRepository.sync(source, now)) {
+            val result = if (graph.settings.liveEnabled.value) {
+                graph.catalogRepository.syncLive(source, now)
+            } else {
+                CatalogRepository.SyncResult.Success(0, 0, 0)
+            }
+            when (result) {
                 is CatalogRepository.SyncResult.Success ->
                     Log.i(TAG, "Catalogue for ${source.name}: ${result.channelCount} channels")
                 is CatalogRepository.SyncResult.Failed -> {
@@ -51,8 +63,14 @@ class SyncWorker(
                     Log.w(TAG, "Catalogue for ${source.name} failed: ${result.reason}")
                 }
             }
-
+            if (result is CatalogRepository.SyncResult.Success &&
+                source.kind == app.opentv.data.model.SourceKind.XTREAM && refreshVod
+            ) {
+                graph.catalogRepository.syncVod(source, now)
+                attemptedVodRefresh = true
+            }
         }
+        if (attemptedVodRefresh) graph.settings.vodSyncedAtMillis = now
 
         // Guides sync as one pass across every enabled feed — provider guides, built-in
         // free sources and user URLs merge into a single guide, then the matcher runs.

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -62,6 +63,7 @@ fun EpgSettingsScreen(
     val settings = remember(context) { ServiceLocator.get(context).settings }
     val density by settings.guideDensity.collectAsState()
     var showAdd by remember { mutableStateOf(false) }
+    var showPauseExtraGuides by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
     var newUrl by remember { mutableStateOf("") }
 
@@ -93,6 +95,13 @@ fun EpgSettingsScreen(
         Text(
             stringResource(R.string.epg_desc),
             style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.widthIn(max = 720.dp),
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            stringResource(R.string.epg_multiple_guides_note),
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.widthIn(max = 720.dp),
         )
@@ -129,6 +138,14 @@ fun EpgSettingsScreen(
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            item {
+                if (ui.feeds.any { it.playlistSourceId != null }) {
+                    OutlinedButton(onClick = { showPauseExtraGuides = true }) {
+                        Text(stringResource(R.string.epg_pause_extra_guides))
                     }
                 }
             }
@@ -179,6 +196,25 @@ fun EpgSettingsScreen(
                 }
             }
         }
+    }
+
+    if (showPauseExtraGuides) {
+        AlertDialog(
+            onDismissRequest = { showPauseExtraGuides = false },
+            title = { Text(stringResource(R.string.epg_pause_extra_confirm_title)) },
+            text = { Text(stringResource(R.string.epg_pause_extra_confirm_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    showPauseExtraGuides = false
+                    viewModel.disableDiscoveredFeedsAndClearData()
+                }) { Text(stringResource(R.string.epg_pause_extra_guides)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPauseExtraGuides = false }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            },
+        )
     }
 }
 

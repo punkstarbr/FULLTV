@@ -25,10 +25,10 @@ object M3uParser {
 
     data class Result(
         val channels: List<Channel>,
-        /** Value of `url-tvg`/`x-tvg-url` on the #EXTM3U header, if the playlist declares one. */
+        /** First `url-tvg`/`x-tvg-url` found anywhere in the playlist. */
         val declaredEpgUrl: String?,
         /**
-         * Every guide URL declared on the #EXTM3U header, in order and de-duplicated.
+         * Every guide URL declared anywhere in the playlist, in order and de-duplicated.
          *
          * Playlists routinely repeat `url-tvg="…"` dozens of times (one per country/region),
          * and sometimes put several URLs in a single value separated by whitespace. A plain
@@ -60,25 +60,22 @@ object M3uParser {
 
         reader.forEachLine { rawLine ->
             val line = rawLine.trim()
+            val attributes = if (line.startsWith("#")) parseAttributePairs(line) else emptyList()
+            for ((key, value) in attributes) {
+                if (key != "url-tvg" && key != "x-tvg-url") continue
+                for (url in splitGuideUrls(value)) {
+                    if (declaredEpgUrls.add(url) && declaredEpgUrl == null) {
+                        declaredEpgUrl = url
+                    }
+                }
+            }
             when {
                 line.isEmpty() -> Unit
 
-                line.startsWith("#EXTM3U", ignoreCase = true) -> {
-                    // Walk every attribute rather than collapsing to a map: real playlists
-                    // repeat url-tvg once per guide, and `associate` would silently keep
-                    // only the final one.
-                    for ((key, value) in parseAttributePairs(line)) {
-                        if (key != "url-tvg" && key != "x-tvg-url") continue
-                        for (url in splitGuideUrls(value)) {
-                            if (declaredEpgUrls.add(url) && declaredEpgUrl == null) {
-                                declaredEpgUrl = url
-                            }
-                        }
-                    }
-                }
+                line.startsWith("#EXTM3U", ignoreCase = true) -> Unit
 
                 line.startsWith("#EXTINF", ignoreCase = true) -> {
-                    pendingAttributes = parseAttributes(line)
+                    pendingAttributes = attributes.toMap()
                     pendingName = displayNameOf(line, pendingAttributes)
                     pendingNumber = pendingAttributes["tvg-chno"]?.toIntOrNull()
                 }

@@ -107,7 +107,8 @@ class EpgRepository(
      * Registers every guide URL a playlist declared (`url-tvg` / `x-tvg-url`) as its own feed.
      *
      * Real lists advertise one guide per country — often dozens — and repeating the attribute is
-     * the only signal they give. Without this the user had to discover and paste each URL by hand.
+     * the only signal they give. Every additional unique guide URL is added and enabled automatically,
+     * as requested; large multi-country playlists can therefore use substantial network and storage.
      * [skipUrl] is the one already adopted as the provider guide, so it is not duplicated.
      * On every playlist refresh, feeds previously discovered by that same playlist but no longer
      * declared are removed together with their aliases/programmes. Manual and built-in feeds are
@@ -118,6 +119,8 @@ class EpgRepository(
         urls: List<String>,
         skipUrl: String? = null,
     ) {
+        // The first URL remains the source's provider guide; all other unique declared URLs are
+        // imported and enabled automatically. Existing feed rows retain their explicit user choice.
         val skip = skipUrl?.trim()
         val discoveredUrls = urls.map { it.trim() }
             .filter { it.isNotEmpty() && it != skip }
@@ -155,6 +158,17 @@ class EpgRepository(
     }
 
     suspend fun setFeedEnabled(id: Long, enabled: Boolean) = feedDao.setEnabled(id, enabled)
+
+    /** Explicit bulk action: pause playlist-discovered feeds and remove their stored guide rows. */
+    suspend fun disableDiscoveredFeedsAndClearData(): Int {
+        val discovered = feedDao.all().filter { it.playlistSourceId != null }
+        discovered.forEach { feed ->
+            if (feed.enabled) feedDao.setEnabled(feed.id, false)
+            programmeDao.deleteForFeed(feed.id)
+            aliasDao.deleteForFeed(feed.id)
+        }
+        return discovered.size
+    }
 
     suspend fun removeFeed(feed: EpgFeed) {
         // A removed feed takes its guide data with it — orphaned programmes would otherwise

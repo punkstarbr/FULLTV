@@ -174,6 +174,27 @@ class M3uParserTest {
     }
 
     @Test
+    fun `guide URL attributes are discovered anywhere in the playlist`() {
+        val playlist = """
+            #EXTM3U
+            #EXTINF:-1 tvg-id="one" url-tvg="https://a.example/guide.xml",Channel One
+            https://example.com/one.m3u8
+            #EXTGRP x-tvg-url="https://b.example/guide.xml https://c.example/guide.xml"
+            #EXTINF:-1 tvg-id="two",Channel Two
+            https://example.com/two.m3u8
+        """.trimIndent()
+
+        val result = M3uParser.parse(playlist, sourceId = 1)
+
+        assertThat(result.channels).hasSize(2)
+        assertThat(result.declaredEpgUrls).containsExactly(
+            "https://a.example/guide.xml",
+            "https://b.example/guide.xml",
+            "https://c.example/guide.xml",
+        ).inOrder()
+    }
+
+    @Test
     fun `playlist order is preserved even when channel numbers are not ascending`() {
         val playlist = """
             #EXTM3U

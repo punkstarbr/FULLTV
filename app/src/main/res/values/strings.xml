@@ -373,6 +373,42 @@
     <string name="epg_name_optional">Name (optional)</string>
     <string name="epg_xmltv_url">XMLTV URL (.xml or .xml.gz)</string>
     <string name="epg_add_guide">Add guide</string>
+    <string name="epg_multiple_guides_note">Guide URLs are detected anywhere in an M3U. Every unique guide found is added and enabled automatically. Playlists with many regions can use substantial network and storage; pause feeds you do not need in Settings. Plain HTTP guide URLs are blocked for privacy; use HTTPS where available.</string>
+    <string name="epg_pause_extra_guides">Pause extra playlist guides</string>
+    <string name="epg_pause_extra_confirm_title">Pause and clear extra M3U guides?</string>
+    <string name="epg_pause_extra_confirm_body">This disables feeds discovered in M3U playlists and removes only their stored guide entries. The first guide for each playlist, channels, favourites and recordings are kept. You can enable a feed again later.</string>
+    <string name="epg_paused_extra_guides">Paused and cleared %1$d extra playlist guide(s).</string>
+
+    <string name="settings_clock_title">Persistent local clock</string>
+    <string name="settings_clock_subtitle">Show the device local time at the bottom-right of every screen.</string>
+    <string name="settings_storage_title">Storage usage</string>
+    <string name="settings_storage_subtitle">Inspect app data and recordings, and safely compact the guide database.</string>
+    <string name="storage_title">Storage usage</string>
+    <string name="storage_subtitle">App package, data, guide database, model and recording sizes.</string>
+    <string name="storage_apk_files">APK and split APK files</string>
+    <string name="storage_native_libraries">Installed native libraries</string>
+    <string name="storage_app_data">App data and cache</string>
+    <string name="storage_database">Guide and catalogue database</string>
+    <string name="storage_internal_recordings">Internal recordings (%1$d files)</string>
+    <string name="storage_whisper_model">Downloaded Whisper model</string>
+    <string name="storage_image_cache">Poster and logo cache</string>
+    <string name="storage_free_space">Available device space</string>
+    <string name="storage_epg_note">The guide keeps one past day and up to the configured future recording window. Optimization removes entries outside that period.</string>
+    <string name="storage_recordings_note">Optimization never deletes recordings. Recordings on USB or NAS are not included in the app-private file count.</string>
+    <string name="storage_translation_note">Translation models may be stored by Google Play services and are not included in this app-data measurement.</string>
+    <string name="storage_refresh">Refresh sizes</string>
+    <string name="storage_working">Working…</string>
+    <string name="storage_optimize_database">Optimize guide database</string>
+    <string name="storage_optimize_confirm_title">Optimize the guide database?</string>
+    <string name="storage_optimize_confirm_body">This removes guide programmes outside the retained date window and compacts the database. Channels, favourites, settings and recordings are not deleted. The operation can take a while and needs free space.</string>
+    <string name="storage_optimize_success">Guide database optimized.</string>
+    <string name="storage_not_enough_space">There is not enough free space to compact the database safely. Free space and try again.</string>
+    <string name="storage_optimize_failed">The database could not be compacted. No recordings were changed.</string>
+    <string name="storage_remove_whisper_model">Remove downloaded Whisper model</string>
+    <string name="storage_remove_model_confirm_title">Remove the Whisper model?</string>
+    <string name="storage_remove_model_confirm_body">The model can be downloaded again if AI Portuguese captions are used. This does not delete recordings or channel data.</string>
+    <string name="storage_model_removed">Whisper model removed. It will download again only when needed.</string>
+    <string name="storage_model_not_found">No downloaded Whisper model was found.</string>
 
     <!-- ============================ Sync watch history ============================ -->
     <string name="sync_desc">Copy your continue-watching between two FullTV devices over your own wifi — nothing leaves the house, and no account is involved.</string>

@@ -68,6 +68,7 @@ fun SettingsHubScreen(
     onOpenParental: () -> Unit,
     onOpenSync: () -> Unit,
     onOpenRecordings: () -> Unit,
+    onOpenStorage: () -> Unit,
     onOpenAbout: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -79,6 +80,7 @@ fun SettingsHubScreen(
         HubEntry(Icons.Filled.PhoneAndroid, stringResource(R.string.settings_webmanager_title), stringResource(R.string.settings_webmanager_subtitle), onOpenWebManager),
         HubEntry(Icons.Filled.Tune, stringResource(R.string.settings_display_title), stringResource(R.string.settings_display_subtitle), onOpenDisplay),
         HubEntry(Icons.Filled.Storage, stringResource(R.string.settings_recording_title), stringResource(R.string.settings_recording_subtitle), onOpenRecordings),
+        HubEntry(Icons.Filled.Storage, stringResource(R.string.settings_storage_title), stringResource(R.string.settings_storage_subtitle), onOpenStorage),
         HubEntry(Icons.Filled.Lock, stringResource(R.string.settings_parental_title), stringResource(R.string.settings_parental_subtitle), onOpenParental),
         HubEntry(Icons.Filled.Sync, stringResource(R.string.settings_sync_title), stringResource(R.string.settings_sync_subtitle), onOpenSync),
         HubEntry(Icons.Filled.Info, stringResource(R.string.settings_about_title), stringResource(R.string.settings_about_subtitle), onOpenAbout),

@@ -16,9 +16,15 @@ None of it is uploaded anywhere. There is no account to create and no server to 
 
 ## Who your device talks to
 
-Your provider, and only at the address you entered, is the normal network destination. Channel
-logos and posters are fetched from whatever URLs your provider puts in its catalogue, which are
-usually its own servers but may be third parties — that is your provider's choice, not ours.
+Your provider is the normal destination. Channel logos and posters use the URLs supplied in its
+catalogue, which may point to third parties. Playlist EPG URLs are also requested as described
+below.
+
+When an M3U contains `url-tvg` or `x-tvg-url` attributes, FullTV discovers each unique XMLTV URL
+across the playlist and requests all of them automatically when refreshing the guide. Those guide
+hosts can see the device network request and any query parameters included in the URL. Do not post
+or share a playlist containing credentials or private tokens. Plain HTTP guide URLs are blocked;
+HTTPS is required.
 
 If you open a playlist channel whose URL is a YouTube `@handle` (or a live YouTube watch URL), the
 bundled Streamlink resolver contacts YouTube and its video CDN directly to find the current live

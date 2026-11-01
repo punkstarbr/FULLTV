@@ -62,6 +62,10 @@ class AppSettings private constructor(context: Context) {
     private val _interfaceStyle = MutableStateFlow(readInterfaceStyle())
     val interfaceStyle: StateFlow<InterfaceStyle> = _interfaceStyle.asStateFlow()
 
+    /** Whether to keep the device's local clock visible over every app screen. */
+    private val _persistentClock = MutableStateFlow(prefs.getBoolean(KEY_PERSISTENT_CLOCK, false))
+    val persistentClock: StateFlow<Boolean> = _persistentClock.asStateFlow()
+
     /**
      * How tall the guide rows are and how much time fits on screen. On a weak box [COMPACT] packs
      * more channels in and makes each programme narrower, so fewer blocks are laid out per row.
@@ -154,6 +158,11 @@ class AppSettings private constructor(context: Context) {
     fun setInterfaceStyle(style: InterfaceStyle) {
         prefs.edit().putString(KEY_INTERFACE_STYLE, style.name).apply()
         _interfaceStyle.value = style
+    }
+
+    fun setPersistentClock(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_PERSISTENT_CLOCK, enabled).apply()
+        _persistentClock.value = enabled
     }
 
     fun setChannelLayout(layout: ChannelLayout) {
@@ -560,6 +569,7 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_THEME = "theme_mode"
         private const val KEY_CHANNEL_LAYOUT = "channel_layout"
         private const val KEY_INTERFACE_STYLE = "interface_style"
+        private const val KEY_PERSISTENT_CLOCK = "persistent_clock"
         private const val KEY_GUIDE_DENSITY = "guide_density"
         private const val KEY_SUBTITLES = "subtitles_enabled"
         private const val KEY_AUTO_PT_SUBTITLES = "auto_pt_subtitles"

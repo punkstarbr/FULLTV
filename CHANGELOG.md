@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.20
+
+- **Startup stability:** defer full VOD shelf scans until Movies/Shows is opened, skip heavy VOD
+  downloads in periodic background refreshes, and log isolated startup task failures instead of
+  letting them terminate the foreground app. SQLite `VACUUM` is no longer run automatically.
+- **Storage:** add a usage breakdown and an explicit, free-space-checked guide-database compaction
+  action. It never removes recordings. The Whisper model can be removed and downloaded again later.
+- **M3U guides:** detect `url-tvg` / `x-tvg-url` attributes anywhere in a playlist. Every unique
+  guide is added and enabled automatically; multi-region playlists may use substantial network and
+  storage. Settings can pause and clear extra feed rows. Cleartext HTTP feeds remain blocked.
+- **Clock:** add an optional local-time badge in the bottom-right corner of every screen.
+
 ## 0.11.19
 
 - **Portuguese default:** use Brazilian Portuguese (`pt-BR`) when no language preference exists;

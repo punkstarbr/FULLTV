@@ -91,6 +91,14 @@ the feed does not contain; the Recording settings screen offers an explicit refr
 data for a large provider is comfortably 150 MB of XML; nothing about that fits in the heap of
 a cheap TV stick, and `String`-based parsing is an OOM waiting to happen.
 
+`M3uParser` scans comment/directive lines throughout the playlist for repeated `url-tvg` and
+`x-tvg-url` attributes, splits multiple URLs in one value, and de-duplicates in first-seen order.
+The first URL remains the source guide; every other unique URL is imported and enabled
+automatically. Existing feed toggles are preserved, and a URL removed from the playlist also loses
+its stored guide rows. This can generate large network and storage use for multi-region lists;
+Settings provides a confirmed action to pause and clear extra discovered feeds. Plain HTTP remains
+blocked by the manifest security policy.
+
 **Times are stored as UTC epoch millis, always.** `XmltvParser.parseXmltvTime` normalises the
 `+0100`-style offsets that XMLTV uses, treats a missing offset as UTC rather than guessing the
 device zone, and converts to local time only at draw time. `XmltvTimeTest` changes the JVM's
@@ -123,6 +131,16 @@ of thousands. So neither of these works, despite being the natural thing to writ
 
 Both would pass every test written against a small synthetic dataset and fail on exactly the
 providers where it matters most.
+
+## Startup and storage budget
+
+The process does not read every movie and series row during startup. The VOD shelf is loaded only
+when Movies/Shows is opened, and a periodic worker refreshes live channels and the guide without
+downloading a large VOD catalogue. VOD uses a 12-hour on-demand freshness policy. Startup prunes
+old guide rows but never runs SQLite `VACUUM`; a storage settings screen reports APK/data/database,
+model and recording sizes. Database compaction is user-triggered, requires free-space headroom, and
+does not delete recordings. A separately confirmed action can clear programmes from playlist-
+discovered guide feeds.
 
 ## Playback
 

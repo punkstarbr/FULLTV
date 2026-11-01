@@ -7,6 +7,7 @@ package app.opentv
 
 import android.app.Application
 import android.content.Context
+import android.util.Log
 import app.opentv.core.LocaleUtils
 import app.opentv.core.ServiceLocator
 import app.opentv.data.repo.CatalogRepository
@@ -17,18 +18,22 @@ import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 class OpenTvApp : Application(), ImageLoaderFactory {
-    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val startupErrorHandler = CoroutineExceptionHandler { _, error ->
+        Log.e(TAG, "Background startup task failed; continuing app startup", error)
+    }
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + startupErrorHandler)
 
     /**
      * The app-wide Coil loader, tuned for a poster-and-logo heavy UI on a low-end TV box. The
      * default loader keeps a small memory cache and no disk cache, so scrolling back through a
      * shelf — or reopening Movies — re-downloads and re-decodes every image. Here:
-     *  - a bounded memory cache and a 64 MB disk cache mean art you've already seen paints from
+     *  - a bounded memory cache and a 32 MB disk cache mean art you've already seen paints from
      *    cache, instantly, instead of hitting the network;
      *  - no crossfade — an immediate swap reads as snappier on a d-pad grid than a fade, and skips
      *    a frame of blending per image;
@@ -39,13 +44,13 @@ class OpenTvApp : Application(), ImageLoaderFactory {
         ImageLoader.Builder(this)
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.25)
+                    .maxSizePercent(0.10)
                     .build()
             }
             .diskCache {
                 DiskCache.Builder()
                     .directory(cacheDir.resolve("image_cache"))
-                    .maxSizeBytes(64L * 1024 * 1024)
+                    .maxSizeBytes(32L * 1024 * 1024)
                     .build()
             }
             .crossfade(false)
@@ -60,7 +65,8 @@ class OpenTvApp : Application(), ImageLoaderFactory {
     override fun onCreate() {
         super.onCreate()
         val graph = ServiceLocator.get(this)
-        SyncWorker.schedule(this)
+        runCatching { SyncWorker.schedule(this) }
+            .onFailure { Log.e(TAG, "Could not schedule background refresh", it) }
         // A killed MP4 conversion can leave its local input/output pair behind. These are only
         // staging files; completed recordings live in the configured recording target.
         File(cacheDir, "remux").listFiles()?.forEach { file ->
@@ -108,30 +114,30 @@ class OpenTvApp : Application(), ImageLoaderFactory {
             val prefs = getSharedPreferences("opentv", MODE_PRIVATE)
             val seen = prefs.getInt("normalizer_version", 0)
             if (seen < CatalogRepository.NORMALIZER_VERSION) {
-                graph.catalogRepository.renormalizeAll()
-                prefs.edit().putInt("normalizer_version", CatalogRepository.NORMALIZER_VERSION).apply()
-            }
-            // Runs on every launch. It is cheap when nothing is stale (feeds within their
-            // refresh window are skipped), but it is what makes the free regional guide turn
-            // itself on and download the first time — without waiting for the user to find
-            // the refresh button. ensureFeeds + auto-enable-by-region + matcher all live here.
-            val now = System.currentTimeMillis()
-            graph.epgRepository.syncAll(now, force = false)
-
-            // Older builds could retain many days of every one of a playlist's EPG feeds. Prune
-            // first, then reclaim SQLite pages once after upgrading; this is deliberately not run
-            // every hour because VACUUM is I/O-heavy on a Fire TV.
-            graph.database.programmes().deleteOutsideWindow(
-                now - app.opentv.data.repo.EpgRepository.RETENTION_PAST_MILLIS,
-                now + graph.epgRepository.retentionFutureMillis,
-            )
-            if (!prefs.getBoolean("storage_cleanup_v2", false)) {
-                val compacted = runCatching {
-                    graph.database.openHelper.writableDatabase.execSQL("PRAGMA wal_checkpoint(TRUNCATE)")
-                    graph.database.openHelper.writableDatabase.execSQL("VACUUM")
-                }.isSuccess
-                if (compacted) prefs.edit().putBoolean("storage_cleanup_v2", true).apply()
+                runCatching { graph.catalogRepository.renormalizeAll() }
+                    .onSuccess {
+                        prefs.edit().putInt("normalizer_version", CatalogRepository.NORMALIZER_VERSION).apply()
+                    }
+                    .onFailure { Log.w(TAG, "Channel normalization will retry later", it) }
             }
         }
+
+        appScope.launch {
+            // Runs off the UI thread. An EPG/network/database error is logged and must never
+            // terminate the foreground app process.
+            val now = System.currentTimeMillis()
+            runCatching { graph.epgRepository.syncAll(now, force = false) }
+                .onFailure { Log.w(TAG, "EPG startup refresh will retry later", it) }
+            runCatching {
+                graph.database.programmes().deleteOutsideWindow(
+                    now - app.opentv.data.repo.EpgRepository.RETENTION_PAST_MILLIS,
+                    now + graph.epgRepository.retentionFutureMillis,
+                )
+            }.onFailure { Log.w(TAG, "Could not prune expired EPG rows", it) }
+        }
+    }
+
+    private companion object {
+        const val TAG = "OpenTvApp"
     }
 }
