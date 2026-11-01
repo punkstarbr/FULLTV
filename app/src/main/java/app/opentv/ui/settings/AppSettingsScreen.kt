@@ -230,6 +230,21 @@ fun AppSettingsScreen(onBack: () -> Unit) {
             ThemeOption(stringResource(R.string.settings_interface_retro_epg), interfaceStyle == AppSettings.InterfaceStyle.RETRO_EPG) {
                 settings.setInterfaceStyle(AppSettings.InterfaceStyle.RETRO_EPG)
             }
+            ThemeOption(stringResource(R.string.settings_interface_oi_hybrid), interfaceStyle == AppSettings.InterfaceStyle.OI_HYBRID) {
+                settings.setInterfaceStyle(AppSettings.InterfaceStyle.OI_HYBRID)
+            }
+            ThemeOption(stringResource(R.string.settings_interface_player_info_top), interfaceStyle == AppSettings.InterfaceStyle.PLAYER_INFO_TOP) {
+                settings.setInterfaceStyle(AppSettings.InterfaceStyle.PLAYER_INFO_TOP)
+            }
+            ThemeOption(stringResource(R.string.settings_interface_epg_fullscreen), interfaceStyle == AppSettings.InterfaceStyle.EPG_FULLSCREEN) {
+                settings.setInterfaceStyle(AppSettings.InterfaceStyle.EPG_FULLSCREEN)
+            }
+            ThemeOption(stringResource(R.string.settings_interface_linear_autohide), interfaceStyle == AppSettings.InterfaceStyle.LINEAR_AUTOHIDE) {
+                settings.setInterfaceStyle(AppSettings.InterfaceStyle.LINEAR_AUTOHIDE)
+            }
+            ThemeOption(stringResource(R.string.settings_interface_bottom_drawer), interfaceStyle == AppSettings.InterfaceStyle.BOTTOM_INFO_DRAWER) {
+                settings.setInterfaceStyle(AppSettings.InterfaceStyle.BOTTOM_INFO_DRAWER)
+            }
             Spacer(Modifier.height(8.dp))
             Text(
                 stringResource(R.string.settings_channel_layout_title),

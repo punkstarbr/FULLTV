@@ -55,7 +55,6 @@ import androidx.media3.ui.PlayerView
 import app.opentv.ui.ChannelsViewModel
 import app.opentv.ui.interfacePalette
 import coil.compose.AsyncImage
-import app.opentv.player.YouTubeChannelUrl
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -98,12 +97,17 @@ fun GuidePreview(
 ) {
     val palette = interfacePalette(interfaceStyle, MaterialTheme.colorScheme)
     val compactBottomPanel = interfaceStyle == AppSettings.InterfaceStyle.CLASSIC_EPG
+    val hybridPreview = interfaceStyle == AppSettings.InterfaceStyle.OI_HYBRID
     val previewModifier = if (interfaceStyle == AppSettings.InterfaceStyle.CURRENT) modifier
         else modifier.background(palette.surface)
     Row(
         previewModifier
             .fillMaxWidth()
-            .height(if (compactBottomPanel) 132.dp else 212.dp)
+            .height(when {
+                compactBottomPanel -> 132.dp
+                hybridPreview -> 300.dp
+                else -> 212.dp
+            })
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
         // ---- Logo / "watch" card ----------------------------------------------------------
@@ -197,7 +201,7 @@ fun GuidePreview(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                if (row != null && YouTubeChannelUrl.asLiveUrlOrNull(row.primary.streamUrl) == null) {
+                if (row != null) {
                     IconButton(onClick = onRecord) {
                         // Red throughout — the record convention — but the glyph switches to a
                         // stop square while a recording is running, so a press visibly does

@@ -52,6 +52,11 @@ class AppSettings private constructor(context: Context) {
         CATEGORY_PORTAL,
         MODERN_EPG,
         RETRO_EPG,
+        OI_HYBRID,
+        PLAYER_INFO_TOP,
+        EPG_FULLSCREEN,
+        LINEAR_AUTOHIDE,
+        BOTTOM_INFO_DRAWER,
     }
 
     private val _interfaceStyle = MutableStateFlow(readInterfaceStyle())

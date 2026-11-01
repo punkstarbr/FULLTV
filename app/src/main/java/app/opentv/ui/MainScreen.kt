@@ -137,7 +137,11 @@ fun MainScreen(
     var portalGuideOpen by remember { mutableStateOf(false) }
 
     LaunchedEffect(tab, interfaceStyle) {
-        if (tab != Tab.LIVE || interfaceStyle != AppSettings.InterfaceStyle.CATEGORY_PORTAL) {
+        if (tab != Tab.LIVE || interfaceStyle !in setOf(
+                AppSettings.InterfaceStyle.CATEGORY_PORTAL,
+                AppSettings.InterfaceStyle.OI_HYBRID,
+            )
+        ) {
             portalGuideOpen = false
         }
     }
@@ -158,7 +162,10 @@ fun MainScreen(
     BackHandler(enabled = tab == homeTab) { showExit = true }
     BackHandler(
         enabled = tab == Tab.LIVE &&
-            interfaceStyle == AppSettings.InterfaceStyle.CATEGORY_PORTAL && portalGuideOpen,
+            interfaceStyle in setOf(
+                AppSettings.InterfaceStyle.CATEGORY_PORTAL,
+                AppSettings.InterfaceStyle.OI_HYBRID,
+            ) && portalGuideOpen,
     ) { portalGuideOpen = false }
     if (showExit) {
         AlertDialog(
@@ -194,7 +201,10 @@ fun MainScreen(
         Box(Modifier.weight(1f).fillMaxHeight()) {
             when (tab) {
                 Tab.LIVE -> when {
-                    interfaceStyle == AppSettings.InterfaceStyle.CATEGORY_PORTAL && !portalGuideOpen ->
+                    interfaceStyle in setOf(
+                        AppSettings.InterfaceStyle.CATEGORY_PORTAL,
+                        AppSettings.InterfaceStyle.OI_HYBRID,
+                    ) && !portalGuideOpen ->
                         CategoryPortalScreen(
                             isSyncing = isSyncing,
                             hasSources = hasSources,
@@ -230,7 +240,9 @@ fun MainScreen(
                         onAddSource = onAddSource,
                         onRefresh = onRefresh,
                         onPlayCatchup = onPlayCatchup,
-                        interfaceStyle = if (portalGuideOpen) AppSettings.InterfaceStyle.CURRENT else interfaceStyle,
+                        interfaceStyle = if (
+                            portalGuideOpen && interfaceStyle == AppSettings.InterfaceStyle.CATEGORY_PORTAL
+                        ) AppSettings.InterfaceStyle.CURRENT else interfaceStyle,
                     )
                 }
                 Tab.MOSAIC -> MosaicScreen(

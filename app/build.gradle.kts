@@ -21,8 +21,8 @@ android {
             // Chaquopy 3.11 builds support these four ABIs, including 32-bit TV boxes.
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
         }
-        versionCode = 27
-        versionName = "0.11.15"
+        versionCode = 29
+        versionName = "0.11.17"
         // FullTV publishes versioned GitHub Releases; older releases remain available there.
         buildConfigField("String", "UPDATE_REPO_SLUG", "\"punkstarbr/FULLTV\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -107,6 +107,7 @@ chaquopy {
         buildPython("python3.11")
         pip {
             install("streamlink==8.6.3")
+            install("yt-dlp==2026.10.26")
         }
     }
 }

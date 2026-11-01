@@ -27,6 +27,9 @@ enum class SourceKind {
     /** A plain M3U/M3U8 playlist URL, optionally with a separate XMLTV EPG URL. */
     M3U,
 
+    /** A public YouTube `/results` URL, filtered to currently active live broadcasts. */
+    YOUTUBE_LIVE_SEARCH,
+
     /**
      * Stalker / Ministra portal (MAG-box middleware): identified by a MAC address rather than a
      * login, with a token handshake and per-play `create_link` stream resolution. Its channels

@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import app.opentv.R
 import app.opentv.data.model.Source
 import app.opentv.data.model.SourceKind
+import app.opentv.data.parser.YouTubeLiveSearchUrl
 import app.opentv.isRunningOnTelevision
 import app.opentv.ui.SourcesViewModel
 import app.opentv.ui.channels.readClipboardText
@@ -109,23 +110,32 @@ fun AddSourceScreen(
 
     // Editing copies onto the existing row, so id, enabled state, live format and last-sync stamp
     // are preserved; a fresh add starts from a blank Source (id 0, so save() inserts).
-    fun draft(): Source = (existing ?: Source(name = "", kind = kind, url = "")).copy(
+    fun draft(): Source {
+        val resolvedKind = if (YouTubeLiveSearchUrl.isSearchUrl(url)) {
+            SourceKind.YOUTUBE_LIVE_SEARCH
+        } else kind
+        return (existing ?: Source(name = "", kind = resolvedKind, url = "")).copy(
         name = name.ifBlank {
-            if (kind == SourceKind.M3U) context.getString(R.string.onboarding_default_playlist_name)
-            else context.getString(R.string.onboarding_default_provider_name)
+            when (resolvedKind) {
+                SourceKind.M3U -> context.getString(R.string.onboarding_default_playlist_name)
+                SourceKind.YOUTUBE_LIVE_SEARCH -> context.getString(R.string.onboarding_default_youtube_search_name)
+                else -> context.getString(R.string.onboarding_default_provider_name)
+            }
         },
-        kind = kind,
+        kind = resolvedKind,
         url = url,
         username = username.takeIf { it.isNotBlank() },
         password = password.takeIf { it.isNotBlank() },
         macAddress = mac.takeIf { it.isNotBlank() },
         epgUrl = epgUrl.takeIf { it.isNotBlank() },
         userAgent = userAgent.ifBlank { Source.DEFAULT_USER_AGENT },
-    )
+        )
+    }
 
     val canSubmit = url.isNotBlank() && when (kind) {
         SourceKind.XTREAM -> username.isNotBlank() && password.isNotBlank()
         SourceKind.M3U -> true
+        SourceKind.YOUTUBE_LIVE_SEARCH -> YouTubeLiveSearchUrl.isSearchUrl(url)
         SourceKind.STALKER -> mac.isNotBlank()
     }
 
@@ -165,6 +175,11 @@ fun AddSourceScreen(
                     label = { Text(stringResource(R.string.onboarding_m3u_url)) },
                 )
                 FilterChip(
+                    selected = kind == SourceKind.YOUTUBE_LIVE_SEARCH,
+                    onClick = { kind = SourceKind.YOUTUBE_LIVE_SEARCH },
+                    label = { Text(stringResource(R.string.onboarding_youtube_live)) },
+                )
+                FilterChip(
                     selected = kind == SourceKind.STALKER,
                     onClick = { kind = SourceKind.STALKER },
                     label = { Text(stringResource(R.string.onboarding_stalker_portal)) },
@@ -184,12 +199,16 @@ fun AddSourceScreen(
 
             OutlinedTextField(
                 value = url,
-                onValueChange = { url = it },
+                onValueChange = {
+                    url = it
+                    if (YouTubeLiveSearchUrl.isSearchUrl(it)) kind = SourceKind.YOUTUBE_LIVE_SEARCH
+                },
                 label = {
                     Text(
                         when (kind) {
                             SourceKind.XTREAM -> stringResource(R.string.onboarding_server_address)
                             SourceKind.M3U -> stringResource(R.string.onboarding_playlist_url)
+                            SourceKind.YOUTUBE_LIVE_SEARCH -> stringResource(R.string.onboarding_youtube_search_url)
                             SourceKind.STALKER -> stringResource(R.string.onboarding_portal_url)
                         },
                     )
@@ -199,11 +218,20 @@ fun AddSourceScreen(
                         when (kind) {
                             SourceKind.XTREAM -> stringResource(R.string.onboarding_server_help)
                             SourceKind.M3U -> stringResource(R.string.onboarding_playlist_help)
+                            SourceKind.YOUTUBE_LIVE_SEARCH -> stringResource(R.string.onboarding_youtube_search_help)
                             SourceKind.STALKER -> stringResource(R.string.onboarding_portal_help)
                         },
                     )
                 },
-                trailingIcon = { PasteButton { url += it } },
+                trailingIcon = {
+                    PasteButton { pasted ->
+                        val updatedUrl = url + pasted
+                        url = updatedUrl
+                        if (YouTubeLiveSearchUrl.isSearchUrl(updatedUrl)) {
+                            kind = SourceKind.YOUTUBE_LIVE_SEARCH
+                        }
+                    }
+                },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
                 modifier = Modifier.fillMaxWidth(),

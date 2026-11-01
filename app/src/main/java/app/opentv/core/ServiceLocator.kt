@@ -16,6 +16,7 @@ import app.opentv.data.repo.RecordingRepository
 import app.opentv.data.repo.ReminderRepository
 import app.opentv.data.repo.SourceRepository
 import app.opentv.player.StreamlinkResolver
+import app.opentv.player.YouTubeLiveSearchResolver
 import app.opentv.recording.RecordingEngine
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
@@ -77,6 +78,9 @@ object ServiceLocator {
 
         /** Bundled YouTube live resolver; Python/Streamlink starts only on the first @handle tune. */
         val streamlinkResolver: StreamlinkResolver by lazy { StreamlinkResolver(appContext) }
+        val youtubeLiveSearchResolver: YouTubeLiveSearchResolver by lazy {
+            YouTubeLiveSearchResolver(appContext)
+        }
 
         val xtreamApi: XtreamApi by lazy { XtreamApi(httpClient) }
 
@@ -104,6 +108,7 @@ object ServiceLocator {
                 http = httpClient,
                 settings = settings,
                 epgRepository = epgRepository,
+                youtubeLiveSearch = youtubeLiveSearchResolver,
             )
         }
 

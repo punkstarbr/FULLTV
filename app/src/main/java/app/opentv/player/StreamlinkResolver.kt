@@ -6,11 +6,14 @@
 package app.opentv.player
 
 import android.content.Context
+import android.util.Base64
 import android.util.Log
 import com.chaquo.python.Python
-import com.chaquo.python.android.AndroidPlatform
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -30,7 +33,7 @@ class StreamlinkResolver(context: Context) {
     suspend fun resolveBest(channelUrl: String): ResolvedYouTubeStream = resolveMutex.withLock {
         withContext(Dispatchers.IO) {
             val liveUrl = YouTubeChannelUrl.asLiveUrlOrNull(channelUrl)
-                ?: throw IllegalArgumentException("Expected a YouTube @handle channel URL.")
+                ?: throw IllegalArgumentException("Expected a YouTube live channel or video URL.")
 
             try {
                 val python = pythonInstance()
@@ -50,24 +53,58 @@ class StreamlinkResolver(context: Context) {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                Log.w(TAG, "Streamlink could not resolve the YouTube live channel", error)
+                Log.w(TAG, "Streamlink could not resolve the YouTube live stream", error)
                 throw error
             }
         }
     }
 
-    private fun pythonInstance(): Python {
-        if (!Python.isStarted()) {
-            synchronized(PYTHON_START_LOCK) {
-                if (!Python.isStarted()) Python.start(AndroidPlatform(appContext))
+    /** Open a Streamlink reader which yields media bytes, not an HLS playlist document. */
+    suspend fun openRecording(channelUrl: String): RecordingReader = resolveMutex.withLock {
+        val liveUrl = YouTubeChannelUrl.asLiveUrlOrNull(channelUrl)
+            ?: throw IllegalArgumentException("Expected a YouTube live channel or video URL.")
+        var openedReader: RecordingReader? = null
+        val reader = try {
+            withContext(NonCancellable + Dispatchers.IO) {
+                val response = pythonInstance().getModule("streamlink_bridge")
+                    .callAttr("open_recording", liveUrl)
+                    .toString()
+                val token = JSONObject(response).getString("token")
+                RecordingReader(token).also { openedReader = it }
+            }
+        } catch (cancelled: CancellationException) {
+            openedReader?.close()
+            throw cancelled
+        }
+        if (!currentCoroutineContext().isActive) {
+            reader.close()
+            throw CancellationException("Recording stopped while Streamlink was opening the reader.")
+        }
+        reader
+    }
+
+    inner class RecordingReader internal constructor(private val token: String) {
+        /** Read up to [size] media bytes. Empty means Streamlink reached EOF. */
+        suspend fun read(size: Int): ByteArray = withContext(Dispatchers.IO) {
+            require(size > 0)
+            val encoded = pythonInstance().getModule("streamlink_bridge")
+                .callAttr("read_recording", token, size)
+                .toString()
+            if (encoded.isEmpty()) byteArrayOf() else Base64.decode(encoded, Base64.NO_WRAP)
+        }
+
+        /** Closes the underlying Streamlink HLS reader and its HTTP requests. */
+        suspend fun close() = withContext(NonCancellable + Dispatchers.IO) {
+            runCatching {
+                pythonInstance().getModule("streamlink_bridge").callAttr("close_recording", token)
             }
         }
-        return Python.getInstance()
     }
+
+    private fun pythonInstance(): Python = PythonRuntime.get(appContext)
 
     private companion object {
         const val TAG = "StreamlinkResolver"
         const val DEFAULT_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-        val PYTHON_START_LOCK = Any()
     }
 }

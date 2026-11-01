@@ -25,10 +25,23 @@ class YouTubeChannelUrlTest {
     }
 
     @Test
-    fun `only channel handle and live routes are intercepted`() {
+    fun `watch result URLs are canonicalized for Streamlink`() {
+        assertThat(
+            YouTubeChannelUrl.asLiveUrlOrNull("https://www.youtube.com/watch?feature=share&v=abcdefghijk"),
+        ).isEqualTo("https://www.youtube.com/watch?v=abcdefghijk")
+        assertThat(
+            YouTubeChannelUrl.asLiveUrlOrNull("https://youtu.be/abcdefghijk?t=10"),
+        ).isEqualTo("https://www.youtube.com/watch?v=abcdefghijk")
+        assertThat(
+            YouTubeChannelUrl.asLiveUrlOrNull("https://www.youtube.com/live/abcdefghijk"),
+        ).isEqualTo("https://www.youtube.com/live/abcdefghijk")
+    }
+
+    @Test
+    fun `unrelated YouTube pages and similar hosts are not intercepted`() {
         assertThat(YouTubeChannelUrl.asLiveUrlOrNull("https://www.youtube.com/@tvbrasil/videos"))
             .isNull()
-        assertThat(YouTubeChannelUrl.asLiveUrlOrNull("https://www.youtube.com/watch?v=abcdefghijk"))
+        assertThat(YouTubeChannelUrl.asLiveUrlOrNull("https://www.youtube.com/watch?v=short"))
             .isNull()
         assertThat(YouTubeChannelUrl.asLiveUrlOrNull("https://youtube.com.evil.example/@tvbrasil"))
             .isNull()
@@ -41,5 +54,6 @@ class YouTubeChannelUrlTest {
         assertThat(YouTubeChannelUrl.asLiveUrlOrNull("not a URL")).isNull()
         assertThat(YouTubeChannelUrl.asLiveUrlOrNull("https://www.youtube.com/@")).isNull()
         assertThat(YouTubeChannelUrl.asLiveUrlOrNull("ftp://www.youtube.com/@tvbrasil")).isNull()
+        assertThat(YouTubeChannelUrl.asLiveUrlOrNull("https://www.youtube.com/watch?v=abc&v=def")).isNull()
     }
 }

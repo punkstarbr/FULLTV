@@ -152,12 +152,25 @@ explicit; support depends on the provider and device.
 
 ### YouTube channel handles
 
-M3U entries whose playback URL is a YouTube `@handle` are the one special case in the live path.
-The app bundles Streamlink's Python library through Chaquopy, normalizes the URL to `/live`, and
-asks Streamlink for `best` immediately before playback. The resolved, short-lived media URL is
-passed to the existing Media3 player and is never stored in the catalogue. Full-screen playback
-and guide preview share this path; every non-YouTube URL continues through the existing provider
-path. The resolver starts lazily, so ordinary channels do not initialize Python.
+M3U entries whose playback URL is a YouTube `@handle` or live video URL are resolved immediately
+before playback. The APK bundles Streamlink's Python library through Chaquopy; its short-lived media
+URL is passed to the existing Media3 player and is never stored in the catalogue. Full-screen
+playback and guide preview share this path; other providers keep their existing path. The resolver
+starts lazily, so ordinary channels do not initialize Python.
+
+### YouTube live search and recording
+
+The user may add a public YouTube `/results` URL as a `YOUTUBE_LIVE_SEARCH` source. A bundled,
+version-pinned yt-dlp extractor reads at most 50 search entries, filters for active-live metadata,
+and exposes up to five watch URLs as catalogue channels. No YouTube API key or server is involved;
+the extractor depends on YouTube's public page and may be affected by rate limits or anti-bot
+responses. Selected watch URLs go through Streamlink like handle-based channels.
+
+YouTube live recording uses Streamlink's `stream.open()` reader instead of saving the HLS manifest
+text. A capture worker appends media-byte chunks to the selected `RecordingStorage` sink, reports
+file size periodically, reconnects when a segment reader ends, and closes its reader when the user
+stops or the scheduled end is reached. This behavior is specific to recognized YouTube URLs;
+ordinary IPTV recordings keep their HTTP capture path.
 
 ### Automatic Portuguese captions
 

@@ -419,10 +419,17 @@ class ManagerServer(
         when (k) {
             SourceKind.XTREAM -> if (username.isNullOrBlank() || password.isNullOrBlank()) return null
             SourceKind.STALKER -> if (mac.isNullOrBlank()) return null
+            SourceKind.YOUTUBE_LIVE_SEARCH -> Unit
             SourceKind.M3U -> Unit
         }
         return Source(
-            name = name.trim().ifBlank { if (k == SourceKind.M3U) "Playlist" else "Provider" },
+            name = name.trim().ifBlank {
+                when (k) {
+                    SourceKind.M3U -> "Playlist"
+                    SourceKind.YOUTUBE_LIVE_SEARCH -> "YouTube Live Search"
+                    else -> "Provider"
+                }
+            },
             kind = k,
             url = url.trim(),
             username = username?.takeIf { it.isNotBlank() },

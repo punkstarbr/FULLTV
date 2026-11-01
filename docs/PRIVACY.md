@@ -20,10 +20,17 @@ Your provider, and only at the address you entered, is the normal network destin
 logos and posters are fetched from whatever URLs your provider puts in its catalogue, which are
 usually its own servers but may be third parties — that is your provider's choice, not ours.
 
-If you open a playlist channel whose URL is a YouTube `@handle`, the bundled Streamlink resolver
-contacts YouTube and its video CDN directly to find the current live stream. This happens on the
-device, only for that channel, and no request is sent to a FullTV server. An internet connection
-and a currently available live broadcast are required.
+If you open a playlist channel whose URL is a YouTube `@handle` (or a live YouTube watch URL), the
+bundled Streamlink resolver contacts YouTube and its video CDN directly to find the current live
+stream. If you add a YouTube `/results` page as a Live Search source, refreshing it sends that
+user-provided search URL/query directly to YouTube through the bundled yt-dlp extractor and reads
+public result metadata on-device; no API key or FullTV server is used. Results are limited to
+currently live videos. YouTube may rate-limit or block automated requests, so search and playback
+depend on public-page availability, network access, and a live broadcast.
+
+If you record a YouTube live, Streamlink reads the HLS media bytes on the device and the existing
+recording service writes them to the storage destination you selected. FullTV does not relay or
+store those bytes on a FullTV server.
 
 If you enable automatic Portuguese captions, FullTV downloads the Whisper speech model from
 Hugging Face (about 78 MB) and the required Google ML Kit translation model (about 30 MB) on first

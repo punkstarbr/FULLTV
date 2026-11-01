@@ -172,4 +172,23 @@ class M3uParserTest {
         assertThat(M3uParser.parse(playlist, sourceId = 1).declaredEpgUrls)
             .containsExactly("https://a.example/x.xml")
     }
+
+    @Test
+    fun `playlist order is preserved even when channel numbers are not ascending`() {
+        val playlist = """
+            #EXTM3U
+            #EXTINF:-1 tvg-chno="200",Zulu
+            https://example.com/zulu.m3u8
+            #EXTINF:-1 tvg-chno="10",Alpha
+            https://example.com/alpha.m3u8
+            #EXTINF:-1 tvg-chno="11",Bravo
+            https://example.com/bravo.m3u8
+        """.trimIndent()
+
+        val channels = M3uParser.parse(playlist, sourceId = 1).channels
+
+        assertThat(channels.map { it.displayName }).containsExactly("Zulu", "Alpha", "Bravo").inOrder()
+        assertThat(channels.map { it.sortIndex }).containsExactly(0, 1, 2).inOrder()
+        assertThat(channels.map { it.number }).containsExactly(200, 10, 11).inOrder()
+    }
 }

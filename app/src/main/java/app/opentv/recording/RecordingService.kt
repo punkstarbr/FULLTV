@@ -19,11 +19,15 @@ import androidx.core.app.NotificationCompat
 import app.opentv.R
 import app.opentv.core.AppSettings
 import app.opentv.core.ServiceLocator
+import app.opentv.player.StreamlinkResolver
+import app.opentv.player.YouTubeChannelUrl
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Request
 import java.util.concurrent.ConcurrentHashMap
@@ -46,7 +50,11 @@ class RecordingService : Service() {
     private val remuxes = ConcurrentHashMap<Long, Job>()
     private var wakeLock: PowerManager.WakeLock? = null
 
-    private class Capture(@Volatile var call: Call?, val job: Job)
+    private class Capture(
+        @Volatile var call: Call?,
+        val job: Job,
+        @Volatile var streamlinkReader: StreamlinkResolver.RecordingReader? = null,
+    )
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -83,13 +91,51 @@ class RecordingService : Service() {
     }
 
     private suspend fun runCapture(id: Long) {
-        val graph = ServiceLocator.get(applicationContext)
-        val repo = graph.recordingRepository
-        val recording = repo.byId(id)
-        if (recording == null) {
-            finish(id)
+        var setupRepo: app.opentv.data.repo.RecordingRepository? = null
+        val setup = try {
+            val graph = ServiceLocator.get(applicationContext)
+            val repo = graph.recordingRepository
+            setupRepo = repo
+            val recording = repo.byId(id) ?: run {
+                finish(id)
+                return
+            }
+            Triple(graph, repo, recording)
+        } catch (t: Throwable) {
+            val error = t.message ?: t.javaClass.simpleName
+            if (t is kotlinx.coroutines.CancellationException) {
+                withContext(NonCancellable) {
+                    runCatching {
+                        setupRepo?.markFinished(
+                            ok = false,
+                            id = id,
+                            atMillis = System.currentTimeMillis(),
+                            bytes = 0L,
+                            error = getString(R.string.rec_error_nothing),
+                        )
+                    }
+                    finish(id)
+                }
+                throw t
+            }
+            Log.w(TAG, "Recording $id failed during setup", t)
+            withContext(NonCancellable) {
+                runCatching {
+                    setupRepo?.markFinished(
+                        ok = false,
+                        id = id,
+                        atMillis = System.currentTimeMillis(),
+                        bytes = 0L,
+                        error = error,
+                    )
+                }
+                finish(id)
+            }
             return
         }
+        val graph = setup.first
+        val repo = setup.second
+        val recording = setup.third
 
         var total = 0L
         var error: String? = null
@@ -108,63 +154,61 @@ class RecordingService : Service() {
                 }
             }
 
-            val buffer = ByteArray(BUFFER_BYTES)
-            var lastReport = 0L
-            var deadReconnects = 0
-
-            // Reconnect loop. Real IPTV `.ts` live endpoints commonly serve a rolling ~30s window and
-            // then close the socket, expecting the client to re-request (ExoPlayer does this on its own
-            // during playback). A single read-to-EOF therefore captures only ~30s — the exact bug. So
-            // when the connection drops we reopen it and keep appending to the same file, until the
-            // scheduled end, a user stop, or the stream is genuinely gone (several empty reconnects).
             val scheduledEnd = recording.scheduledEndMillis
-            while (kotlin.coroutines.coroutineContext[Job]?.isActive == true) {
-                if (scheduledEnd > 0 && System.currentTimeMillis() >= scheduledEnd) break
+            val youtubeLiveUrl = YouTubeChannelUrl.asLiveUrlOrNull(recording.streamUrl)
+            if (youtubeLiveUrl != null) {
+                total = copyStreamlinkRecording(id, youtubeLiveUrl, scheduledEnd, repo, sink)
+            } else {
+                val buffer = ByteArray(BUFFER_BYTES)
+                var lastReport = 0L
+                var deadReconnects = 0
 
-                val request = Request.Builder()
-                    .url(recording.streamUrl)
-                    .header("User-Agent", recording.userAgent)
-                    .build()
-                val call = graph.streamingHttpClient.newCall(request)
-                captures[id]?.call = call
+                // Direct IPTV `.ts` endpoints often close a rolling socket and expect reconnects.
+                while (kotlin.coroutines.coroutineContext[Job]?.isActive == true) {
+                    if (scheduledEnd > 0 && System.currentTimeMillis() >= scheduledEnd) break
 
-                val bytesThisLeg = try {
-                    call.execute().use { response ->
-                        if (!response.isSuccessful) throw java.io.IOException("HTTP ${response.code}")
-                        val input = response.body?.byteStream() ?: throw java.io.IOException("Empty response")
-                        var leg = 0L
-                        while (kotlin.coroutines.coroutineContext[Job]?.isActive == true) {
-                            val read = input.read(buffer)
-                            if (read < 0) break
-                            sink.output.write(buffer, 0, read)
-                            total += read
-                            leg += read
-                            if (scheduledEnd > 0 && System.currentTimeMillis() >= scheduledEnd) break
-                            if (total - lastReport >= SIZE_REPORT_BYTES) {
-                                lastReport = total
-                                repo.setSize(id, total)
+                    val request = Request.Builder()
+                        .url(recording.streamUrl)
+                        .header("User-Agent", recording.userAgent)
+                        .build()
+                    val call = graph.streamingHttpClient.newCall(request)
+                    captures[id]?.call = call
+
+                    val bytesThisLeg = try {
+                        call.execute().use { response ->
+                            if (!response.isSuccessful) throw java.io.IOException("HTTP ${response.code}")
+                            val input = response.body?.byteStream() ?: throw java.io.IOException("Empty response")
+                            var leg = 0L
+                            while (kotlin.coroutines.coroutineContext[Job]?.isActive == true) {
+                                val read = input.read(buffer)
+                                if (read < 0) break
+                                sink.output.write(buffer, 0, read)
+                                total += read
+                                leg += read
+                                if (scheduledEnd > 0 && System.currentTimeMillis() >= scheduledEnd) break
+                                if (total - lastReport >= SIZE_REPORT_BYTES) {
+                                    lastReport = total
+                                    repo.setSize(id, total)
+                                }
                             }
+                            leg
                         }
-                        leg
+                    } catch (t: kotlinx.coroutines.CancellationException) {
+                        throw t
+                    } catch (t: java.io.IOException) {
+                        Log.i(TAG, "Recording $id connection dropped (${t.message}); reconnecting")
+                        0L
                     }
-                } catch (t: kotlinx.coroutines.CancellationException) {
-                    throw t
-                } catch (t: java.io.IOException) {
-                    // A dropped connection isn't a failure — reconnect and carry on.
-                    Log.i(TAG, "Recording $id connection dropped (${t.message}); reconnecting")
-                    0L
-                }
 
-                // Nothing arrived this leg: count it, and give up only after several in a row so a
-                // truly dead stream can't spin forever. A leg that delivered bytes resets the counter.
-                if (bytesThisLeg <= 0L) {
-                    if (++deadReconnects >= MAX_DEAD_RECONNECTS) {
-                        if (total == 0L) error = getString(R.string.rec_error_nothing)
-                        break
+                    if (bytesThisLeg <= 0L) {
+                        if (++deadReconnects >= MAX_DEAD_RECONNECTS) {
+                            if (total == 0L) error = getString(R.string.rec_error_nothing)
+                            break
+                        }
+                        kotlinx.coroutines.delay(RECONNECT_BACKOFF_MILLIS)
+                    } else {
+                        deadReconnects = 0
                     }
-                    kotlinx.coroutines.delay(RECONNECT_BACKOFF_MILLIS)
-                } else {
-                    deadReconnects = 0
                 }
             }
         } catch (t: Throwable) {
@@ -223,9 +267,70 @@ class RecordingService : Service() {
         job.start()
     }
 
+    /** Streamlink reads transport bytes from its HLS reader; it cannot record the `.m3u8` URL itself. */
+    private suspend fun copyStreamlinkRecording(
+        id: Long,
+        liveUrl: String,
+        scheduledEndMillis: Long,
+        repo: app.opentv.data.repo.RecordingRepository,
+        sink: RecordingStorage.Sink,
+    ): Long {
+        var total = 0L
+        var lastReport = 0L
+        var deadReconnects = 0
+        val resolver = ServiceLocator.get(applicationContext).streamlinkResolver
+
+        while (kotlin.coroutines.coroutineContext[Job]?.isActive == true) {
+            if (scheduledEndMillis > 0 && System.currentTimeMillis() >= scheduledEndMillis) break
+            val reader = try {
+                resolver.openRecording(liveUrl)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.i(TAG, "Recording $id could not open the YouTube live (${error.message}); retrying")
+                if (++deadReconnects >= MAX_DEAD_RECONNECTS) break
+                kotlinx.coroutines.delay(RECONNECT_BACKOFF_MILLIS)
+                continue
+            }
+
+            captures[id]?.streamlinkReader = reader
+            var bytesThisLeg = 0L
+            try {
+                while (kotlin.coroutines.coroutineContext[Job]?.isActive == true) {
+                    if (scheduledEndMillis > 0 && System.currentTimeMillis() >= scheduledEndMillis) break
+                    val chunk = reader.read(BUFFER_BYTES)
+                    if (chunk.isEmpty()) break
+                    sink.output.write(chunk)
+                    total += chunk.size
+                    bytesThisLeg += chunk.size
+                    if (total - lastReport >= SIZE_REPORT_BYTES) {
+                        lastReport = total
+                        repo.setSize(id, total)
+                    }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.i(TAG, "Recording $id Streamlink reader ended (${error.message}); reconnecting")
+            } finally {
+                captures[id]?.streamlinkReader = null
+                runCatching { reader.close() }
+            }
+
+            if (bytesThisLeg <= 0L) {
+                if (++deadReconnects >= MAX_DEAD_RECONNECTS) break
+                kotlinx.coroutines.delay(RECONNECT_BACKOFF_MILLIS)
+            } else {
+                deadReconnects = 0
+            }
+        }
+        return total
+    }
+
     private fun stopCapture(id: Long) {
         val capture = captures[id] ?: return
         runCatching { capture.call?.cancel() }
+        capture.streamlinkReader?.let { reader -> scope.launch { runCatching { reader.close() } } }
         capture.job.cancel()
     }
 

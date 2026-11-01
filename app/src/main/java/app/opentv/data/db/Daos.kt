@@ -68,12 +68,12 @@ interface ChannelDao {
         WHERE hidden = 0
           AND (:sourceId IS NULL OR sourceId = :sourceId)
           AND (:categoryId IS NULL OR categoryId = :categoryId)
-        ORDER BY sortIndex, displayName
+        ORDER BY sourceId, sortIndex, id
         """
     )
     fun observe(sourceId: Long?, categoryId: String?): Flow<List<Channel>>
 
-    @Query("SELECT * FROM channels WHERE favourite = 1 AND hidden = 0 ORDER BY sortIndex, displayName")
+    @Query("SELECT * FROM channels WHERE favourite = 1 AND hidden = 0 ORDER BY sourceId, sortIndex, id")
     fun observeFavourites(): Flow<List<Channel>>
 
     /**
@@ -86,7 +86,7 @@ interface ChannelDao {
         """
         SELECT * FROM channels
         WHERE hidden = 0 AND categoryId IN (:categoryIds)
-        ORDER BY sortIndex, displayName
+        ORDER BY sourceId, sortIndex, id
         """
     )
     fun observeInCategories(categoryIds: List<String>): Flow<List<Channel>>
@@ -104,7 +104,7 @@ interface ChannelDao {
         SELECT * FROM channels
         WHERE (:sourceId IS NULL OR sourceId = :sourceId)
           AND categoryId IN (:categoryIds)
-        ORDER BY sortIndex, displayName
+        ORDER BY sourceId, sortIndex, id
         """
     )
     fun observeInCategoriesIncludingHidden(sourceId: Long?, categoryIds: List<String>): Flow<List<Channel>>
@@ -120,7 +120,7 @@ interface ChannelDao {
         SELECT * FROM channels
         WHERE (:sourceId IS NULL OR sourceId = :sourceId)
           AND categoryId = :categoryId
-        ORDER BY sortIndex, displayName
+        ORDER BY sourceId, sortIndex, id
         """
     )
     suspend fun channelsInCategoryIncludingHidden(sourceId: Long?, categoryId: String): List<Channel>
@@ -145,7 +145,7 @@ interface ChannelDao {
         SELECT * FROM channels
         WHERE hidden = 0
           AND (displayName LIKE '%' || :query || '%' OR name LIKE '%' || :query || '%')
-        ORDER BY favourite DESC, sortIndex, displayName
+        ORDER BY favourite DESC, sourceId, sortIndex, id
         LIMIT :limit
         """
     )
@@ -156,7 +156,7 @@ interface ChannelDao {
         """
         SELECT * FROM channels
         WHERE (displayName LIKE '%' || :query || '%' OR name LIKE '%' || :query || '%')
-        ORDER BY hidden, favourite DESC, sortIndex, displayName
+        ORDER BY hidden, favourite DESC, sourceId, sortIndex, id
         LIMIT :limit
         """
     )
@@ -292,12 +292,12 @@ interface ChannelDao {
 
 @Dao
 interface CategoryDao {
-    @Query("SELECT * FROM categories WHERE kind = :kind ORDER BY sortIndex, name")
+    @Query("SELECT * FROM categories WHERE kind = :kind ORDER BY sourceId, sortIndex, id")
     fun observe(kind: StreamKind): Flow<List<Category>>
 
     /** One-shot list of every category of a kind, ordered like [observe] — the web manager reads
      * the live categories once per request rather than subscribing to a Flow. */
-    @Query("SELECT * FROM categories WHERE kind = :kind ORDER BY sortIndex, name")
+    @Query("SELECT * FROM categories WHERE kind = :kind ORDER BY sourceId, sortIndex, id")
     suspend fun allByKind(kind: StreamKind): List<Category>
 
     /** Minimal id+name rows for the re-normalise pass. */

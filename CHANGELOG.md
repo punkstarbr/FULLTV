@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.11.17
+
+- **YouTube Live Search:** add a public `/results` URL as a source; the bundled yt-dlp extractor
+  refreshes up to five currently live results, which open through the bundled Streamlink resolver.
+- **YouTube live recording:** capture media bytes through Streamlink's HLS reader into the selected
+  recording destination, with reconnects while the scheduled capture remains active.
+- **Five new TV compositions:** Oi-style hybrid guide/preview, top Info player, full-screen EPG,
+  auto-hiding linear-TV banner, and bottom Info bar with a wider channel drawer.
+- **Validation:** the search extractor matched the live video supplied by the user, the generic
+  Streamlink reader returned HLS bytes, and 26 targeted JVM tests passed. A real-device playback
+  test remains necessary; this sandbox is rate-limited by YouTube anti-bot responses.
+
+## 0.11.16
+
+- **Stable channel order:** keep each provider's channels together in source order, use a stable
+  row order when indices tie, and preserve the first-seen order of M3U categories. This avoids
+  alphabetical tie-breaking that made combined playlists look shuffled.
+
 ## 0.11.15
 
 - **Install FullTV beside original OpenTV:** FullTV now has Android package ID `app.fulltv`; the

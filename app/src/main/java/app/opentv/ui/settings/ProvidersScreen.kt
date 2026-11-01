@@ -121,8 +121,14 @@ private fun ProviderRow(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Text(source.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                    val kindLabel = when (source.kind) {
+                        SourceKind.XTREAM -> stringResource(R.string.onboarding_xtream_login)
+                        SourceKind.M3U -> stringResource(R.string.onboarding_m3u_url)
+                        SourceKind.YOUTUBE_LIVE_SEARCH -> stringResource(R.string.onboarding_youtube_live)
+                        SourceKind.STALKER -> stringResource(R.string.onboarding_stalker_portal)
+                    }
                     Text(
-                        "${source.kind.name} · ${hostOf(source.url)}",
+                        "$kindLabel · ${hostOf(source.url)}",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

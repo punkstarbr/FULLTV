@@ -8,6 +8,7 @@ package app.opentv.data.repo
 import app.opentv.data.db.SourceDao
 import app.opentv.data.model.Source
 import app.opentv.data.model.SourceKind
+import app.opentv.data.parser.YouTubeLiveSearchUrl
 import app.opentv.data.remote.StalkerApi
 import app.opentv.data.remote.XtreamApi
 import kotlinx.coroutines.Dispatchers
@@ -52,6 +53,12 @@ class SourceRepository(
                     }
                 }
                 SourceKind.M3U -> "Playlist address looks valid. It will be checked on first sync."
+                SourceKind.YOUTUBE_LIVE_SEARCH -> {
+                    if (YouTubeLiveSearchUrl.normalize(source.url) == null) {
+                        error("Enter a YouTube /results URL with a search_query parameter.")
+                    }
+                    "YouTube search URL format looks valid. Live results are checked during sync."
+                }
                 SourceKind.STALKER -> {
                     stalkerApi.handshakeTest(source.copy(url = normaliseUrl(source.url, source.kind)))
                     "Portal accepted the MAC address. Loading channels…"
@@ -79,6 +86,9 @@ class SourceRepository(
                 url = "http://$url"
             }
             if (kind == SourceKind.M3U) return url
+            if (kind == SourceKind.YOUTUBE_LIVE_SEARCH) {
+                return YouTubeLiveSearchUrl.normalize(url) ?: url
+            }
             // A Stalker portal URL is the portal path itself (e.g. .../stalker_portal or .../c) —
             // stripping Xtream API paths would be wrong; just tidy the trailing slash.
             if (kind == SourceKind.STALKER) return url.trimEnd('/')

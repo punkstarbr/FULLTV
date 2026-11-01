@@ -128,7 +128,10 @@ fun HomeScreen(
     val graph = remember { ServiceLocator.get(context) }
     val settings = remember { graph.settings }
     val previewEnabled by settings.guidePreviewVideo.collectAsState()
-    val previewEnabledForLayout = previewEnabled && interfaceStyle != AppSettings.InterfaceStyle.CLASSIC_EPG
+    val previewEnabledForLayout = previewEnabled && interfaceStyle !in setOf(
+        AppSettings.InterfaceStyle.CLASSIC_EPG,
+        AppSettings.InterfaceStyle.EPG_FULLSCREEN,
+    )
     val palette = interfacePalette(interfaceStyle, MaterialTheme.colorScheme)
     val channelLayout by settings.channelLayout.collectAsState()
     val guideDensity by settings.guideDensity.collectAsState()
@@ -177,7 +180,9 @@ fun HomeScreen(
     // The rail is full-width while focus is on it, then slides shut once focus moves into the
     // guide (onFocusRow) so the grid gets the whole width. Pressing d-pad LEFT from the guide's
     // leftmost (channel) column slides it back and drops focus on the selected category.
-    var railExpanded by remember { mutableStateOf(true) }
+    var railExpanded by remember(interfaceStyle) {
+        mutableStateOf(interfaceStyle != AppSettings.InterfaceStyle.EPG_FULLSCREEN)
+    }
     val railWidth by animateDpAsState(
         targetValue = if (railExpanded) 240.dp else 0.dp,
         label = "railWidth",
@@ -453,7 +458,11 @@ fun HomeScreen(
                         SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(Date(windowStart))
                     }
                 }
-                if (interfaceStyle != AppSettings.InterfaceStyle.CLASSIC_EPG) {
+                if (interfaceStyle !in setOf(
+                        AppSettings.InterfaceStyle.CLASSIC_EPG,
+                        AppSettings.InterfaceStyle.EPG_FULLSCREEN,
+                    )
+                ) {
                     GuidePreview(
                         row = highlightedRow,
                         nowMillis = nowMillis,

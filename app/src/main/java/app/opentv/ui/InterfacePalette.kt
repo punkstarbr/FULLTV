@@ -30,6 +30,7 @@ fun interfacePalette(
 ): InterfacePalette = when (style) {
     AppSettings.InterfaceStyle.CURRENT,
     AppSettings.InterfaceStyle.CATEGORY_PORTAL,
+    AppSettings.InterfaceStyle.LINEAR_AUTOHIDE,
     -> InterfacePalette(
         screenBackground = defaults.background,
         surface = defaults.surface,
@@ -43,7 +44,9 @@ fun interfacePalette(
         accent = defaults.primary,
         progress = defaults.primary,
     )
-    AppSettings.InterfaceStyle.PLAYER_ZAPPING -> InterfacePalette(
+    AppSettings.InterfaceStyle.PLAYER_ZAPPING,
+    AppSettings.InterfaceStyle.PLAYER_INFO_TOP,
+    -> InterfacePalette(
         screenBackground = defaults.background,
         surface = defaults.surface,
         surfaceVariant = defaults.surfaceVariant,
@@ -69,7 +72,9 @@ fun interfacePalette(
         accent = Color(0xFFB7E41D),
         progress = Color(0xFFB7E41D),
     )
-    AppSettings.InterfaceStyle.MODERN_EPG -> InterfacePalette(
+    AppSettings.InterfaceStyle.MODERN_EPG,
+    AppSettings.InterfaceStyle.EPG_FULLSCREEN,
+    -> InterfacePalette(
         screenBackground = Color(0xFF07111A),
         surface = Color(0xFF101D27),
         surfaceVariant = Color(0xFF1D2D38),
@@ -94,5 +99,31 @@ fun interfacePalette(
         onSelected = Color(0xFF070A2B),
         accent = Color(0xFFFFD22E),
         progress = Color(0xFFFFD22E),
+    )
+    AppSettings.InterfaceStyle.OI_HYBRID -> InterfacePalette(
+        screenBackground = Color.Transparent,
+        surface = Color(0xCC0C2631),
+        surfaceVariant = Color(0xD91A3540),
+        selectedChannel = Color(0xDD203D47),
+        focusedBlock = Color(0xFFFFC72C),
+        currentProgramme = Color(0xCC2D4A54),
+        text = Color(0xFFF3F6F7),
+        mutedText = Color(0xFFACBDC2),
+        onSelected = Color(0xFF102027),
+        accent = Color(0xFFFFC72C),
+        progress = Color(0xFFFFC72C),
+    )
+    AppSettings.InterfaceStyle.BOTTOM_INFO_DRAWER -> InterfacePalette(
+        screenBackground = defaults.background,
+        surface = defaults.surface,
+        surfaceVariant = defaults.surfaceVariant,
+        selectedChannel = defaults.primaryContainer,
+        focusedBlock = defaults.primary,
+        currentProgramme = defaults.primaryContainer,
+        text = defaults.onSurface,
+        mutedText = defaults.onSurfaceVariant,
+        onSelected = defaults.onPrimaryContainer,
+        accent = Color(0xFFFFB74D),
+        progress = Color(0xFFFFB74D),
     )
 }

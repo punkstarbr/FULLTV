@@ -16,6 +16,22 @@ Release is found, it asks the user before downloading and opening Android's inst
 installations receive the debug APK, while release installations receive the release APK; this
 avoids an Android package/signature mismatch.
 
+## Manual release when Actions are unavailable
+
+Build from the release commit with JDK 17, Android SDK 35 and Python 3.11, then run the targeted
+tests and assemble both variants locally:
+
+```bash
+./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
+```
+
+Before publishing, verify both APK signatures with `apksigner`, confirm the release `applicationId`
+and version, and compare its certificate with the currently published APK. Upload the release APK,
+debug APK and a `SHA256SUMS.txt` file with `gh release create <tag> ... --notes-file <file>` or the
+GitHub Releases page. Creating the release this way does not depend on Actions; pushing the tag may
+still trigger any enabled repository workflows. Never replace or change a signing key if the APK
+must update an existing installation.
+
 ## Signing
 
 **Right now, release builds are signed with the Android debug key.** This is deliberate, and

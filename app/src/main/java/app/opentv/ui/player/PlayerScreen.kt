@@ -59,8 +59,10 @@ import androidx.compose.material.icons.filled.Subtitles
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -103,6 +105,7 @@ import app.opentv.core.SleepTimer
 import app.opentv.core.findActivity
 import app.opentv.core.requestIgnoreBatteryOptimizations
 import app.opentv.data.model.Channel
+import app.opentv.data.model.Programme
 import app.opentv.data.model.shownName
 import app.opentv.player.AutoPortugueseSubtitleEngine
 import app.opentv.player.AutoPortugueseSubtitleState
@@ -123,6 +126,9 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import java.net.URI
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 /**
@@ -201,6 +207,9 @@ fun PlayerScreen(
     var variants by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var currentId by remember { mutableStateOf<Long?>(null) }
     var currentChannel by remember { mutableStateOf<Channel?>(null) }
+    var nowProgramme by remember { mutableStateOf<Programme?>(null) }
+    var nextProgramme by remember { mutableStateOf<Programme?>(null) }
+    var infoClockMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     var tuneJob by remember { mutableStateOf<Job?>(null) }
     // The channel we were on before this one — powers the "Last channel" recall in the list.
     var previousId by remember { mutableStateOf<Long?>(null) }
@@ -243,6 +252,42 @@ fun PlayerScreen(
     // on entry so it doesn't shift under you mid-session.
     val queue = remember { PlaybackQueue.items }
     val zappingCarouselState = rememberLazyListState()
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            infoClockMillis = System.currentTimeMillis()
+            delay(30_000)
+        }
+    }
+    LaunchedEffect(currentChannel?.id, variants) {
+        val epgChannelIds = (
+            variants.flatMap { it.epgCandidates } + currentChannel?.epgCandidates.orEmpty()
+        ).distinct()
+        nowProgramme = null
+        nextProgramme = null
+        if (epgChannelIds.isNotEmpty()) {
+            while (true) {
+                val now = System.currentTimeMillis()
+                var programmes = emptyList<Programme>()
+                for (epgChannelId in epgChannelIds) {
+                    programmes = try {
+                        graph.epgRepository.upcoming(epgChannelId, now, limit = 8)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                    if (programmes.isNotEmpty()) break
+                }
+                val current = programmes.firstOrNull { it.isLiveAt(now) }
+                nowProgramme = current
+                nextProgramme = programmes.firstOrNull {
+                    it.startUtcMillis >= (current?.endUtcMillis ?: now)
+                }
+                delay(60_000)
+            }
+        }
+    }
 
     LaunchedEffect(currentId, interfaceStyle, queue.size) {
         if (interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.PLAYER_ZAPPING) {
@@ -441,6 +486,13 @@ fun PlayerScreen(
                         interaction++
                         false
                     }
+                    // With the top Info layout, vertical navigation crosses between the top tabs
+                    // and lower player controls instead of zapping while the controls are visible.
+                    (event.key == Key.DirectionUp || event.key == Key.DirectionDown) &&
+                        controlsVisible && interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.PLAYER_INFO_TOP -> {
+                        interaction++
+                        false
+                    }
                     // Channel up/down works whether or not the bar is showing — this remote has no
                     // CH+/CH- keys, so up/down IS the channel changer. Each zap flashes the bar as a
                     // channel banner, then it auto-hides.
@@ -494,6 +546,24 @@ fun PlayerScreen(
             update = { it.resizeMode = resizeMode },
         )
 
+        val topInfoChannel = currentChannel
+        if (interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.PLAYER_INFO_TOP &&
+            !inPip && topInfoChannel != null
+        ) {
+            PlayerTopInfoOverlay(
+                modifier = Modifier.align(Alignment.TopCenter),
+                channel = topInfoChannel,
+                current = nowProgramme,
+                next = nextProgramme,
+                clockMillis = infoClockMillis,
+                videoWidth = controller.player.videoSize.width,
+                videoHeight = controller.player.videoSize.height,
+                onOpenChannels = { channelListVisible = true; reveal() },
+                onOpenSubtitles = { panel = Panel.SUBTITLES; reveal() },
+                onOpenAudio = { panel = Panel.AUDIO; reveal() },
+            )
+        }
+
         if (aiCaptionsEnabled && !inPip) {
             val subtitleStatus = when (aiSubtitleState.phase) {
                 AutoSubtitlePhase.DOWNLOADING_SPEECH_MODEL -> {
@@ -516,7 +586,14 @@ fun PlayerScreen(
                         .padding(
                             start = 28.dp,
                             end = 28.dp,
-                            bottom = if (controlsVisible) 182.dp else 56.dp,
+                            bottom = when {
+                                controlsVisible && interfaceStyle in setOf(
+                                    app.opentv.core.AppSettings.InterfaceStyle.LINEAR_AUTOHIDE,
+                                    app.opentv.core.AppSettings.InterfaceStyle.BOTTOM_INFO_DRAWER,
+                                ) -> 330.dp
+                                controlsVisible -> 182.dp
+                                else -> 56.dp
+                            },
                         )
                         .widthIn(max = 1_080.dp)
                         .clip(RoundedCornerShape(12.dp))
@@ -551,6 +628,30 @@ fun PlayerScreen(
             ) {
                 Text(numberEntry, color = Color.White, style = MaterialTheme.typography.displaySmall)
             }
+        }
+
+        val lowerInfoStyle = interfaceStyle in setOf(
+            app.opentv.core.AppSettings.InterfaceStyle.LINEAR_AUTOHIDE,
+            app.opentv.core.AppSettings.InterfaceStyle.BOTTOM_INFO_DRAWER,
+        )
+        val lowerInfoChannel = currentChannel
+        if (controlsVisible && lowerInfoStyle && lowerInfoChannel != null && !inPip) {
+            val sourceHost = runCatching { URI(lowerInfoChannel.streamUrl).host }.getOrNull()
+            PlayerBottomInfoOverlay(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(horizontal = 28.dp)
+                    .padding(bottom = 220.dp),
+                channel = lowerInfoChannel,
+                current = nowProgramme,
+                next = nextProgramme,
+                clockMillis = infoClockMillis,
+                videoWidth = controller.player.videoSize.width,
+                videoHeight = controller.player.videoSize.height,
+                sourceHost = sourceHost,
+                accent = controlAccent,
+                showProgress = interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.BOTTOM_INFO_DRAWER,
+            )
         }
 
         when (val current = state) {
@@ -732,18 +833,16 @@ fun PlayerScreen(
                     ) {
                         panel = if (panel == Panel.ASPECT) Panel.NONE else Panel.ASPECT; interaction++
                     }
-                    if (currentChannel?.let { YouTubeChannelUrl.asLiveUrlOrNull(it.streamUrl) } == null) {
-                        Spacer(Modifier.width(10.dp))
-                        val recordingThis = activeRecordings.any { it.channelId == currentId }
-                        BarChip(
-                            icon = Icons.Filled.FiberManualRecord,
-                            label = if (recordingThis) stringResource(R.string.common_stop) else stringResource(R.string.player_record),
-                            selected = recordingThis,
-                            iconTint = Color(0xFFE53935),
-                            accentColor = controlAccent,
-                            onAccentColor = controlOnAccent,
-                        ) { toggleRecord() }
-                    }
+                    Spacer(Modifier.width(10.dp))
+                    val recordingThis = activeRecordings.any { it.channelId == currentId }
+                    BarChip(
+                        icon = Icons.Filled.FiberManualRecord,
+                        label = if (recordingThis) stringResource(R.string.common_stop) else stringResource(R.string.player_record),
+                        selected = recordingThis,
+                        iconTint = Color(0xFFE53935),
+                        accentColor = controlAccent,
+                        onAccentColor = controlOnAccent,
+                    ) { toggleRecord() }
                     if (pipSupported) {
                         Spacer(Modifier.width(10.dp))
                         BarChip(
@@ -791,8 +890,15 @@ fun PlayerScreen(
             Column(
                 Modifier
                     .fillMaxHeight()
-                    .width(380.dp)
-                    .background(Color.Black.copy(alpha = 0.72f))
+                    .width(
+                        if (interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.BOTTOM_INFO_DRAWER) 480.dp
+                        else 380.dp,
+                    )
+                    .background(
+                        Color.Black.copy(
+                            alpha = if (interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.BOTTOM_INFO_DRAWER) 0.9f else 0.72f,
+                        ),
+                    )
                     .padding(vertical = 16.dp),
             ) {
                 Text(

@@ -29,6 +29,7 @@ import app.opentv.data.parser.VodTitleCleaner
 import app.opentv.data.remote.StalkerApi
 import app.opentv.data.remote.TmdbClient
 import app.opentv.data.remote.XtreamApi
+import app.opentv.player.YouTubeLiveSearchResolver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -130,6 +131,7 @@ class CatalogRepository(
     private val http: OkHttpClient,
     private val settings: AppSettings,
     private val epgRepository: EpgRepository,
+    private val youtubeLiveSearch: YouTubeLiveSearchResolver,
 ) {
 
     /** TMDB back-fill for VOD detail pages, gated on a user-supplied key. See [TmdbClient]. */
@@ -634,6 +636,7 @@ class CatalogRepository(
             when (source.kind) {
                 SourceKind.XTREAM -> syncXtreamLive(source, nowUtcMillis)
                 SourceKind.M3U -> syncM3u(source, nowUtcMillis)
+                SourceKind.YOUTUBE_LIVE_SEARCH -> syncYouTubeLiveSearch(source, nowUtcMillis)
                 SourceKind.STALKER -> syncStalkerLive(source, nowUtcMillis)
             }
         } catch (e: CancellationException) {
@@ -760,7 +763,6 @@ class CatalogRepository(
         val categories = parsed.channels
             .mapNotNull { it.categoryId }
             .distinct()
-            .sorted()
             .mapIndexed { index, name ->
                 Category(
                     id = name,
@@ -793,6 +795,54 @@ class CatalogRepository(
 
         sourceDao.markCatalogSynced(source.id, nowUtcMillis)
         return SyncResult.Success(parsed.channels.size, 0, 0)
+    }
+
+    /** Import the first five results which yt-dlp confirms are live right now. */
+    private suspend fun syncYouTubeLiveSearch(source: Source, nowUtcMillis: Long): SyncResult {
+        val videos = youtubeLiveSearch.search(source.url, maxResults = 5)
+        if (videos.isEmpty()) {
+            return SyncResult.Failed(
+                "No currently live videos matched this YouTube search. Previous results were kept.",
+                null,
+            )
+        }
+
+        val categoryId = "youtube-live"
+        categoryDao.upsertAll(
+            listOf(
+                Category(
+                    id = categoryId,
+                    sourceId = source.id,
+                    name = "YouTube Live",
+                    kind = StreamKind.LIVE,
+                    sortIndex = 0,
+                ),
+            ),
+        )
+        val channels = videos.take(5).mapIndexed { index, video ->
+            val displayName = video.channelName
+                ?.takeIf(String::isNotBlank)
+                ?.let { "$it · ${video.title}" }
+                ?: video.title
+            Channel(
+                sourceId = source.id,
+                streamId = "yt-live:${video.videoId}",
+                name = video.channelName ?: video.title,
+                displayName = displayName,
+                groupKey = "yt-live:${video.videoId}",
+                qualityRank = 0,
+                qualityLabel = "",
+                categoryId = categoryId,
+                logoUrl = video.thumbnailUrl,
+                epgChannelId = null,
+                number = index + 1,
+                streamUrl = video.watchUrl,
+                sortIndex = index,
+            )
+        }
+        channelDao.replaceCatalogue(source.id, channels, nowUtcMillis)
+        sourceDao.markCatalogSynced(source.id, nowUtcMillis)
+        return SyncResult.Success(channels.size, 0, 0)
     }
 
     /**
