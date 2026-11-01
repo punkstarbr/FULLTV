@@ -14,15 +14,15 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "app.opentv"
+        applicationId = "app.fulltv"
         targetSdk = 35
         minSdk = 24
         ndk {
             // Chaquopy 3.11 builds support these four ABIs, including 32-bit TV boxes.
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
         }
-        versionCode = 26
-        versionName = "0.11.14"
+        versionCode = 27
+        versionName = "0.11.15"
         // FullTV publishes versioned GitHub Releases; older releases remain available there.
         buildConfigField("String", "UPDATE_REPO_SLUG", "\"punkstarbr/FULLTV\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"

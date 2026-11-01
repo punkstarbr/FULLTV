@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.11.15
+
+- **Install FullTV beside original OpenTV:** FullTV now has Android package ID `app.fulltv`; the
+  original OpenTV can keep `app.opentv`, so the two apps no longer conflict on fresh installations.
+- **Migration note:** Android treats this as a separate app. Settings and database from older
+  FullTV builds using `app.opentv` are not copied automatically. Remove an old FullTV installation
+  before installing original OpenTV; removing it can erase its local data.
+- **YouTube live channels:** Streamlink is bundled to resolve `youtube.com/@handle` live channels.
+- **Automatic Portuguese subtitles (opt-in):** Whisper transcribes locally and ML Kit translates
+  on-device; models download on first use and playback audio is not uploaded.
+- **Recording horizon and TV UI:** configure series lookahead from 2 to 14 days, choose from six
+  interface styles, and use the four-channel mosaic with one audio tile at a time.
+- **Encrypted device backup:** export/import sources, credentials, settings and syncable state in a
+  passphrase-protected AES-256-GCM `.fulltv` file; video files and USB folder grants are excluded.
+- **Minimum Android version:** Android 7.0/API 24 or newer.
+
 ## 0.11.14
 
 - **YouTube live channels:** bundle Streamlink and resolve `youtube.com/@handle` links to the
