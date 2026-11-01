@@ -89,7 +89,8 @@ import kotlinx.coroutines.withContext
 @Composable
 fun RecordingSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
-    val settings = remember { ServiceLocator.get(context).settings }
+    val graph = remember { ServiceLocator.get(context) }
+    val settings = graph.settings
     val scope = rememberCoroutineScope()
 
     var target by remember { mutableStateOf(settings.recordingTarget.value) }
@@ -102,12 +103,15 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
     var usbLabel by remember { mutableStateOf(settings.usbFolderLabel.value) }
     var status by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
+    var refreshingSchedule by remember { mutableStateOf(false) }
+    var scheduleStatus by remember { mutableStateOf<String?>(null) }
 
     // Recording behaviour. These apply the moment they're changed so they hold whether the user
     // leaves via Done or Save.
     var manualMinutes by remember { mutableStateOf(settings.manualRecordMinutes.value) }
     var padStart by remember { mutableStateOf(settings.recordPadStartMinutes.value) }
     var padEnd by remember { mutableStateOf(settings.recordPadEndMinutes.value) }
+    var scheduleLookaheadDays by remember { mutableStateOf(settings.recordScheduleLookaheadDays.value) }
     var autoSwitch by remember { mutableStateOf(settings.recordAutoSwitch.value) }
     var livePause by remember { mutableStateOf(settings.livePauseEnabled.value) }
     var container by remember { mutableStateOf(settings.recordingContainer.value) }
@@ -187,6 +191,43 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
                 unit = stringResource(R.string.recset_minutes_short),
                 min = 0, max = 60,
             ) { padEnd = it; settings.setRecordPadding(padStart, padEnd) }
+            StepperRow(
+                label = stringResource(R.string.recset_series_lookahead),
+                subtitle = stringResource(R.string.recset_series_lookahead_desc),
+                value = scheduleLookaheadDays,
+                unit = stringResource(R.string.recset_days_short),
+                min = 2, max = 14,
+            ) {
+                scheduleLookaheadDays = it
+                settings.setRecordScheduleLookaheadDays(it)
+                scheduleStatus = null
+            }
+            Button(
+                enabled = !refreshingSchedule,
+                onClick = {
+                    refreshingSchedule = true
+                    scheduleStatus = null
+                    scope.launch {
+                        try {
+                            graph.epgRepository.syncAll(System.currentTimeMillis(), force = true)
+                            graph.recordingEngine.rescanSeriesRules()
+                            scheduleStatus = context.getString(R.string.recset_schedule_refreshed)
+                        } catch (_: Exception) {
+                            scheduleStatus = context.getString(R.string.recset_schedule_refresh_failed)
+                        } finally {
+                            refreshingSchedule = false
+                        }
+                    }
+                },
+            ) {
+                Text(
+                    if (refreshingSchedule) stringResource(R.string.recset_schedule_refreshing)
+                    else stringResource(R.string.recset_schedule_refresh_now),
+                )
+            }
+            scheduleStatus?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+            }
             ToggleRow(
                 label = stringResource(R.string.recset_autoswitch),
                 subtitle = stringResource(R.string.recset_autoswitch_desc),

@@ -49,9 +49,13 @@ And what is bought with it:
 - Provider credentials never leave the device. Nobody has to trust the maintainers with them.
 - It works with no internet connection to anything except your own provider.
 
-If multi-device setup becomes painful enough, the answer is **export/import of a settings file**
-— or, at most, optional sync through storage the *user* already owns and pays for. Never a
-service the project has to fund.
+Multi-device transfer is available as an explicit **export/import of a `.fulltv` file**. It uses
+the system document picker and AES-256-GCM with a key derived from the user's passphrase; there is
+still no server to fund. The encrypted snapshot contains sources/credentials, portable settings,
+user-added EPG feeds and the existing stable-key sync bundle. Import merges sources, refreshes
+catalogues and the guide, then applies favourites and watch positions. It deliberately excludes
+catalogue/EPG caches, local video recordings, device IDs, filesystem paths and USB SAF grants; those
+are either re-downloaded or must be selected again on the new device.
 
 ## The EPG, and why it is written the way it is
 
@@ -77,6 +81,11 @@ scratch. It fixes nothing. The next refresh fails the same way.
 2. Pruning happens **by age** (`deleteEndedBefore`), never by source, and only **after** a sync
    reports success.
 3. A failed sync leaves the previous guide completely intact and returns the reason.
+
+The future cutoff is user-configurable from 2 to 14 days (2 days by default). The same setting is
+used while parsing and pruning, so series rules can reserve matching airings as far ahead as the
+provider's XMLTV feed actually publishes. Increasing the setting cannot create guide data which
+the feed does not contain; the Recording settings screen offers an explicit refresh and rescan.
 
 `XmltvParser` streams via `XmlPullParser` and emits programmes to a callback. A week of guide
 data for a large provider is comfortably 150 MB of XML; nothing about that fits in the heap of
@@ -117,8 +126,9 @@ providers where it matters most.
 
 ## Playback
 
-`PlayerController` owns exactly one `ExoPlayer` for the lifetime of the screen and only ever
-swaps its media item.
+Each `PlayerController` owns exactly one `ExoPlayer` for the lifetime of its playback surface and
+only ever swaps its media item. Full-screen playback and the guide preview each use one controller;
+the multi-channel mosaic is the explicit exception and owns one controller per selected tile.
 
 The naive implementation of "change channel" releases the player and builds a new one. On a
 low-end box that is slow enough that a user holding channel-up queues several constructions and
@@ -129,6 +139,38 @@ it is self-inflicted.
 So: requests are debounced (350 ms), an in-flight switch is cancelled the moment a newer one
 arrives, and the player is `stop()`ed rather than released. Holding channel-up costs one actual
 tune — the one you stopped on.
+
+### Multi-channel mosaic
+
+`MosaicScreen` can start up to four independent live controllers after the user selects channels
+and confirms a warning; merely opening the tab never opens provider connections. Each tile uses the
+shallow preview buffer, has subtitles disabled, and only the focused tile plays audio. The screen
+stops all tile controllers before handing a channel to the normal full-screen player. Four streams
+still mean four provider connections and video decoders: some providers limit concurrent streams,
+and some low-end TV boxes cannot sustain four decoders. The in-app warning makes that limitation
+explicit; support depends on the provider and device.
+
+### YouTube channel handles
+
+M3U entries whose playback URL is a YouTube `@handle` are the one special case in the live path.
+The app bundles Streamlink's Python library through Chaquopy, normalizes the URL to `/live`, and
+asks Streamlink for `best` immediately before playback. The resolved, short-lived media URL is
+passed to the existing Media3 player and is never stored in the catalogue. Full-screen playback
+and guide preview share this path; every non-YouTube URL continues through the existing provider
+path. The resolver starts lazily, so ordinary channels do not initialize Python.
+
+### Automatic Portuguese captions
+
+Automatic captions are opt-in and are wired only into the full-screen player. A Media3
+`TeeAudioProcessor` copies decoded 16-bit PCM into a bounded, drop-oldest worker queue; five-second
+mono 16 kHz Whisper windows overlap by two seconds. The playback thread never waits for inference,
+and stale windows are dropped if the device cannot keep up. Whisper runs locally with the
+multilingual `tiny` model, downloaded on first use with a pinned SHA-256 check. ML Kit identifies
+the recognized text language and downloads the translation model for Portuguese; subsequent
+translation is on-device. The audio itself is never uploaded. The current prebuilt Whisper AAR is
+arm64-v8a only, the feature declines devices reporting less than 512 MB app memory, and the tap
+requires decoded PCM (encoded passthrough streams may not yield captions). The feature is disabled
+by default because it adds model storage, CPU and memory pressure.
 
 ### Retries are tuned for IPTV, not for CDNs
 

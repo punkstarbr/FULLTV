@@ -10,6 +10,12 @@ Para publicar o FullTV no GitHub, siga o [PUBLICAR.md](PUBLICAR.md).
 
 - JDK 17
 - Android SDK 35 e build-tools 35.0.0
+- Python 3.11 (usado pelo Chaquopy para empacotar o Streamlink)
+
+O Streamlink e o runtime Python são incluídos no APK; não é necessário instalar outro app nem
+usar um servidor. O runtime atual do Chaquopy eleva o mínimo do FullTV para Android 7.0 (API 24).
+O APK universal inclui as ABIs `arm64-v8a`, `armeabi-v7a`, `x86` e `x86_64`, o que aumenta o
+tamanho do arquivo.
 
 ```bash
 export JAVA_HOME=/caminho/para/jdk17

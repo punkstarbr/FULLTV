@@ -72,6 +72,8 @@ import androidx.compose.ui.window.Dialog
 import app.opentv.R
 import app.opentv.core.AppSettings
 import app.opentv.core.ServiceLocator
+import app.opentv.ui.InterfacePalette
+import app.opentv.ui.interfacePalette
 import app.opentv.core.findActivity
 import app.opentv.core.requestIgnoreBatteryOptimizations
 import app.opentv.data.model.Channel
@@ -81,6 +83,7 @@ import app.opentv.data.model.shownName
 import app.opentv.reminders.ReminderScheduler
 import app.opentv.player.PlaybackQueue
 import app.opentv.player.PlayerController
+import app.opentv.player.YouTubeChannelUrl
 import app.opentv.ui.ChannelsViewModel
 import app.opentv.ui.RecordingBackgroundDialog
 import app.opentv.ui.RecordingBackgroundPrompt
@@ -88,6 +91,7 @@ import coil.compose.AsyncImage
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -117,11 +121,15 @@ fun HomeScreen(
     onRefresh: () -> Unit,
     onPlayCatchup: (mediaKey: String, url: String, title: String, ua: String) -> Unit = { _, _, _, _ -> },
     viewModel: ChannelsViewModel = viewModel(),
+    interfaceStyle: AppSettings.InterfaceStyle = AppSettings.InterfaceStyle.CURRENT,
+    modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
     val graph = remember { ServiceLocator.get(context) }
     val settings = remember { graph.settings }
     val previewEnabled by settings.guidePreviewVideo.collectAsState()
+    val previewEnabledForLayout = previewEnabled && interfaceStyle != AppSettings.InterfaceStyle.CLASSIC_EPG
+    val palette = interfacePalette(interfaceStyle, MaterialTheme.colorScheme)
     val channelLayout by settings.channelLayout.collectAsState()
     val guideDensity by settings.guideDensity.collectAsState()
 
@@ -254,9 +262,9 @@ fun HomeScreen(
 
     // Hold the screen awake while the guide's live preview is playing — otherwise the box's
     // screensaver fires while you're browsing with a channel running in the preview pane.
-    DisposableEffect(previewEnabled, screenResumed) {
+    DisposableEffect(previewEnabledForLayout, screenResumed) {
         val window = context.findActivity()?.window
-        if (previewEnabled && screenResumed) {
+        if (previewEnabledForLayout && screenResumed) {
             window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         } else {
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -265,8 +273,8 @@ fun HomeScreen(
     }
 
     // Preview audio follows the setting; muted by default so browsing stays quiet.
-    LaunchedEffect(previewSound) {
-        previewController.player.volume = if (previewSound) 1f else 0f
+    LaunchedEffect(previewSound, previewEnabledForLayout) {
+        previewController.player.volume = if (previewEnabledForLayout && previewSound) 1f else 0f
     }
 
     // Tune the preview to the highlighted channel, so it follows the d-pad as you browse — the
@@ -274,26 +282,47 @@ fun HomeScreen(
     // While a recording is running the preview is silenced entirely: on a single-connection line a
     // muted preview is still a second stream, which fights the recording and risks a provider ban.
     val recordingActive = activeRecordings.isNotEmpty()
-    LaunchedEffect(highlightedRow?.key, previewEnabled, screenResumed, recordingActive) {
+    LaunchedEffect(highlightedRow?.key, previewEnabledForLayout, screenResumed, recordingActive) {
         val row = highlightedRow
-        if (!previewEnabled || !screenResumed || recordingActive || row == null) {
+        if (!previewEnabledForLayout || !screenResumed || recordingActive || row == null) {
             previewController.stop()
             return@LaunchedEffect
         }
         val channel = row.primary
-        val source = graph.sourceRepository.byId(channel.sourceId)
-        previewController.play(
-            PlayerController.Request(
-                url = channel.streamUrl,
-                title = channel.shownName,
-                userAgent = source?.userAgent ?: "OpenTV/0.1 (Android)",
-                isLive = true,
-            ),
-            debounce = true,
-        )
+        val youtubeLiveUrl = YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl)
+        if (youtubeLiveUrl != null) {
+            previewController.beginExternalResolution(channel.shownName)
+            try {
+                val resolved = graph.streamlinkResolver.resolveBest(youtubeLiveUrl)
+                previewController.play(
+                    PlayerController.Request(
+                        url = resolved.url,
+                        title = channel.shownName,
+                        userAgent = resolved.userAgent,
+                        isLive = true,
+                    ),
+                    debounce = true,
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                previewController.stop()
+            }
+        } else {
+            val source = graph.sourceRepository.byId(channel.sourceId)
+            previewController.play(
+                PlayerController.Request(
+                    url = channel.streamUrl,
+                    title = channel.shownName,
+                    userAgent = source?.userAgent ?: "OpenTV/0.1 (Android)",
+                    isLive = true,
+                ),
+                debounce = true,
+            )
+        }
     }
 
-    Row(Modifier.fillMaxSize()) {
+    Row(modifier.fillMaxSize().background(palette.screenBackground)) {
 
         // ---- Category rail -----------------------------------------------------------------
         // Width animates to 0 while focus is in the guide (see onFocusRow) so the grid gets the
@@ -302,7 +331,7 @@ fun HomeScreen(
             Modifier
                 .width(railWidth)
                 .fillMaxHeight()
-                .background(MaterialTheme.colorScheme.surface)
+                .background(palette.surface)
                 .clipToBounds()
                 .padding(vertical = 16.dp),
         ) {
@@ -334,6 +363,7 @@ fun HomeScreen(
                             label = stringResource(R.string.channels_manager_all_sources),
                             selected = selectedSource == null,
                             onClick = { viewModel.selectSource(null) },
+                            palette = palette,
                         )
                     }
                     items(sources, key = { "src-${it.id}" }) { source ->
@@ -341,6 +371,7 @@ fun HomeScreen(
                             label = source.name,
                             selected = selectedSource == source.id,
                             onClick = { viewModel.selectSource(source.id) },
+                            palette = palette,
                         )
                     }
                     item(key = "provider-divider") { Spacer(Modifier.height(10.dp)) }
@@ -352,6 +383,7 @@ fun HomeScreen(
                         label = stringResource(R.string.guide_favourites),
                         selected = favouritesOnly,
                         onClick = viewModel::selectFavourites,
+                        palette = palette,
                         modifier = if (favouritesOnly) Modifier.focusRequester(railFocusRequester) else Modifier,
                     )
                 }
@@ -361,6 +393,7 @@ fun HomeScreen(
                         label = stringResource(R.string.guide_all_channels),
                         selected = allSelected,
                         onClick = { viewModel.selectCategory(null) },
+                        palette = palette,
                         modifier = if (allSelected) Modifier.focusRequester(railFocusRequester) else Modifier,
                     )
                 }
@@ -370,6 +403,7 @@ fun HomeScreen(
                         label = group.label,
                         selected = groupSelected,
                         onClick = { viewModel.selectCategory(group.key) },
+                        palette = palette,
                         modifier = if (groupSelected) Modifier.focusRequester(railFocusRequester) else Modifier,
                     )
                 }
@@ -377,7 +411,7 @@ fun HomeScreen(
         }
 
         // ---- Preview + guide ---------------------------------------------------------------
-        Column(Modifier.weight(1f)) {
+        Column(Modifier.weight(1f).background(palette.screenBackground)) {
             if (rows.isEmpty()) {
                 when {
                     favouritesOnly -> NoFavouritesState()
@@ -419,22 +453,25 @@ fun HomeScreen(
                         SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(Date(windowStart))
                     }
                 }
-                GuidePreview(
-                    row = highlightedRow,
-                    nowMillis = nowMillis,
-                    onWatch = { highlightedRow?.let { goFullscreen(it.primary) } },
-                    onRefresh = onRefresh,
-                    onAddSource = onAddSource,
-                    previewPlayer = if (previewEnabled && !recordingActive) previewController.player else null,
-                    isRecording = highlightedRow?.primary?.id?.let { id ->
-                        activeRecordings.any { it.channelId == id }
-                    } == true,
-                    onRecord = { recordSelected() },
-                    dayLabel = dayLabel,
-                    canGoPrevDay = guideDayOffset > 0,
-                    onPrevDay = { viewModel.nudgeGuideDay(-1) },
-                    onNextDay = { viewModel.nudgeGuideDay(1) },
-                )
+                if (interfaceStyle != AppSettings.InterfaceStyle.CLASSIC_EPG) {
+                    GuidePreview(
+                        row = highlightedRow,
+                        nowMillis = nowMillis,
+                        onWatch = { highlightedRow?.let { goFullscreen(it.primary) } },
+                        onRefresh = onRefresh,
+                        onAddSource = onAddSource,
+                        previewPlayer = if (previewEnabledForLayout && !recordingActive) previewController.player else null,
+                        isRecording = highlightedRow?.primary?.id?.let { id ->
+                            activeRecordings.any { it.channelId == id }
+                        } == true,
+                        onRecord = { recordSelected() },
+                        dayLabel = dayLabel,
+                        canGoPrevDay = guideDayOffset > 0,
+                        onPrevDay = { viewModel.nudgeGuideDay(-1) },
+                        onNextDay = { viewModel.nudgeGuideDay(1) },
+                        interfaceStyle = interfaceStyle,
+                    )
+                }
                 // Shared by both layouts: focus follows the highlight and collapses the rail; LEFT
                 // from the leftmost element reopens the rail (consumed only when it was hidden).
                 val onFocusChannel: (ChannelsViewModel.Row) -> Unit = {
@@ -450,7 +487,10 @@ fun HomeScreen(
                         false
                     }
                 }
-                if (channelLayout == AppSettings.ChannelLayout.LIST) {
+                val useList = channelLayout == AppSettings.ChannelLayout.LIST &&
+                    (interfaceStyle == AppSettings.InterfaceStyle.CURRENT ||
+                        interfaceStyle == AppSettings.InterfaceStyle.PLAYER_ZAPPING)
+                if (useList) {
                     ChannelList(
                         rows = rows,
                         selectedKey = highlightedRow?.key,
@@ -458,6 +498,7 @@ fun HomeScreen(
                         onFocusRow = onFocusChannel,
                         onToggleFavourite = { viewModel.toggleFavourite(it) },
                         onExitLeftFromChannel = onExitLeftChannel,
+                        interfaceStyle = interfaceStyle,
                         modifier = Modifier.weight(1f).padding(start = 12.dp, end = 12.dp),
                     )
                 } else {
@@ -475,7 +516,27 @@ fun HomeScreen(
                         onProgramme = { row, programme -> recordTarget = row to programme },
                         onToggleFavourite = { viewModel.toggleFavourite(it) },
                         onExitLeftFromChannel = onExitLeftChannel,
+                        interfaceStyle = interfaceStyle,
                         modifier = Modifier.weight(1f).padding(start = 12.dp, end = 12.dp),
+                    )
+                }
+                if (interfaceStyle == AppSettings.InterfaceStyle.CLASSIC_EPG) {
+                    GuidePreview(
+                        row = highlightedRow,
+                        nowMillis = nowMillis,
+                        onWatch = { highlightedRow?.let { goFullscreen(it.primary) } },
+                        onRefresh = onRefresh,
+                        onAddSource = onAddSource,
+                        previewPlayer = null,
+                        isRecording = highlightedRow?.primary?.id?.let { id ->
+                            activeRecordings.any { it.channelId == id }
+                        } == true,
+                        onRecord = { recordSelected() },
+                        dayLabel = dayLabel,
+                        canGoPrevDay = guideDayOffset > 0,
+                        onPrevDay = { viewModel.nudgeGuideDay(-1) },
+                        onNextDay = { viewModel.nudgeGuideDay(1) },
+                        interfaceStyle = interfaceStyle,
                     )
                 }
             }
@@ -908,21 +969,29 @@ private fun QualityChip(label: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun RailEntry(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun RailEntry(
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    palette: InterfacePalette? = null,
+) {
+    val selectedBackground = palette?.selectedChannel ?: MaterialTheme.colorScheme.primaryContainer
+    val selectedText = palette?.onSelected ?: MaterialTheme.colorScheme.onPrimaryContainer
+    val unselectedBackground = palette?.surface ?: MaterialTheme.colorScheme.surface
+    val secondaryText = palette?.mutedText ?: MaterialTheme.colorScheme.onSurfaceVariant
     Text(
         text = label,
         style = MaterialTheme.typography.titleMedium,
         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-        color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
-        else MaterialTheme.colorScheme.onSurfaceVariant,
+        color = if (selected) selectedText else secondaryText,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (selected) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surface,
+                if (selected) selectedBackground else unselectedBackground,
             )
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),

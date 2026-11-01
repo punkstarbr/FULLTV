@@ -60,9 +60,11 @@ fun AppSettingsScreen(onBack: () -> Unit) {
     val settings = remember { AppSettings.get(context) }
     val themeMode by settings.themeMode.collectAsState()
     val channelLayout by settings.channelLayout.collectAsState()
+    val interfaceStyle by settings.interfaceStyle.collectAsState()
     val previewVideo by settings.guidePreviewVideo.collectAsState()
     val previewSound by settings.guidePreviewSound.collectAsState()
     val captions by settings.subtitlesEnabled.collectAsState()
+    val autoPortugueseCaptions by settings.autoPortugueseSubtitles.collectAsState()
     val resumeLast by settings.resumeLastChannel.collectAsState()
     val language by settings.languageTag.collectAsState()
     val liveEnabled by settings.liveEnabled.collectAsState()
@@ -202,6 +204,34 @@ fun AppSettingsScreen(onBack: () -> Unit) {
 
         SettingsSection(stringResource(R.string.settings_section_guide)) {
             Text(
+                stringResource(R.string.settings_interface_style_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                stringResource(R.string.settings_interface_style_desc),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ThemeOption(stringResource(R.string.settings_interface_current), interfaceStyle == AppSettings.InterfaceStyle.CURRENT) {
+                settings.setInterfaceStyle(AppSettings.InterfaceStyle.CURRENT)
+            }
+            ThemeOption(stringResource(R.string.settings_interface_player_zapping), interfaceStyle == AppSettings.InterfaceStyle.PLAYER_ZAPPING) {
+                settings.setInterfaceStyle(AppSettings.InterfaceStyle.PLAYER_ZAPPING)
+            }
+            ThemeOption(stringResource(R.string.settings_interface_classic_epg), interfaceStyle == AppSettings.InterfaceStyle.CLASSIC_EPG) {
+                settings.setInterfaceStyle(AppSettings.InterfaceStyle.CLASSIC_EPG)
+            }
+            ThemeOption(stringResource(R.string.settings_interface_portal), interfaceStyle == AppSettings.InterfaceStyle.CATEGORY_PORTAL) {
+                settings.setInterfaceStyle(AppSettings.InterfaceStyle.CATEGORY_PORTAL)
+            }
+            ThemeOption(stringResource(R.string.settings_interface_modern_epg), interfaceStyle == AppSettings.InterfaceStyle.MODERN_EPG) {
+                settings.setInterfaceStyle(AppSettings.InterfaceStyle.MODERN_EPG)
+            }
+            ThemeOption(stringResource(R.string.settings_interface_retro_epg), interfaceStyle == AppSettings.InterfaceStyle.RETRO_EPG) {
+                settings.setInterfaceStyle(AppSettings.InterfaceStyle.RETRO_EPG)
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
                 stringResource(R.string.settings_channel_layout_title),
                 style = MaterialTheme.typography.titleMedium,
             )
@@ -236,6 +266,12 @@ fun AppSettingsScreen(onBack: () -> Unit) {
                 subtitle = stringResource(R.string.settings_subtitles_subtitle),
                 checked = captions,
                 onToggle = settings::setSubtitlesEnabled,
+            )
+            ToggleRow(
+                title = stringResource(R.string.settings_ai_subtitles_title),
+                subtitle = stringResource(R.string.settings_ai_subtitles_subtitle),
+                checked = autoPortugueseCaptions,
+                onToggle = settings::setAutoPortugueseSubtitles,
             )
             ToggleRow(
                 title = stringResource(R.string.settings_resume_title),

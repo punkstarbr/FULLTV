@@ -15,6 +15,7 @@ import app.opentv.data.repo.EpgRepository
 import app.opentv.data.repo.RecordingRepository
 import app.opentv.data.repo.ReminderRepository
 import app.opentv.data.repo.SourceRepository
+import app.opentv.player.StreamlinkResolver
 import app.opentv.recording.RecordingEngine
 import java.util.concurrent.TimeUnit
 import okhttp3.OkHttpClient
@@ -74,6 +75,9 @@ object ServiceLocator {
                 .build()
         }
 
+        /** Bundled YouTube live resolver; Python/Streamlink starts only on the first @handle tune. */
+        val streamlinkResolver: StreamlinkResolver by lazy { StreamlinkResolver(appContext) }
+
         val xtreamApi: XtreamApi by lazy { XtreamApi(httpClient) }
 
         /** Stalker / Ministra portal client (MAC handshake + create_link). */
@@ -112,6 +116,7 @@ object ServiceLocator {
                 sourceDao = database.sources(),
                 api = xtreamApi,
                 http = httpClient,
+                settings = settings,
             )
         }
 

@@ -37,6 +37,8 @@ import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -102,16 +104,24 @@ import app.opentv.core.findActivity
 import app.opentv.core.requestIgnoreBatteryOptimizations
 import app.opentv.data.model.Channel
 import app.opentv.data.model.shownName
+import app.opentv.player.AutoPortugueseSubtitleEngine
+import app.opentv.player.AutoPortugueseSubtitleState
+import app.opentv.player.AutoSubtitlePhase
 import app.opentv.player.PlaybackQueue
 import app.opentv.player.PlayerController
+import app.opentv.player.YouTubeChannelUrl
 import app.opentv.ui.RecordingBackgroundDialog
 import app.opentv.ui.RecordingBackgroundPrompt
+import app.opentv.ui.interfacePalette
 import coil.compose.AsyncImage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -137,14 +147,33 @@ fun PlayerScreen(
     val view = LocalView.current
     val graph = remember { ServiceLocator.get(context) }
     val settings = remember { graph.settings }
+    val interfaceStyle by settings.interfaceStyle.collectAsState()
+    val interfaceColors = interfacePalette(interfaceStyle, MaterialTheme.colorScheme)
+    val controlAccent = interfaceColors.accent
+    val controlOnAccent = when (interfaceStyle) {
+        app.opentv.core.AppSettings.InterfaceStyle.CLASSIC_EPG,
+        app.opentv.core.AppSettings.InterfaceStyle.RETRO_EPG,
+        -> interfaceColors.onSelected
+        else -> Color.White
+    }
     val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
     val subtitlesDefault by settings.subtitlesEnabled.collectAsState()
+    val aiSubtitleEngine = remember {
+        if (settings.autoPortugueseSubtitles.value) AutoPortugueseSubtitleEngine(context) else null
+    }
+    val aiSubtitleStateFlow = remember(aiSubtitleEngine) {
+        aiSubtitleEngine?.state ?: MutableStateFlow(AutoPortugueseSubtitleState())
+    }
+    val aiSubtitleState by aiSubtitleStateFlow.collectAsState()
+    val aiCaptionsEnabled = aiSubtitleEngine != null
+    LaunchedEffect(aiSubtitleEngine) { aiSubtitleEngine?.start() }
     val controller = remember {
         PlayerController(
             context, scope, graph.streamingHttpClient,
             subtitlesEnabled = settings.subtitlesEnabled.value,
             // Opt-in shallow DVR so the transport's pause/rewind actually holds on a live stream.
             dvr = settings.livePauseEnabled.value,
+            audioBufferSink = aiSubtitleEngine?.audioBufferSink,
         )
     }
     val state by controller.state.collectAsState()
@@ -164,12 +193,15 @@ fun PlayerScreen(
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             view.keepScreenOn = false
             controller.release()
+            aiSubtitleEngine?.close()
             scope.cancel()
         }
     }
 
     var variants by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var currentId by remember { mutableStateOf<Long?>(null) }
+    var currentChannel by remember { mutableStateOf<Channel?>(null) }
+    var tuneJob by remember { mutableStateOf<Job?>(null) }
     // The channel we were on before this one — powers the "Last channel" recall in the list.
     var previousId by remember { mutableStateOf<Long?>(null) }
     // Digits typed on the remote accumulate here, then jump to that channel number after a beat.
@@ -210,6 +242,14 @@ fun PlayerScreen(
     // The channel list you were browsing, for channel up/down and the in-player list. Snapshotted
     // on entry so it doesn't shift under you mid-session.
     val queue = remember { PlaybackQueue.items }
+    val zappingCarouselState = rememberLazyListState()
+
+    LaunchedEffect(currentId, interfaceStyle, queue.size) {
+        if (interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.PLAYER_ZAPPING) {
+            val index = queue.indexOfFirst { it.id == currentId }
+            if (index >= 0) runCatching { zappingCarouselState.animateScrollToItem(index) }
+        }
+    }
 
     fun reveal() {
         controlsVisible = true
@@ -217,22 +257,48 @@ fun PlayerScreen(
     }
 
     fun tuneTo(channel: Channel) {
+        tuneJob?.cancel()
         currentId = channel.id
+        currentChannel = channel
         paused = false
         settings.lastChannelId = channel.id
-        scope.launch {
+        tuneJob = scope.launch {
             val source = graph.sourceRepository.byId(channel.sourceId)
-            // Xtream/M3U carry a ready URL; a Stalker channel's URL is minted here from its cmd.
-            val url = graph.catalogRepository.resolvePlaybackUrl(channel, source)
-            controller.play(
-                PlayerController.Request(
-                    url = url,
-                    title = channel.shownName,
-                    userAgent = source?.userAgent ?: "OpenTV/0.1 (Android)",
-                    isLive = true,
-                ),
-                debounce = false,
-            )
+            val youtubeLiveUrl = YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl)
+            if (youtubeLiveUrl != null) {
+                controller.beginExternalResolution(channel.shownName)
+                try {
+                    val resolved = graph.streamlinkResolver.resolveBest(youtubeLiveUrl)
+                    controller.play(
+                        PlayerController.Request(
+                            url = resolved.url,
+                            title = channel.shownName,
+                            userAgent = resolved.userAgent,
+                            isLive = true,
+                        ),
+                        debounce = false,
+                    )
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    controller.failExternalResolution(
+                        channel.shownName,
+                        context.getString(R.string.player_youtube_unavailable),
+                    )
+                }
+            } else {
+                // Xtream/M3U carry a ready URL; a Stalker channel's URL is minted here from its cmd.
+                val url = graph.catalogRepository.resolvePlaybackUrl(channel, source)
+                controller.play(
+                    PlayerController.Request(
+                        url = url,
+                        title = channel.shownName,
+                        userAgent = source?.userAgent ?: "OpenTV/0.1 (Android)",
+                        isLive = true,
+                    ),
+                    debounce = false,
+                )
+            }
         }
     }
 
@@ -378,15 +444,27 @@ fun PlayerScreen(
                     // Channel up/down works whether or not the bar is showing — this remote has no
                     // CH+/CH- keys, so up/down IS the channel changer. Each zap flashes the bar as a
                     // channel banner, then it auto-hides.
-                    event.key == Key.DirectionUp || event.key == Key.ChannelUp -> { zapBy(-1); reveal(); true }
-                    event.key == Key.DirectionDown || event.key == Key.ChannelDown -> { zapBy(1); reveal(); true }
+                    (event.key == Key.DirectionUp || event.key == Key.ChannelUp) &&
+                        !(controlsVisible && interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.PLAYER_ZAPPING) -> {
+                        zapBy(-1); reveal(); true
+                    }
+                    (event.key == Key.DirectionDown || event.key == Key.ChannelDown) &&
+                        !(controlsVisible && interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.PLAYER_ZAPPING) -> {
+                        zapBy(1); reveal(); true
+                    }
                     // With the bar up, left/right drive its buttons; let them through.
                     controlsVisible -> {
                         interaction++
                         false
                     }
                     // Immersive: left opens the channel list, right the quality picker.
-                    event.key == Key.DirectionLeft -> { if (queue.isNotEmpty()) channelListVisible = true; true }
+                    event.key == Key.DirectionLeft -> {
+                        if (queue.isNotEmpty()) {
+                            if (interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.PLAYER_ZAPPING) reveal()
+                            else channelListVisible = true
+                        }
+                        true
+                    }
                     event.key == Key.DirectionRight -> {
                         if (variants.size > 1) { reveal(); panel = Panel.QUALITY }; true
                     }
@@ -415,6 +493,51 @@ fun PlayerScreen(
             },
             update = { it.resizeMode = resizeMode },
         )
+
+        if (aiCaptionsEnabled && !inPip) {
+            val subtitleStatus = when (aiSubtitleState.phase) {
+                AutoSubtitlePhase.DOWNLOADING_SPEECH_MODEL -> {
+                    val progress = aiSubtitleState.progressPercent?.let { " $it%" }.orEmpty()
+                    stringResource(R.string.player_ai_subtitles_downloading, progress)
+                }
+                AutoSubtitlePhase.LOADING_SPEECH_MODEL -> stringResource(R.string.player_ai_subtitles_loading)
+                AutoSubtitlePhase.WAITING_FOR_AUDIO -> stringResource(R.string.player_ai_subtitles_waiting)
+                AutoSubtitlePhase.TRANSCRIBING -> stringResource(R.string.player_ai_subtitles_processing)
+                AutoSubtitlePhase.DOWNLOADING_TRANSLATION_MODEL -> stringResource(R.string.player_ai_subtitles_translating)
+                AutoSubtitlePhase.UNSUPPORTED_DEVICE -> stringResource(R.string.player_ai_subtitles_unsupported)
+                AutoSubtitlePhase.ERROR -> stringResource(R.string.player_ai_subtitles_error)
+                AutoSubtitlePhase.OFF, AutoSubtitlePhase.READY -> ""
+            }
+            val displayedCaption = aiSubtitleState.caption.ifBlank { subtitleStatus }
+            if (displayedCaption.isNotBlank()) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(
+                            start = 28.dp,
+                            end = 28.dp,
+                            bottom = if (controlsVisible) 182.dp else 56.dp,
+                        )
+                        .widthIn(max = 1_080.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black.copy(alpha = 0.82f))
+                        .padding(horizontal = 22.dp, vertical = 14.dp),
+                ) {
+                    Text(
+                        displayedCaption,
+                        color = Color.White,
+                        style = if (aiSubtitleState.caption.isNotBlank()) {
+                            MaterialTheme.typography.headlineSmall
+                        } else {
+                            MaterialTheme.typography.labelLarge
+                        },
+                        textAlign = TextAlign.Center,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
 
         // The channel number as you type it, top-right, until it resolves.
         if (numberEntry.isNotEmpty() && !inPip) {
@@ -460,7 +583,14 @@ fun PlayerScreen(
                             textAlign = TextAlign.Center,
                         )
                         Spacer(Modifier.height(24.dp))
-                        Button(onClick = { controller.retry() }) { Text(stringResource(R.string.common_try_again)) }
+                        Button(onClick = {
+                            val channel = currentChannel
+                            if (channel != null && YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl) != null) {
+                                tuneTo(channel)
+                            } else {
+                                controller.retry()
+                            }
+                        }) { Text(stringResource(R.string.common_try_again)) }
                     }
                 }
             }
@@ -524,7 +654,13 @@ fun PlayerScreen(
 
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (controller.isSeekable) {
-                        BarChip(Icons.Filled.FastRewind, stringResource(R.string.player_rewind), false) {
+                        BarChip(
+                            icon = Icons.Filled.FastRewind,
+                            label = stringResource(R.string.player_rewind),
+                            selected = false,
+                            accentColor = controlAccent,
+                            onAccentColor = controlOnAccent,
+                        ) {
                             controller.seekBackward(); interaction++
                         }
                         Spacer(Modifier.width(10.dp))
@@ -534,6 +670,8 @@ fun PlayerScreen(
                         label = if (paused) stringResource(R.string.common_play) else stringResource(R.string.player_pause),
                         selected = false,
                         focusRequester = barFocus,
+                        accentColor = controlAccent,
+                        onAccentColor = controlOnAccent,
                     ) {
                         paused = !paused
                         controller.player.playWhenReady = !paused
@@ -541,42 +679,98 @@ fun PlayerScreen(
                     }
                     if (controller.isSeekable) {
                         Spacer(Modifier.width(10.dp))
-                        BarChip(Icons.Filled.FastForward, stringResource(R.string.player_forward), false) {
+                        BarChip(
+                            icon = Icons.Filled.FastForward,
+                            label = stringResource(R.string.player_forward),
+                            selected = false,
+                            accentColor = controlAccent,
+                            onAccentColor = controlOnAccent,
+                        ) {
                             controller.seekForward(); interaction++
                         }
                     }
 
                     Spacer(Modifier.width(20.dp))
-                    BarChip(Icons.Filled.Subtitles, stringResource(R.string.player_subtitles), panel == Panel.SUBTITLES) {
+                    BarChip(
+                        icon = Icons.Filled.Subtitles,
+                        label = stringResource(R.string.player_subtitles),
+                        selected = panel == Panel.SUBTITLES,
+                        accentColor = controlAccent,
+                        onAccentColor = controlOnAccent,
+                    ) {
                         panel = if (panel == Panel.SUBTITLES) Panel.NONE else Panel.SUBTITLES; interaction++
                     }
                     Spacer(Modifier.width(10.dp))
-                    BarChip(Icons.Filled.Audiotrack, stringResource(R.string.player_audio), panel == Panel.AUDIO) {
+                    BarChip(
+                        icon = Icons.Filled.Audiotrack,
+                        label = stringResource(R.string.player_audio),
+                        selected = panel == Panel.AUDIO,
+                        accentColor = controlAccent,
+                        onAccentColor = controlOnAccent,
+                    ) {
                         panel = if (panel == Panel.AUDIO) Panel.NONE else Panel.AUDIO; interaction++
                     }
                     if (variants.size > 1) {
                         Spacer(Modifier.width(10.dp))
-                        BarChip(Icons.Filled.HighQuality, stringResource(R.string.player_quality), panel == Panel.QUALITY) {
+                        BarChip(
+                            icon = Icons.Filled.HighQuality,
+                            label = stringResource(R.string.player_quality),
+                            selected = panel == Panel.QUALITY,
+                            accentColor = controlAccent,
+                            onAccentColor = controlOnAccent,
+                        ) {
                             panel = if (panel == Panel.QUALITY) Panel.NONE else Panel.QUALITY; interaction++
                         }
                     }
                     Spacer(Modifier.width(10.dp))
-                    BarChip(Icons.Filled.AspectRatio, stringResource(R.string.player_aspect), panel == Panel.ASPECT) {
+                    BarChip(
+                        icon = Icons.Filled.AspectRatio,
+                        label = stringResource(R.string.player_aspect),
+                        selected = panel == Panel.ASPECT,
+                        accentColor = controlAccent,
+                        onAccentColor = controlOnAccent,
+                    ) {
                         panel = if (panel == Panel.ASPECT) Panel.NONE else Panel.ASPECT; interaction++
                     }
-                    Spacer(Modifier.width(10.dp))
-                    val recordingThis = activeRecordings.any { it.channelId == currentId }
-                    BarChip(
-                        icon = Icons.Filled.FiberManualRecord,
-                        label = if (recordingThis) stringResource(R.string.common_stop) else stringResource(R.string.player_record),
-                        selected = recordingThis,
-                        iconTint = Color(0xFFE53935),
-                    ) { toggleRecord() }
+                    if (currentChannel?.let { YouTubeChannelUrl.asLiveUrlOrNull(it.streamUrl) } == null) {
+                        Spacer(Modifier.width(10.dp))
+                        val recordingThis = activeRecordings.any { it.channelId == currentId }
+                        BarChip(
+                            icon = Icons.Filled.FiberManualRecord,
+                            label = if (recordingThis) stringResource(R.string.common_stop) else stringResource(R.string.player_record),
+                            selected = recordingThis,
+                            iconTint = Color(0xFFE53935),
+                            accentColor = controlAccent,
+                            onAccentColor = controlOnAccent,
+                        ) { toggleRecord() }
+                    }
                     if (pipSupported) {
                         Spacer(Modifier.width(10.dp))
-                        BarChip(Icons.Filled.PictureInPictureAlt, stringResource(R.string.player_pop_out), false) {
+                        BarChip(
+                            icon = Icons.Filled.PictureInPictureAlt,
+                            label = stringResource(R.string.player_pop_out),
+                            selected = false,
+                            accentColor = controlAccent,
+                            onAccentColor = controlOnAccent,
+                        ) {
                             (context.findActivity() as? app.opentv.MainActivity)?.enterPipNow()
                             interaction++
+                        }
+                    }
+                }
+                if (interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.PLAYER_ZAPPING && queue.isNotEmpty()) {
+                    Spacer(Modifier.height(14.dp))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        items(queue, key = { it.id }) { item ->
+                            ZappingChannelCard(
+                                item = item,
+                                selected = item.id == currentId,
+                                accent = controlAccent,
+                                onAccent = controlOnAccent,
+                            ) {
+                                playChannelId(item.id)
+                                reveal()
+                            }
                         }
                     }
                 }
@@ -585,7 +779,8 @@ fun PlayerScreen(
 
         // Left-side transparent channel list — d-pad Left opens it, pick a channel to switch.
         AnimatedVisibility(
-            visible = channelListVisible && !inPip,
+            visible = channelListVisible && !inPip &&
+                interfaceStyle != app.opentv.core.AppSettings.InterfaceStyle.PLAYER_ZAPPING,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.CenterStart),
@@ -862,21 +1057,73 @@ private fun OptionRow(
 }
 
 @Composable
+private fun ZappingChannelCard(
+    item: PlaybackQueue.Item,
+    selected: Boolean,
+    accent: Color,
+    onAccent: Color,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    Row(
+        Modifier
+            .width(166.dp)
+            .height(72.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (selected) accent else Color.Black.copy(alpha = 0.72f))
+            .then(
+                if (focused || selected) Modifier.border(
+                    if (focused) 3.dp else 2.dp,
+                    if (focused) Color.White else accent,
+                    RoundedCornerShape(10.dp),
+                ) else Modifier,
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(onClick = onClick)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = item.logoUrl,
+            contentDescription = null,
+            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(6.dp)),
+        )
+        Spacer(Modifier.width(8.dp))
+        Column(Modifier.weight(1f)) {
+            item.number?.let {
+                Text("$it", style = MaterialTheme.typography.labelMedium, color = onAccent, maxLines = 1)
+            }
+            Text(
+                item.name,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (selected) onAccent else Color.White,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
 private fun BarChip(
     icon: ImageVector,
     label: String,
     selected: Boolean,
     focusRequester: FocusRequester? = null,
     iconTint: Color? = null,
+    accentColor: Color? = null,
+    onAccentColor: Color? = null,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val accent = accentColor ?: MaterialTheme.colorScheme.primary
+    val onAccent = onAccentColor ?: MaterialTheme.colorScheme.onPrimary
     val container = when {
-        focused -> MaterialTheme.colorScheme.primary
-        selected -> MaterialTheme.colorScheme.primary.copy(alpha = 0.55f)
+        focused -> accent
+        selected -> accent.copy(alpha = 0.55f)
         else -> Color.White.copy(alpha = 0.14f)
     }
-    val content = if (focused) MaterialTheme.colorScheme.onPrimary else Color.White
+    val content = if (focused) onAccent else Color.White
 
     Row(
         modifier = Modifier
@@ -885,7 +1132,7 @@ private fun BarChip(
             .clip(RoundedCornerShape(12.dp))
             .background(container)
             .then(
-                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
+                if (focused) Modifier.border(2.dp, accent, RoundedCornerShape(12.dp))
                 else Modifier,
             )
             .clickable(onClick = onClick)

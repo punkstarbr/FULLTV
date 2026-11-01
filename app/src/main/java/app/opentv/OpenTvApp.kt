@@ -123,7 +123,7 @@ class OpenTvApp : Application(), ImageLoaderFactory {
             // every hour because VACUUM is I/O-heavy on a Fire TV.
             graph.database.programmes().deleteOutsideWindow(
                 now - app.opentv.data.repo.EpgRepository.RETENTION_PAST_MILLIS,
-                now + app.opentv.data.repo.EpgRepository.RETENTION_FUTURE_MILLIS,
+                now + graph.epgRepository.retentionFutureMillis,
             )
             if (!prefs.getBoolean("storage_cleanup_v2", false)) {
                 val compacted = runCatching {

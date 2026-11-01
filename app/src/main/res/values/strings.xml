@@ -29,11 +29,33 @@
 
     <!-- ============================ Navigation rail ============================ -->
     <string name="nav_live_tv">Live TV</string>
+    <string name="nav_mosaic">Mosaic</string>
     <string name="nav_movies">Movies</string>
     <string name="nav_shows">Shows</string>
     <string name="nav_recordings">Recordings</string>
     <string name="nav_search">Search</string>
     <string name="nav_settings">Settings</string>
+
+    <!-- ============================ Multi-channel mosaic ============================ -->
+    <string name="mosaic_title">Mosaic</string>
+    <string name="mosaic_subtitle">Choose up to four channels to watch at once · %1$d selected</string>
+    <string name="mosaic_choose_channels">Choose channels</string>
+    <string name="mosaic_start">Start mosaic</string>
+    <string name="mosaic_stop">Stop mosaic</string>
+    <string name="mosaic_no_channels">No visible live channels yet. Add or sync a provider first.</string>
+    <string name="mosaic_empty_slot">Choose a channel for this tile</string>
+    <string name="mosaic_change_channel">Change channel</string>
+    <string name="mosaic_fullscreen">Watch full-screen</string>
+    <string name="mosaic_audio_active">Audio active</string>
+    <string name="mosaic_picker_title">Choose channels</string>
+    <string name="mosaic_picker_body">Select up to four channels. Their order determines the tile order.</string>
+    <string name="mosaic_search_channels">Search channels</string>
+    <string name="mosaic_selected_count">%1$d of 4 selected</string>
+    <string name="mosaic_warning_title">Start multiple streams?</string>
+    <string name="mosaic_connection_warning">FullTV will open %1$d live stream(s) at once. Your provider may limit simultaneous connections, stop streams or recordings, or restrict your account. Older TV boxes may also struggle to decode four videos at the same time.</string>
+    <string name="mosaic_recording_warning">There are %1$d active recording(s). Opening more streams could interrupt a recording.</string>
+    <string name="mosaic_warning_continue">Start anyway</string>
+    <string name="mosaic_playback_error">Couldn’t start this channel. Check the source and try again.</string>
 
     <!-- ============================ Live TV guide / home ============================ -->
     <string name="guide_search_channels">🔍  Search channels</string>
@@ -137,7 +159,15 @@
     <string name="player_aspect_stretch">Stretch</string>
     <string name="player_aspect_ratio_title">Aspect ratio</string>
     <string name="player_none_available">None available</string>
+    <string name="player_youtube_unavailable">Couldn’t find a playable live stream for this YouTube channel. Check that it is live and try again.</string>
     <string name="player_subtitles_off">Off</string>
+    <string name="player_ai_subtitles_downloading">Downloading speech model%1$s</string>
+    <string name="player_ai_subtitles_loading">Loading local speech model…</string>
+    <string name="player_ai_subtitles_waiting">Portuguese AI captions are on. Waiting for audio…</string>
+    <string name="player_ai_subtitles_processing">Transcribing speech locally…</string>
+    <string name="player_ai_subtitles_translating">Downloading the translation model…</string>
+    <string name="player_ai_subtitles_error">Automatic captions could not start. Check your connection and available storage.</string>
+    <string name="player_ai_subtitles_unsupported">Automatic captions require an arm64 device with at least 512 MB app memory.</string>
 
     <!-- ============================ Settings hub ============================ -->
     <string name="settings_providers_title">Providers</string>
@@ -194,6 +224,14 @@
     <string name="settings_language_spanish">Español</string>
     <string name="settings_language_note">Sets the app\'s language. The screen reloads when you change it.</string>
     <string name="settings_section_guide">Guide</string>
+    <string name="settings_interface_style_title">Live TV interface</string>
+    <string name="settings_interface_style_desc">Choose a guide and player layout. Movies, shows, recordings and settings keep their current FullTV screens.</string>
+    <string name="settings_interface_current">FullTV (current)</string>
+    <string name="settings_interface_player_zapping">Player with channel carousel</string>
+    <string name="settings_interface_classic_epg">Classic timeline guide</string>
+    <string name="settings_interface_portal">Category portal</string>
+    <string name="settings_interface_modern_epg">Modern TV guide</string>
+    <string name="settings_interface_retro_epg">Classic 4:3 guide</string>
     <string name="settings_channel_layout_title">Channel layout</string>
     <string name="settings_channel_layout_grid">Guide grid (with timeline)</string>
     <string name="settings_channel_layout_list">Simple list</string>
@@ -204,6 +242,8 @@
     <string name="settings_section_playback">Playback</string>
     <string name="settings_subtitles_title">Show subtitles when available</string>
     <string name="settings_subtitles_subtitle">The default for new channels. While watching, the Subtitles button on the player lets you pick a specific track or turn them off.</string>
+    <string name="settings_ai_subtitles_title">Generate Portuguese subtitles with AI</string>
+    <string name="settings_ai_subtitles_subtitle">Uses Whisper on this device, then translates on-device. First use downloads about 78 MB for speech and about 30 MB for translation. Uses extra CPU and memory; supported on arm64 devices with at least 512 MB app memory. Enable before opening a channel.</string>
     <string name="settings_resume_title">Resume last channel on startup</string>
     <string name="settings_resume_subtitle">Open the app straight into the channel you were last watching, instead of the guide. Press Back to reach the guide.</string>
     <string name="settings_sleep_timer">Sleep timer</string>
@@ -288,6 +328,13 @@
     <string name="recset_pad_end">End late</string>
     <string name="recset_pad_end_desc">Keep recording this many minutes after the listed end, so overruns aren\'t cut</string>
     <string name="recset_minutes_short">min</string>
+    <string name="recset_series_lookahead">Series recording lead time</string>
+    <string name="recset_series_lookahead_desc">Keep future guide data and auto-book matching episodes this many days ahead for existing series rules. Availability depends on your EPG; this does not extend a single recording. Refresh below after changing.</string>
+    <string name="recset_days_short">days</string>
+    <string name="recset_schedule_refresh_now">Refresh guide and series schedules</string>
+    <string name="recset_schedule_refreshing">Refreshing guide…</string>
+    <string name="recset_schedule_refreshed">Guide refreshed and series rules checked.</string>
+    <string name="recset_schedule_refresh_failed">Could not refresh the guide. Try again.</string>
     <string name="recset_autoswitch">Auto-switch when recording starts</string>
     <string name="recset_autoswitch_desc">On a single-connection provider, move the screen onto a recording as it starts (with a 30-second warning) so your live stream isn\'t cut off</string>
     <string name="recset_livepause">Pause &amp; rewind live TV</string>
@@ -342,6 +389,17 @@
     <string name="sync_nas_uploaded">Saved this device to the NAS. No other devices have synced here yet.</string>
     <string name="sync_nas_failed">Couldn\'t reach your NAS. Check it\'s on and the details in Recording settings are right.</string>
     <string name="sync_nas_auto">Auto-sync when the app opens</string>
+    <string name="sync_backup_title">Device backup</string>
+    <string name="sync_backup_desc">Export a password-encrypted file to move sources, credentials, settings, favourites and watch history to another device. Keep the passphrase separate. Video recordings and cached catalogues are not copied; restored sources are refreshed over the internet. USB folder permissions must be chosen again on the new device.</string>
+    <string name="sync_backup_passphrase">Backup passphrase (8+ characters)</string>
+    <string name="sync_backup_export">Export backup</string>
+    <string name="sync_backup_import">Import backup</string>
+    <string name="sync_backup_exporting">Encrypting and saving backup…</string>
+    <string name="sync_backup_exported">Encrypted backup saved.</string>
+    <string name="sync_backup_restoring">Restoring sources and refreshing catalogues…</string>
+    <string name="sync_backup_restored">Restored %1$d source(s); merged %2$d item(s).</string>
+    <string name="sync_backup_restored_warnings">Restored %1$d source(s) with %2$d sync issue(s); merged %3$d item(s).</string>
+    <string name="sync_backup_failed">Backup operation failed. Check the passphrase, selected file, and network connection.</string>
 
     <!-- ============================ About ============================ -->
     <string name="about_title">About FullTV</string>
@@ -529,4 +587,13 @@
     <string name="recset_container_ts">TS (raw)</string>
     <string name="recset_container_mp4">MP4 (remux)</string>
     <string name="rec_notification_converting">Converting recording to MP4…</string>
+    <string name="portal_live_title">Live TV</string>
+    <string name="portal_hero_title">Your TV, organized</string>
+    <string name="portal_hero_desc">Choose a category, open the guide, or start a favourite channel.</string>
+    <string name="portal_open_guide">Open guide</string>
+    <string name="portal_categories">Categories</string>
+    <string name="portal_favourites">Favourite channels</string>
+    <string name="portal_no_favourites">Mark channels as favourites in the guide to pin them here.</string>
+    <string name="portal_no_channels">No channel categories yet. Add or refresh a source, then return here.</string>
+    <string name="portal_no_source">Add an IPTV source to begin building your channel categories.</string>
 </resources>

@@ -38,6 +38,9 @@ interface SourceDao {
     @Query("SELECT * FROM sources ORDER BY id")
     fun observeAll(): Flow<List<Source>>
 
+    @Query("SELECT * FROM sources ORDER BY id")
+    suspend fun all(): List<Source>
+
     @Query("SELECT * FROM sources WHERE enabled = 1 ORDER BY id")
     suspend fun enabled(): List<Source>
 

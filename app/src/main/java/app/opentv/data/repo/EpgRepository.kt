@@ -6,6 +6,7 @@
 package app.opentv.data.repo
 
 import android.util.Log
+import app.opentv.core.AppSettings
 import app.opentv.data.db.ChannelDao
 import app.opentv.data.db.EpgChannelAliasDao
 import app.opentv.data.db.EpgFeedDao
@@ -64,7 +65,12 @@ class EpgRepository(
     private val sourceDao: SourceDao,
     private val api: XtreamApi,
     private val http: OkHttpClient,
+    private val settings: AppSettings,
 ) {
+
+    /** Future guide window used both while parsing feeds and while pruning old database rows. */
+    val retentionFutureMillis: Long
+        get() = TimeUnit.DAYS.toMillis(settings.recordScheduleLookaheadDays.value.toLong())
 
     data class SyncSummary(
         val feedsSucceeded: Int,
@@ -189,6 +195,7 @@ class EpgRepository(
     /** Downloads every enabled feed, merges, prunes, and re-runs the matcher. */
     suspend fun syncAll(nowUtcMillis: Long, force: Boolean = false): SyncSummary =
         withContext(Dispatchers.IO) {
+            val futureCutoffMillis = nowUtcMillis + retentionFutureMillis
             ensureFeeds()
             maybeAutoEnableRegionalFeed()
 
@@ -201,7 +208,7 @@ class EpgRepository(
                     succeeded++
                     continue
                 }
-                when (val result = syncFeed(feed, nowUtcMillis)) {
+                when (val result = syncFeed(feed, nowUtcMillis, futureCutoffMillis)) {
                     is FeedResult.Success -> {
                         succeeded++
                         written += result.programmes
@@ -225,7 +232,7 @@ class EpgRepository(
                 programmeDao.deleteEndedBefore(nowUtcMillis - RETENTION_PAST_MILLIS)
                 programmeDao.deleteOutsideWindow(
                     pastCutoffMillis = nowUtcMillis - RETENTION_PAST_MILLIS,
-                    futureCutoffMillis = nowUtcMillis + RETENTION_FUTURE_MILLIS,
+                    futureCutoffMillis = futureCutoffMillis,
                 )
             }
 
@@ -238,7 +245,11 @@ class EpgRepository(
         data class Failed(val reason: String) : FeedResult
     }
 
-    private suspend fun syncFeed(feed: EpgFeed, nowUtcMillis: Long): FeedResult {
+    private suspend fun syncFeed(
+        feed: EpgFeed,
+        nowUtcMillis: Long,
+        futureCutoffMillis: Long,
+    ): FeedResult {
         val batch = ArrayList<Programme>(BATCH_SIZE)
         val aliases = ArrayList<EpgChannelAlias>(256)
         var written = 0
@@ -265,7 +276,7 @@ class EpgRepository(
                         // Skip anything that finished before the retention cut-off; no point
                         // writing rows we are about to prune.
                         if (programme.endUtcMillis >= nowUtcMillis - RETENTION_PAST_MILLIS &&
-                            programme.startUtcMillis <= nowUtcMillis + RETENTION_FUTURE_MILLIS
+                            programme.startUtcMillis <= futureCutoffMillis
                         ) {
                             batch += programme
                             if (batch.size >= BATCH_SIZE) {
@@ -423,7 +434,7 @@ class EpgRepository(
         /** Keep finished programmes for a day so "what was on" still works. */
         val RETENTION_PAST_MILLIS: Long = TimeUnit.DAYS.toMillis(1)
 
-        /** Keep two days ahead: enough for the guide and short scheduled recordings, not whole archives. */
+        /** Default/legacy value; active sync uses [retentionFutureMillis] from AppSettings. */
         val RETENTION_FUTURE_MILLIS: Long = TimeUnit.DAYS.toMillis(2)
 
         /** Feeds publish rolling windows; refreshing more often than this is rude. */

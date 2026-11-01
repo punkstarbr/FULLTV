@@ -47,12 +47,15 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.media3.common.util.UnstableApi
 import app.opentv.R
+import app.opentv.core.AppSettings
 import app.opentv.data.model.shownName
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import app.opentv.ui.ChannelsViewModel
+import app.opentv.ui.interfacePalette
 import coil.compose.AsyncImage
+import app.opentv.player.YouTubeChannelUrl
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -91,11 +94,16 @@ fun GuidePreview(
     onPrevDay: () -> Unit = {},
     onNextDay: () -> Unit = {},
     modifier: Modifier = Modifier,
+    interfaceStyle: AppSettings.InterfaceStyle = AppSettings.InterfaceStyle.CURRENT,
 ) {
+    val palette = interfacePalette(interfaceStyle, MaterialTheme.colorScheme)
+    val compactBottomPanel = interfaceStyle == AppSettings.InterfaceStyle.CLASSIC_EPG
+    val previewModifier = if (interfaceStyle == AppSettings.InterfaceStyle.CURRENT) modifier
+        else modifier.background(palette.surface)
     Row(
-        modifier
+        previewModifier
             .fillMaxWidth()
-            .height(212.dp)
+            .height(if (compactBottomPanel) 132.dp else 212.dp)
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
         // ---- Logo / "watch" card ----------------------------------------------------------
@@ -177,6 +185,7 @@ fun GuidePreview(
                     Text(
                         dayLabel,
                         style = MaterialTheme.typography.labelLarge,
+                        color = palette.text,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1,
                     )
@@ -188,7 +197,7 @@ fun GuidePreview(
                     }
                 }
                 Spacer(Modifier.weight(1f))
-                if (row != null) {
+                if (row != null && YouTubeChannelUrl.asLiveUrlOrNull(row.primary.streamUrl) == null) {
                     IconButton(onClick = onRecord) {
                         // Red throughout — the record convention — but the glyph switches to a
                         // stop square while a recording is running, so a press visibly does
@@ -223,6 +232,7 @@ fun GuidePreview(
                 Text(
                     row.primary.shownName,
                     style = MaterialTheme.typography.headlineSmall,
+                    color = palette.text,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -232,7 +242,7 @@ fun GuidePreview(
                     Text(
                         stringResource(R.string.guide_qualities_count, row.variants.size),
                         style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = palette.accent,
                     )
                 }
             }
@@ -244,6 +254,7 @@ fun GuidePreview(
                 Text(
                     "${formatTime(nowProg.startUtcMillis)}–${formatTime(nowProg.endUtcMillis)}   ${nowProg.title}",
                     style = MaterialTheme.typography.titleMedium,
+                    color = palette.text,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -252,13 +263,14 @@ fun GuidePreview(
                 LinearProgressIndicator(
                     progress = { nowProg.progressAt(nowMillis) },
                     modifier = Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)),
+                    color = palette.progress,
                 )
                 nowProg.description?.takeIf { it.isNotBlank() }?.let { synopsis ->
                     Spacer(Modifier.height(8.dp))
                     Text(
                         synopsis,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = palette.mutedText,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
                     )
@@ -267,7 +279,7 @@ fun GuidePreview(
                 Text(
                     stringResource(R.string.guide_no_info_channel),
                     style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = palette.mutedText,
                 )
             }
 
@@ -276,7 +288,7 @@ fun GuidePreview(
                 Text(
                     stringResource(R.string.guide_next_prefix, formatTime(next.startUtcMillis), next.title),
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    color = palette.mutedText.copy(alpha = 0.8f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )

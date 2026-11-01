@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.11.14
+
+- **YouTube live channels:** bundle Streamlink and resolve `youtube.com/@handle` links to the
+  current live stream before playback; the existing player handles the resulting media.
+- **Automatic Portuguese subtitles (opt-in):** locally transcribe live PCM with Whisper and
+  translate the recognized text on-device. Model downloads are required; playback audio is not uploaded.
+- **Series recording horizon:** configure upcoming EPG scan/retention from 2 to 14 days and refresh
+  the guide/rescan series rules from Recording settings.
+- **TV interface options:** six visual presets, channel-zapping style, category portal, and a
+  four-channel mosaic with per-tile audio control.
+- **Device backup:** export/import an AES-256-GCM encrypted `.fulltv` file protected by a passphrase,
+  carrying sources, credentials, portable settings and syncable user state. Video files and USB
+  folder grants are not copied.
+- **Minimum Android version:** raised to Android 7.0/API 24 for the embedded Python and native
+  speech runtime; older Android 6/API 23 devices can no longer install this build.
+
 ## 0.11.10
 
 - **Fire TV: app row fix, take two.** v0.11.9 replaced the placeholder artwork but the stick still

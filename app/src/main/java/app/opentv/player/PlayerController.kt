@@ -18,7 +18,11 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
@@ -84,6 +88,7 @@ class PlayerController(
      * is a network round-trip — rides over the gaps instead of stalling on every one.
      */
     private val liveRecording: Boolean = false,
+    private val audioBufferSink: TeeAudioProcessor.AudioBufferSink? = null,
 ) {
 
     /** Channel-surf debounce for this controller — longer for the preview so browsing is calm. */
@@ -179,7 +184,23 @@ class PlayerController(
             .build()
     }
 
-    val player: ExoPlayer = ExoPlayer.Builder(context)
+    private val renderersFactory = audioBufferSink?.let { sink ->
+        object : DefaultRenderersFactory(context) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioOutputPlaybackParams: Boolean,
+            ): AudioSink? = DefaultAudioSink.Builder(context)
+                .setEnableFloatOutput(false)
+                .setAudioProcessors(arrayOf(TeeAudioProcessor(sink)))
+                .build()
+        }
+    }
+
+    private val playerBuilder = renderersFactory?.let { ExoPlayer.Builder(context, it) }
+        ?: ExoPlayer.Builder(context)
+
+    val player: ExoPlayer = playerBuilder
         .setSeekBackIncrementMs(SEEK_INCREMENT_MILLIS)
         .setSeekForwardIncrementMs(SEEK_INCREMENT_MILLIS)
         .setMediaSourceFactory(
@@ -302,6 +323,23 @@ class PlayerController(
 
     fun retry() {
         current?.let { play(it, debounce = false) }
+    }
+
+    /** Stops the previous tune and keeps the normal buffering UI visible while a URL is resolved. */
+    fun beginExternalResolution(title: String) {
+        switchJob?.cancel()
+        current = null
+        consecutiveFailures = 0
+        player.stop()
+        player.clearMediaItems()
+        _state.value = State.Buffering(title)
+    }
+
+    /** Reports a resolver failure; the owning screen is responsible for retrying the resolution. */
+    fun failExternalResolution(title: String, message: String) {
+        switchJob?.cancel()
+        current = null
+        _state.value = State.Error(title, message, canRetry = true)
     }
 
     /**

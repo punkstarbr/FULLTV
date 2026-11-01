@@ -5,6 +5,9 @@
  */
 package app.opentv.ui.settings
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,6 +17,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -24,6 +28,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -31,18 +36,24 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import app.opentv.backup.BackupTransfer
 import app.opentv.R
+import app.opentv.core.ServiceLocator
 import app.opentv.sync.SyncServer
 import app.opentv.ui.SyncViewModel
+import kotlinx.coroutines.launch
 
 /**
  * Local watch-history sync between two OpenTV devices on the same wifi. No servers of ours: one
@@ -78,6 +89,7 @@ fun SyncScreen(
             ModeChip(stringResource(R.string.sync_share_from_here), mode == Mode.SHARE) { mode = Mode.SHARE }
             ModeChip(stringResource(R.string.sync_receive), mode == Mode.RECEIVE) { mode = Mode.RECEIVE }
             ModeChip(stringResource(R.string.sync_nas), mode == Mode.NAS) { mode = Mode.NAS }
+            ModeChip(stringResource(R.string.sync_backup_title), mode == Mode.BACKUP) { mode = Mode.BACKUP }
         }
         Spacer(Modifier.height(20.dp))
 
@@ -85,11 +97,116 @@ fun SyncScreen(
             Mode.SHARE -> SharePane(viewModel)
             Mode.RECEIVE -> ReceivePane(viewModel)
             Mode.NAS -> NasPane(viewModel)
+            Mode.BACKUP -> BackupPane()
         }
     }
 }
 
-private enum class Mode { SHARE, RECEIVE, NAS }
+private enum class Mode { SHARE, RECEIVE, NAS, BACKUP }
+
+@Composable
+private fun BackupPane() {
+    val context = LocalContext.current
+    val graph = remember { ServiceLocator.get(context) }
+    val transfer = remember { BackupTransfer(context.applicationContext, graph) }
+    val scope = rememberCoroutineScope()
+    var passphrase by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var status by remember { mutableStateOf<String?>(null) }
+
+    val exportLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                busy = true
+                status = context.getString(R.string.sync_backup_exporting)
+                try {
+                    transfer.export(uri, passphrase)
+                    status = context.getString(R.string.sync_backup_exported)
+                    passphrase = ""
+                } catch (_: Exception) {
+                    status = context.getString(R.string.sync_backup_failed)
+                } finally {
+                    busy = false
+                }
+            }
+        }
+    }
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri: Uri? ->
+        if (uri != null) {
+            scope.launch {
+                busy = true
+                status = context.getString(R.string.sync_backup_restoring)
+                try {
+                    val result = transfer.restore(uri, passphrase)
+                    status = if (result.syncFailures == 0) {
+                        context.getString(
+                            R.string.sync_backup_restored,
+                            result.sourcesImported,
+                            result.mergedItems,
+                        )
+                    } else {
+                        context.getString(
+                            R.string.sync_backup_restored_warnings,
+                            result.sourcesImported,
+                            result.syncFailures,
+                            result.mergedItems,
+                        )
+                    }
+                    passphrase = ""
+                } catch (_: Exception) {
+                    status = context.getString(R.string.sync_backup_failed)
+                } finally {
+                    busy = false
+                }
+            }
+        }
+    }
+
+    Card {
+        Column(Modifier.padding(20.dp).widthIn(max = 680.dp)) {
+            Text(stringResource(R.string.sync_backup_title), style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.sync_backup_desc),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(16.dp))
+            OutlinedTextField(
+                value = passphrase,
+                onValueChange = { passphrase = it; status = null },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                label = { Text(stringResource(R.string.sync_backup_passphrase)) },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Button(
+                    enabled = !busy && passphrase.length >= 8,
+                    onClick = { exportLauncher.launch("fulltv-backup.fulltv") },
+                ) { Text(stringResource(R.string.sync_backup_export)) }
+                OutlinedButton(
+                    enabled = !busy && passphrase.length >= 8,
+                    onClick = { importLauncher.launch(arrayOf("*/*")) },
+                ) { Text(stringResource(R.string.sync_backup_import)) }
+            }
+            status?.let {
+                Spacer(Modifier.height(12.dp))
+                Text(
+                    it,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (busy) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
 
 @Composable
 private fun SharePane(viewModel: SyncViewModel) {

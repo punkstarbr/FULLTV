@@ -60,6 +60,8 @@ import app.opentv.data.model.Channel
 import app.opentv.data.model.Programme
 import app.opentv.data.model.shownName
 import app.opentv.ui.ChannelsViewModel
+import app.opentv.ui.InterfacePalette
+import app.opentv.ui.interfacePalette
 import coil.compose.AsyncImage
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -96,7 +98,9 @@ fun GuideGrid(
     nowMillis: Long = System.currentTimeMillis(),
     density: AppSettings.GuideDensity = AppSettings.GuideDensity.NORMAL,
     modifier: Modifier = Modifier,
+    interfaceStyle: AppSettings.InterfaceStyle = AppSettings.InterfaceStyle.CURRENT,
 ) {
+    val palette = interfacePalette(interfaceStyle, MaterialTheme.colorScheme)
     val scroll = rememberScrollState()
     val now = nowMillis
     val metrics = remember(density) { guideMetrics(density) }
@@ -119,7 +123,7 @@ fun GuideGrid(
         Column(Modifier.fillMaxSize()) {
             // No pager buttons: the programme blocks are d-pad focusable, so moving right along a row
             // scrolls the whole timeline (header and every row in lock-step) on its own.
-            TimeHeader(windowStartMillis, scroll, metrics)
+            TimeHeader(windowStartMillis, scroll, metrics, palette)
 
             LazyColumn(
                 contentPadding = PaddingValues(bottom = 16.dp),
@@ -140,6 +144,7 @@ fun GuideGrid(
                         onProgramme = { programme -> onProgramme(row, programme) },
                         onToggleFavourite = { onToggleFavourite(row) },
                         onExitLeft = onExitLeftFromChannel,
+                        palette = palette,
                     )
                 }
             }
@@ -163,7 +168,9 @@ fun ChannelList(
     onToggleFavourite: (ChannelsViewModel.Row) -> Unit = {},
     onExitLeftFromChannel: () -> Boolean = { false },
     modifier: Modifier = Modifier,
+    interfaceStyle: AppSettings.InterfaceStyle = AppSettings.InterfaceStyle.CURRENT,
 ) {
+    val palette = interfacePalette(interfaceStyle, MaterialTheme.colorScheme)
     val now = System.currentTimeMillis()
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -179,6 +186,7 @@ fun ChannelList(
                 onFocus = { onFocusRow(row) },
                 onToggleFavourite = { onToggleFavourite(row) },
                 onExitLeft = onExitLeftFromChannel,
+                palette = palette,
             )
         }
     }
@@ -193,6 +201,7 @@ private fun ChannelListRow(
     onFocus: () -> Unit,
     onToggleFavourite: () -> Unit,
     onExitLeft: () -> Boolean,
+    palette: InterfacePalette,
 ) {
     var focused by remember { mutableStateOf(false) }
     Row(
@@ -200,11 +209,10 @@ private fun ChannelListRow(
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surface,
+                if (isSelected) palette.selectedChannel else palette.surface,
             )
             .then(
-                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
+                if (focused) Modifier.border(2.dp, palette.accent, RoundedCornerShape(8.dp))
                 else Modifier,
             )
             // LEFT from a row reopens the collapsed rail, exactly like the grid's channel column.
@@ -308,6 +316,7 @@ private fun TimeHeader(
     windowStartMillis: Long,
     scroll: androidx.compose.foundation.ScrollState,
     metrics: GuideMetrics,
+    palette: InterfacePalette,
 ) {
     Row(Modifier.fillMaxWidth().height(28.dp)) {
         // Empty corner above the channel column.
@@ -315,7 +324,7 @@ private fun TimeHeader(
         Row(
             Modifier
                 .horizontalScroll(scroll)
-                .background(MaterialTheme.colorScheme.surface),
+                .background(palette.surface),
         ) {
             // A label every half hour across the whole window.
             repeat(HOURS_IN_WINDOW * 2) { i ->
@@ -327,7 +336,7 @@ private fun TimeHeader(
                     Text(
                         clockFormat.format(Date(slotStart)),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = palette.mutedText,
                     )
                 }
             }
@@ -350,6 +359,7 @@ private fun GuideRow(
     onProgramme: (Programme) -> Unit,
     onToggleFavourite: () -> Unit = {},
     onExitLeft: () -> Boolean = { false },
+    palette: InterfacePalette,
 ) {
     // Focus (the d-pad border) just moves the highlight. Selection (the filled cell) is the
     // channel the preview is playing — it only changes when you press OK.
@@ -367,12 +377,11 @@ private fun GuideRow(
                 .fillMaxSize()
                 .clip(RoundedCornerShape(8.dp))
                 .background(
-                    if (isSelected) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surface,
+                    if (isSelected) palette.selectedChannel else palette.surface,
                 )
                 .then(
                     if (focused) Modifier.border(
-                        2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp),
+                        2.dp, palette.accent, RoundedCornerShape(8.dp),
                     ) else Modifier,
                 )
                 // LEFT from this leftmost column asks the host to reopen the collapsed category
@@ -452,13 +461,13 @@ private fun GuideRow(
                         .fillMaxSize()
                         .padding(end = 3.dp)
                         .clip(RoundedCornerShape(6.dp))
-                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.4f)),
+                        .background(palette.surfaceVariant.copy(alpha = 0.7f)),
                     contentAlignment = Alignment.CenterStart,
                 ) {
                     Text(
                         stringResource(R.string.guide_no_info),
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = palette.mutedText,
                     )
                 }
             } else {
@@ -487,6 +496,7 @@ private fun GuideRow(
                         width = placement.width.dp,
                         isNow = isNow,
                         progress = if (isNow) programme.progressAt(nowMillis) else 0f,
+                        palette = palette,
                         onFocus = {
                             // D-pad focus does not scroll a plain Row on its own. Nudge the shared
                             // timeline so the newly focused block is never left off-screen.
@@ -523,6 +533,7 @@ private fun ProgrammeBlock(
     width: Dp,
     isNow: Boolean,
     progress: Float,
+    palette: InterfacePalette,
     onFocus: () -> Unit,
     onClick: () -> Unit,
 ) {
@@ -535,15 +546,15 @@ private fun ProgrammeBlock(
             .clip(RoundedCornerShape(6.dp))
             .background(
                 when {
-                    focused -> MaterialTheme.colorScheme.primary
-                    isNow -> MaterialTheme.colorScheme.primaryContainer
-                    else -> MaterialTheme.colorScheme.surfaceVariant
+                    focused -> palette.focusedBlock
+                    isNow -> palette.currentProgramme
+                    else -> palette.surfaceVariant
                 },
             )
             .then(
                 if (focused || isNow) Modifier.border(
                     if (focused) 2.dp else 1.dp,
-                    MaterialTheme.colorScheme.primary,
+                    palette.accent,
                     RoundedCornerShape(6.dp),
                 ) else Modifier,
             )
@@ -557,9 +568,8 @@ private fun ProgrammeBlock(
             title,
             style = MaterialTheme.typography.bodyMedium,
             color = when {
-                focused -> MaterialTheme.colorScheme.onPrimary
-                isNow -> MaterialTheme.colorScheme.onPrimaryContainer
-                else -> MaterialTheme.colorScheme.onSurface
+                focused -> palette.onSelected
+                else -> palette.text
             },
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -572,7 +582,7 @@ private fun ProgrammeBlock(
                     .align(Alignment.BottomStart)
                     .fillMaxWidth(progress.coerceIn(0f, 1f))
                     .height(3.dp)
-                    .background(MaterialTheme.colorScheme.primary),
+                    .background(palette.progress),
             )
         }
     }

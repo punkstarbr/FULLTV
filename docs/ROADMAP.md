@@ -41,7 +41,7 @@ the EPG parsing.
 | 1 | **Catch-up / archive** (Xtream `tv_archive` + Kodi M3U tags) | TiviMate, Sparkle, Smarters | Highest — "most glaring omission" | Medium |
 | 2 | **Live pause / rewind** (client timeshift buffer) | TiviMate Premium, Sparkle | High, a paid-tier differentiator | Medium |
 | 3 | **Recording / DVR** incl. recurring & series | TiviMate, Smarters, Sparkle | Top-3 valued capability | Medium-Hard |
-| 4 | **Multi-view / Picture-in-Picture** | TiviMate (PiP), IPTV One (grid) | 63% want dual-sports viewing | Medium (PiP) / Hard (N-up) |
+| 4 | **Multi-view mosaic** (up to four channels; PiP already exists separately) | TiviMate, IPTV One | 63% want dual-sports viewing | Initial 2×2 implementation; decoder/provider limits vary |
 | 5 | **Programme reminders / notifications** | TiviMate, OTT Navigator | Recurrent request | Easy |
 | 6 | **Parental controls / PIN lock** | all majors | Core family feature | Easy |
 | 7 | **External player hand-off** (VLC / MX Player) | all majors | Fixes problem-stream support burden | Easy |
@@ -52,7 +52,7 @@ the EPG parsing.
 | 12 | **Channel numbers + number entry + last-channel toggle** | all majors | Ex-cable users expect it | Easy |
 | 13 | **Channel/group sorting, hiding, reordering** | TiviMate, Televizo | Wishlist asks hiding be respected everywhere | Medium |
 | 14 | **Buffering / decoder / stream settings** | TiviMate, Televizo | Power users want knobs for bad streams | Easy-Medium |
-| 15 | **Backup / restore** (and later, local sync) | Televizo, TiviMate (partial) | #1 account request | Easy (local) / Hard (sync) |
+| 15 | **Backup / restore** (encrypted local file; video copy remains out of scope) | FullTV | Implemented in Settings → Sync; passphrase required | — |
 
 Honourable mentions: unified search across live/VOD/series, an "on now" strip, favourites-only
 zapping, per-channel catch-up offset (trivial once #1 ships), a stream health/codec overlay.
@@ -85,9 +85,11 @@ zapping, per-channel catch-up offset (trivial once #1 ships), a stream health/co
    category of complaints.
 5. **Live pause/rewind buffer.** The premium-feeling differentiator that pairs with catch-up.
 
-**Deferred on purpose:** full N-up multiview and *server-backed* cross-device sync are both
-Hard (concurrent decoders / a backend we deliberately don't run) and shouldn't jump the queue.
-Note this is distinct from the **local** LAN sync below, which needs no backend and is planned.
+**Remaining constraints:** the 2×2 mosaic is implemented with an explicit start warning, but actual
+four-stream support depends on concurrent decoder capacity and provider connection limits. Further
+performance/compatibility work may be needed on low-end boxes. *Server-backed* cross-device sync
+remains deliberately out of scope because FullTV does not run a backend. Note this is distinct from
+the **local** LAN sync below, which needs no backend and is planned.
 Recording/DVR is the natural sixth, since it shares the stream-to-disk plumbing with the
 timeshift buffer.
 
@@ -121,7 +123,8 @@ One screen, grouped, replacing today's scattered entries:
   the r/Viewella "it's just porn now" complaint).
 - **Playback & streams** — default aspect/zoom, buffer size, hardware/software decoder,
   hand-off to an external player (VLC / MX) for problem streams.
-- **Sync & backup** — local device-to-device sync (above) and export/import a settings file.
+- **Sync & backup** — local device-to-device sync (above) and the password-encrypted `.fulltv`
+  export/import flow for sources, portable settings and syncable user state.
 - **About** — version + in-app update check, GPL licence, links to repo / issues / privacy, and
   the "built with AI, in the open" note.
 

@@ -2,6 +2,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     alias(libs.plugins.android.application)
+    alias(libs.plugins.chaquopy)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
@@ -14,10 +15,14 @@ android {
 
     defaultConfig {
         applicationId = "app.opentv"
-        minSdk = 23
         targetSdk = 35
-        versionCode = 25
-        versionName = "0.11.13"
+        minSdk = 24
+        ndk {
+            // Chaquopy 3.11 builds support these four ABIs, including 32-bit TV boxes.
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+        }
+        versionCode = 26
+        versionName = "0.11.14"
         // FullTV publishes versioned GitHub Releases; older releases remain available there.
         buildConfigField("String", "UPDATE_REPO_SLUG", "\"punkstarbr/FULLTV\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -96,6 +101,16 @@ android {
     }
 }
 
+chaquopy {
+    defaultConfig {
+        version = "3.11"
+        buildPython("python3.11")
+        pip {
+            install("streamlink==8.6.3")
+        }
+    }
+}
+
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
@@ -134,6 +149,9 @@ dependencies {
     implementation(libs.media3.session)
     implementation(libs.media3.datasource.okhttp)
     implementation(libs.media3.transformer)
+    implementation(libs.whisper.android)
+    implementation(libs.mlkit.translation)
+    implementation(libs.mlkit.language.id)
 
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)

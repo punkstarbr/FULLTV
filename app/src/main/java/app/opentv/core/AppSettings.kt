@@ -44,6 +44,19 @@ class AppSettings private constructor(context: Context) {
     private val _channelLayout = MutableStateFlow(readChannelLayout())
     val channelLayout: StateFlow<ChannelLayout> = _channelLayout.asStateFlow()
 
+    /** Visual preset for Live TV and the player. Other library/settings screens stay unchanged. */
+    enum class InterfaceStyle {
+        CURRENT,
+        PLAYER_ZAPPING,
+        CLASSIC_EPG,
+        CATEGORY_PORTAL,
+        MODERN_EPG,
+        RETRO_EPG,
+    }
+
+    private val _interfaceStyle = MutableStateFlow(readInterfaceStyle())
+    val interfaceStyle: StateFlow<InterfaceStyle> = _interfaceStyle.asStateFlow()
+
     /**
      * How tall the guide rows are and how much time fits on screen. On a weak box [COMPACT] packs
      * more channels in and makes each programme narrower, so fewer blocks are laid out per row.
@@ -56,6 +69,11 @@ class AppSettings private constructor(context: Context) {
     /** Whether embedded subtitles/closed captions are shown when a stream carries them. */
     private val _subtitlesEnabled = MutableStateFlow(prefs.getBoolean(KEY_SUBTITLES, true))
     val subtitlesEnabled: StateFlow<Boolean> = _subtitlesEnabled.asStateFlow()
+
+    /** Whether local Whisper transcription and on-device translation to Portuguese are enabled. */
+    private val _autoPortugueseSubtitles =
+        MutableStateFlow(prefs.getBoolean(KEY_AUTO_PT_SUBTITLES, false))
+    val autoPortugueseSubtitles: StateFlow<Boolean> = _autoPortugueseSubtitles.asStateFlow()
 
     /** Whether the selected channel plays live inside the guide's preview pane. */
     private val _guidePreviewVideo = MutableStateFlow(prefs.getBoolean(KEY_PREVIEW_VIDEO, true))
@@ -128,6 +146,11 @@ class AppSettings private constructor(context: Context) {
         _themeMode.value = mode
     }
 
+    fun setInterfaceStyle(style: InterfaceStyle) {
+        prefs.edit().putString(KEY_INTERFACE_STYLE, style.name).apply()
+        _interfaceStyle.value = style
+    }
+
     fun setChannelLayout(layout: ChannelLayout) {
         prefs.edit().putString(KEY_CHANNEL_LAYOUT, layout.name).apply()
         _channelLayout.value = layout
@@ -141,6 +164,11 @@ class AppSettings private constructor(context: Context) {
     fun setSubtitlesEnabled(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_SUBTITLES, enabled).apply()
         _subtitlesEnabled.value = enabled
+    }
+
+    fun setAutoPortugueseSubtitles(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_AUTO_PT_SUBTITLES, enabled).apply()
+        _autoPortugueseSubtitles.value = enabled
     }
 
     fun setGuidePreviewVideo(enabled: Boolean) {
@@ -204,6 +232,13 @@ class AppSettings private constructor(context: Context) {
     private val _recordPadEndMinutes = MutableStateFlow(prefs.getInt(KEY_PAD_END, 5))
     val recordPadEndMinutes: StateFlow<Int> = _recordPadEndMinutes.asStateFlow()
 
+    /** Days of future EPG data to retain and scan for upcoming series recordings. */
+    private val _recordScheduleLookaheadDays = MutableStateFlow(
+        prefs.getInt(KEY_REC_SCHEDULE_LOOKAHEAD_DAYS, DEFAULT_REC_SCHEDULE_LOOKAHEAD_DAYS)
+            .coerceIn(MIN_REC_SCHEDULE_LOOKAHEAD_DAYS, MAX_REC_SCHEDULE_LOOKAHEAD_DAYS),
+    )
+    val recordScheduleLookaheadDays: StateFlow<Int> = _recordScheduleLookaheadDays.asStateFlow()
+
     /**
      * How long a manual "record now" runs when the channel has no guide entry to bound it.
      * Default 60 minutes, matching the common "record an hour of this" request; 0 means keep
@@ -224,6 +259,12 @@ class AppSettings private constructor(context: Context) {
         prefs.edit().putInt(KEY_PAD_START, s).putInt(KEY_PAD_END, e).apply()
         _recordPadStartMinutes.value = s
         _recordPadEndMinutes.value = e
+    }
+
+    fun setRecordScheduleLookaheadDays(days: Int) {
+        val value = days.coerceIn(MIN_REC_SCHEDULE_LOOKAHEAD_DAYS, MAX_REC_SCHEDULE_LOOKAHEAD_DAYS)
+        prefs.edit().putInt(KEY_REC_SCHEDULE_LOOKAHEAD_DAYS, value).apply()
+        _recordScheduleLookaheadDays.value = value
     }
 
     /**
@@ -328,6 +369,10 @@ class AppSettings private constructor(context: Context) {
     private fun readChannelLayout(): ChannelLayout =
         runCatching { ChannelLayout.valueOf(prefs.getString(KEY_CHANNEL_LAYOUT, null) ?: "") }
             .getOrDefault(ChannelLayout.GRID)
+
+    private fun readInterfaceStyle(): InterfaceStyle =
+        runCatching { InterfaceStyle.valueOf(prefs.getString(KEY_INTERFACE_STYLE, null) ?: "") }
+            .getOrDefault(InterfaceStyle.CURRENT)
 
     private fun readGuideDensity(): GuideDensity =
         runCatching { GuideDensity.valueOf(prefs.getString(KEY_GUIDE_DENSITY, null) ?: "") }
@@ -506,8 +551,10 @@ class AppSettings private constructor(context: Context) {
     companion object {
         private const val KEY_THEME = "theme_mode"
         private const val KEY_CHANNEL_LAYOUT = "channel_layout"
+        private const val KEY_INTERFACE_STYLE = "interface_style"
         private const val KEY_GUIDE_DENSITY = "guide_density"
         private const val KEY_SUBTITLES = "subtitles_enabled"
+        private const val KEY_AUTO_PT_SUBTITLES = "auto_pt_subtitles"
         private const val KEY_PREVIEW_VIDEO = "guide_preview_video"
         private const val KEY_PREVIEW_SOUND = "guide_preview_sound"
         private const val KEY_PIN_HASH = "parental_pin_hash"
@@ -548,8 +595,12 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_MANUAL_REC_MIN = "rec_manual_minutes"
         private const val KEY_PAD_START = "rec_pad_start_min"
         private const val KEY_PAD_END = "rec_pad_end_min"
+        private const val KEY_REC_SCHEDULE_LOOKAHEAD_DAYS = "rec_schedule_lookahead_days"
         private const val KEY_REC_AUTOSWITCH = "rec_auto_switch"
         private const val KEY_LIVE_PAUSE = "live_pause_enabled"
+        private const val DEFAULT_REC_SCHEDULE_LOOKAHEAD_DAYS = 2
+        private const val MIN_REC_SCHEDULE_LOOKAHEAD_DAYS = 2
+        private const val MAX_REC_SCHEDULE_LOOKAHEAD_DAYS = 14
 
         @Volatile private var instance: AppSettings? = null
 

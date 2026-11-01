@@ -14,6 +14,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tv
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Icon
@@ -58,6 +60,7 @@ import app.opentv.core.AppSettings
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -66,6 +69,8 @@ import app.opentv.data.model.Movie
 import app.opentv.data.model.Recording
 import app.opentv.data.model.Series
 import app.opentv.ui.channels.HomeScreen
+import app.opentv.ui.channels.CategoryPortalScreen
+import app.opentv.ui.channels.MosaicScreen
 import app.opentv.ui.recordings.RecordingsScreen
 import app.opentv.ui.vod.MoviesScreen
 import app.opentv.ui.vod.SeriesScreen
@@ -78,6 +83,7 @@ import app.opentv.ui.vod.SeriesScreen
  */
 enum class Tab(val labelRes: Int, val icon: ImageVector) {
     LIVE(R.string.nav_live_tv, Icons.Filled.LiveTv),
+    MOSAIC(R.string.nav_mosaic, Icons.Filled.GridView),
     MOVIES(R.string.nav_movies, Icons.Filled.Movie),
     SHOWS(R.string.nav_shows, Icons.Filled.Tv),
     RECORDINGS(R.string.nav_recordings, Icons.Filled.FiberManualRecord),
@@ -112,9 +118,11 @@ fun MainScreen(
     val liveEnabled by settings.liveEnabled.collectAsState()
     val moviesEnabled by settings.moviesEnabled.collectAsState()
     val seriesEnabled by settings.seriesEnabled.collectAsState()
+    val interfaceStyle by settings.interfaceStyle.collectAsState()
     val visibleTabs = remember(liveEnabled, moviesEnabled, seriesEnabled) {
         buildList {
             if (liveEnabled) add(Tab.LIVE)
+            if (liveEnabled) add(Tab.MOSAIC)
             if (moviesEnabled) add(Tab.MOVIES)
             if (seriesEnabled) add(Tab.SHOWS)
             add(Tab.RECORDINGS)
@@ -125,6 +133,14 @@ fun MainScreen(
     val homeTab = visibleTabs.first()
 
     var tab by remember { mutableStateOf(homeTab) }
+    var mosaicSelection by remember { mutableStateOf(emptyList<String>()) }
+    var portalGuideOpen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(tab, interfaceStyle) {
+        if (tab != Tab.LIVE || interfaceStyle != AppSettings.InterfaceStyle.CATEGORY_PORTAL) {
+            portalGuideOpen = false
+        }
+    }
 
     // If the selected tab gets hidden (its type toggled off while it's open), drop back to the
     // home tab so the content area never tries to show a tab that's no longer there.
@@ -140,6 +156,10 @@ fun MainScreen(
     // before this, so this only fires at the true root.)
     var showExit by remember { mutableStateOf(false) }
     BackHandler(enabled = tab == homeTab) { showExit = true }
+    BackHandler(
+        enabled = tab == Tab.LIVE &&
+            interfaceStyle == AppSettings.InterfaceStyle.CATEGORY_PORTAL && portalGuideOpen,
+    ) { portalGuideOpen = false }
     if (showExit) {
         AlertDialog(
             onDismissRequest = { showExit = false },
@@ -173,15 +193,50 @@ fun MainScreen(
 
         Box(Modifier.weight(1f).fillMaxHeight()) {
             when (tab) {
-                Tab.LIVE -> HomeScreen(
-                    isTelevision = isTelevision,
-                    hasSources = hasSources,
-                    isSyncing = isSyncing,
+                Tab.LIVE -> when {
+                    interfaceStyle == AppSettings.InterfaceStyle.CATEGORY_PORTAL && !portalGuideOpen ->
+                        CategoryPortalScreen(
+                            isSyncing = isSyncing,
+                            hasSources = hasSources,
+                            onPlayChannel = onPlayChannel,
+                            onOpenGuide = { portalGuideOpen = true },
+                        )
+
+                    interfaceStyle == AppSettings.InterfaceStyle.RETRO_EPG ->
+                        Box(
+                            Modifier.fillMaxSize().background(Color(0xFF070A2B)),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            HomeScreen(
+                                isTelevision = isTelevision,
+                                hasSources = hasSources,
+                                isSyncing = isSyncing,
+                                onPlayChannel = onPlayChannel,
+                                onPlayRecording = onPlayRecording,
+                                onAddSource = onAddSource,
+                                onRefresh = onRefresh,
+                                onPlayCatchup = onPlayCatchup,
+                                interfaceStyle = interfaceStyle,
+                                modifier = Modifier.fillMaxHeight().aspectRatio(4f / 3f),
+                            )
+                        }
+
+                    else -> HomeScreen(
+                        isTelevision = isTelevision,
+                        hasSources = hasSources,
+                        isSyncing = isSyncing,
+                        onPlayChannel = onPlayChannel,
+                        onPlayRecording = onPlayRecording,
+                        onAddSource = onAddSource,
+                        onRefresh = onRefresh,
+                        onPlayCatchup = onPlayCatchup,
+                        interfaceStyle = if (portalGuideOpen) AppSettings.InterfaceStyle.CURRENT else interfaceStyle,
+                    )
+                }
+                Tab.MOSAIC -> MosaicScreen(
+                    selectedKeys = mosaicSelection,
+                    onSelectionChange = { mosaicSelection = it },
                     onPlayChannel = onPlayChannel,
-                    onPlayRecording = onPlayRecording,
-                    onAddSource = onAddSource,
-                    onRefresh = onRefresh,
-                    onPlayCatchup = onPlayCatchup,
                 )
                 Tab.MOVIES -> MoviesScreen(
                     onOpenMovie = onOpenMovie,
