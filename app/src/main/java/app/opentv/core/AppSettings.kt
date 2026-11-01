@@ -337,11 +337,14 @@ class AppSettings private constructor(context: Context) {
     }
 
     /**
-     * UI language override. Blank = follow the device; otherwise a BCP-47 tag ("en", "es").
-     * Applied at [android.content.ContextWrapper.attachBaseContext] time so the whole app —
-     * including notifications built off the app context — picks it up.
+     * UI language override. A missing value defaults to Brazilian Portuguese; blank means the user
+     * explicitly chose to follow the device. A legacy generic "pt" choice maps to Portugal.
+     * Applied at [android.content.ContextWrapper.attachBaseContext] so the whole app — including
+     * notifications built from the app context — picks it up.
      */
-    private val _languageTag = MutableStateFlow(prefs.getString(KEY_LANGUAGE, "").orEmpty())
+    private val _languageTag = MutableStateFlow(
+        LanguageTagPolicy.fromStoredValue(prefs.getString(KEY_LANGUAGE, null)),
+    )
     val languageTag: StateFlow<String> = _languageTag.asStateFlow()
 
     fun setLanguageTag(tag: String) {
@@ -576,13 +579,12 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_RESIZE_MODE = "player_resize_mode"
         private const val KEY_LANGUAGE = "language_tag"
 
-        /**
-         * Reads the saved language tag straight from prefs, for use in attachBaseContext before
-         * the settings singleton (or anything else) is initialised. Blank = follow the device.
-         */
+        /** Reads the saved language before settings initialize; a missing choice defaults to pt-BR. */
         fun savedLanguageTag(context: Context): String =
-            context.getSharedPreferences("opentv_settings", Context.MODE_PRIVATE)
-                .getString(KEY_LANGUAGE, "").orEmpty()
+            LanguageTagPolicy.fromStoredValue(
+                context.getSharedPreferences("opentv_settings", Context.MODE_PRIVATE)
+                    .getString(KEY_LANGUAGE, null),
+            )
         private const val KEY_REC_TARGET = "recording_target"
         private const val KEY_REC_CONTAINER = "recording_container"
         private const val KEY_SMB_HOST = "smb_host"

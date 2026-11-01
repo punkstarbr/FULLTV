@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.19
+
+- **Portuguese default:** use Brazilian Portuguese (`pt-BR`) when no language preference exists;
+  Portuguese (Portugal) remains an explicit option. Existing generic `pt` preferences migrate to
+  `pt-PT`, while a previously explicit system-language choice remains unchanged.
+
 ## 0.11.18
 
 - **Terminology:** Use “Live TV” in Portuguese navigation, recordings and settings instead of “TV em direto”.

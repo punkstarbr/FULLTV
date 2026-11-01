@@ -351,9 +351,9 @@ private fun TmdbKeySection(settings: AppSettings) {
 }
 
 /**
- * The UI languages OpenTV ships translations for, each labelled with its own endonym. The tag is
- * both the stored language tag and the resource qualifier (values-<tag>), so adding a language is
- * just a new `values-xx/strings.xml` plus a line here.
+ * UI languages are labelled with their endonyms and stored as BCP-47 tags. Resource matching may
+ * fall back to a language-only folder (for example, pt-PT uses `values-pt`). Brazilian Portuguese
+ * is the first Portuguese option and the app's default; Portugal remains selectable.
  */
 private val OpenTvLanguages: List<Pair<String, String>> = listOf(
     "en" to "English",
@@ -361,8 +361,8 @@ private val OpenTvLanguages: List<Pair<String, String>> = listOf(
     "fr" to "Français",
     "de" to "Deutsch",
     "it" to "Italiano",
-    "pt" to "Português",
     "pt-BR" to "Português (Brasil)",
+    "pt-PT" to "Português (Portugal)",
     "nl" to "Nederlands",
     "pl" to "Polski",
     "ru" to "Русский",
