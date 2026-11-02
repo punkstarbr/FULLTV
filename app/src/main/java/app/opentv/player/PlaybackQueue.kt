@@ -5,17 +5,32 @@
  */
 package app.opentv.player
 
-/**
- * The ordered channel list the full-screen player can zap through.
- *
- * Set by whatever launches playback (the guide passes the list you were browsing), read by the
- * player for channel up/down and the in-player channel list. A plain in-memory handoff rather
- * than a nav argument, because the list can be thousands of channels — far too big for a URL —
- * and it only needs to survive the hop from the guide to the player.
- */
+/** Ordered channel list handed from the guide to one player launch. */
 object PlaybackQueue {
     data class Item(val id: Long, val name: String, val logoUrl: String?, val number: Int? = null)
 
-    @Volatile
-    var items: List<Item> = emptyList()
+    private var ownerChannelId: Long? = null
+    private var pendingItems: List<Item> = emptyList()
+
+    /** Publish a one-use queue for the launch that starts at [channelId]. */
+    @Synchronized
+    fun publish(channelId: Long, items: List<Item>) {
+        ownerChannelId = channelId
+        pendingItems = items.toList()
+    }
+
+    /** Consume only a queue anchored on this launch's channel; discard stale/mismatched state. */
+    @Synchronized
+    fun consumeFor(channelId: Long): List<Item> {
+        val result = if (ownerChannelId == channelId) pendingItems else emptyList()
+        ownerChannelId = null
+        pendingItems = emptyList()
+        return result
+    }
+
+    @Synchronized
+    fun clear() {
+        ownerChannelId = null
+        pendingItems = emptyList()
+    }
 }

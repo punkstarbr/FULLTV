@@ -168,6 +168,11 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
             BackgroundStatus()
         }
 
+        Spacer(Modifier.height(12.dp))
+        SectionCard(stringResource(R.string.recset_exact_alarm_title)) {
+            ExactAlarmStatus()
+        }
+
         Spacer(Modifier.height(20.dp))
         SectionCard(stringResource(R.string.recset_behaviour_title)) {
             StepperRow(
@@ -382,6 +387,70 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
         ) { Text(stringResource(R.string.common_save)) }
     }
 }
+
+@Composable
+private fun ExactAlarmStatus() {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var allowed by remember { mutableStateOf(hasExactAlarmPermission(context)) }
+
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) allowed = hasExactAlarmPermission(context)
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    Column {
+        Text(
+            stringResource(
+                when {
+                    android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S ->
+                        R.string.recset_exact_alarm_supported
+                    allowed -> R.string.recset_exact_alarm_allowed
+                    else -> R.string.recset_exact_alarm_denied
+                },
+            ),
+            color = if (allowed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            stringResource(R.string.recset_exact_alarm_desc),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S && !allowed) {
+            Spacer(Modifier.height(10.dp))
+            OutlinedButton(onClick = {
+                val request = Intent(
+                    android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM,
+                    Uri.fromParts("package", context.packageName, null),
+                )
+                val details = Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.fromParts("package", context.packageName, null),
+                )
+                val opened = runCatching {
+                    context.startActivity(
+                        if (request.resolveActivity(context.packageManager) != null) request else details,
+                    )
+                }.isSuccess
+                if (!opened) {
+                    Toast.makeText(context, R.string.recset_exact_alarm_open_failed, Toast.LENGTH_LONG).show()
+                }
+            }) {
+                Text(stringResource(R.string.recset_exact_alarm_open_settings))
+            }
+        }
+    }
+}
+
+private fun hasExactAlarmPermission(context: android.content.Context): Boolean =
+    android.os.Build.VERSION.SDK_INT < android.os.Build.VERSION_CODES.S || runCatching {
+        context.getSystemService(android.app.AlarmManager::class.java)?.canScheduleExactAlarms() == true
+    }.getOrDefault(false)
 
 /** Used-by-recordings and free-space readout for the box's internal storage. */
 @Composable

@@ -21,7 +21,7 @@ class SourceUrlTest {
     @Test
     fun `adds a scheme when missing`() {
         assertThat(SourceRepository.normaliseUrl("example.com:8080", SourceKind.XTREAM))
-            .isEqualTo("http://example.com:8080")
+            .isEqualTo("https://example.com:8080")
     }
 
     @Test

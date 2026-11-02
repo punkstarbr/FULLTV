@@ -62,6 +62,7 @@ interface SourceDao {
 
 @Dao
 interface ChannelDao {
+    /** Concatenate source playlists by stable source id, preserve import sortIndex, then id. */
     @Query(
         """
         SELECT * FROM channels
@@ -355,10 +356,10 @@ interface EpgFeedDao {
 
 @Dao
 interface EpgChannelAliasDao {
-    @Query("SELECT * FROM epg_channels")
+    @Query("SELECT * FROM epg_channels WHERE feedId > 0")
     suspend fun all(): List<EpgChannelAlias>
 
-    @Query("SELECT COUNT(*) FROM epg_channels")
+    @Query("SELECT COUNT(*) FROM epg_channels WHERE feedId > 0")
     suspend fun count(): Int
 
     @Upsert
@@ -366,6 +367,12 @@ interface EpgChannelAliasDao {
 
     @Query("DELETE FROM epg_channels WHERE feedId = :feedId")
     suspend fun deleteForFeed(feedId: Long)
+
+    @Query("UPDATE epg_channels SET feedId = :targetFeedId WHERE feedId = :stagingFeedId")
+    suspend fun moveFromFeed(stagingFeedId: Long, targetFeedId: Long)
+
+    @Query("DELETE FROM epg_channels WHERE feedId < 0")
+    suspend fun deleteStaging()
 }
 
 @Dao
@@ -381,7 +388,8 @@ interface ProgrammeDao {
     @Query(
         """
         SELECT * FROM programmes
-        WHERE endUtcMillis > :fromUtcMillis
+        WHERE feedId > 0
+          AND endUtcMillis > :fromUtcMillis
           AND startUtcMillis < :toUtcMillis
         ORDER BY epgChannelId, startUtcMillis
         """
@@ -392,7 +400,7 @@ interface ProgrammeDao {
     @Query(
         """
         SELECT * FROM programmes
-        WHERE startUtcMillis <= :nowUtcMillis AND endUtcMillis > :nowUtcMillis
+        WHERE feedId > 0 AND startUtcMillis <= :nowUtcMillis AND endUtcMillis > :nowUtcMillis
         """
     )
     fun observeNow(nowUtcMillis: Long): Flow<List<Programme>>
@@ -400,7 +408,7 @@ interface ProgrammeDao {
     @Query(
         """
         SELECT * FROM programmes
-        WHERE epgChannelId = :channelId AND endUtcMillis > :nowUtcMillis
+        WHERE feedId > 0 AND epgChannelId = :channelId AND endUtcMillis > :nowUtcMillis
         ORDER BY startUtcMillis LIMIT :limit
         """
     )
@@ -410,7 +418,7 @@ interface ProgrammeDao {
     suspend fun countForFeed(feedId: Long): Int
 
     /** Distinct guide channels that actually have programmes — the match report's baseline. */
-    @Query("SELECT DISTINCT epgChannelId FROM programmes")
+    @Query("SELECT DISTINCT epgChannelId FROM programmes WHERE feedId > 0")
     suspend fun channelIdsWithProgrammes(): List<String>
 
     @Upsert
@@ -425,6 +433,12 @@ interface ProgrammeDao {
 
     @Query("DELETE FROM programmes WHERE feedId = :feedId")
     suspend fun deleteForFeed(feedId: Long)
+
+    @Query("UPDATE programmes SET feedId = :targetFeedId WHERE feedId = :stagingFeedId")
+    suspend fun moveFromFeed(stagingFeedId: Long, targetFeedId: Long)
+
+    @Query("DELETE FROM programmes WHERE feedId < 0")
+    suspend fun deleteStaging()
 }
 
 @Dao

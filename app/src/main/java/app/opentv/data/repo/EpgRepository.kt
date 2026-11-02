@@ -7,6 +7,7 @@ package app.opentv.data.repo
 
 import android.util.Log
 import app.opentv.core.AppSettings
+import app.opentv.data.db.OpenTvDatabase
 import app.opentv.data.db.ChannelDao
 import app.opentv.data.db.EpgChannelAliasDao
 import app.opentv.data.db.EpgFeedDao
@@ -19,6 +20,7 @@ import app.opentv.data.model.Source
 import app.opentv.data.parser.ChannelNameNormalizer
 import app.opentv.data.parser.XmltvParser
 import app.opentv.data.remote.XtreamApi
+import app.opentv.data.remote.HttpsUrlPolicy
 import java.io.BufferedInputStream
 import java.io.InputStream
 import java.util.concurrent.TimeUnit
@@ -26,8 +28,12 @@ import java.util.zip.GZIPInputStream
 import org.tukaani.xz.XZInputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
+import androidx.room.withTransaction
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -50,14 +56,15 @@ import okhttp3.Request
  *
  * OpenTV never deletes before it has the replacement:
  *
- * - Programmes are **upserted in batches** as they stream out of the parser. The unique index
- *   on `(feedId, epgChannelId, startUtcMillis)` makes a re-run idempotent, so a sync that
- *   dies at 60% leaves 60% of a fresher guide behind — strictly better than before.
+ * - Programmes and aliases are **staged under a private negative feed id** as they stream out
+ *   of the parser. Public guide queries ignore staging rows. Only a fully parsed snapshot replaces
+ *   the old feed, in one database transaction; failures and cancellation retain the old guide.
  * - Old programmes are pruned **by age**, only after at least one feed succeeds.
  * - A failed feed leaves that feed's previous data intact and records the reason on the
  *   feed row, where the settings screen shows it — no silent failure.
  */
 class EpgRepository(
+    private val database: OpenTvDatabase,
     private val programmeDao: ProgrammeDao,
     private val feedDao: EpgFeedDao,
     private val aliasDao: EpgChannelAliasDao,
@@ -67,6 +74,7 @@ class EpgRepository(
     private val http: OkHttpClient,
     private val settings: AppSettings,
 ) {
+    private val syncMutex = Mutex()
 
     /** Future guide window used both while parsing feeds and while pruning old database rows. */
     val retentionFutureMillis: Long
@@ -96,8 +104,9 @@ class EpgRepository(
     // ---- Feed management -------------------------------------------------------------------
 
     suspend fun addCustomFeed(name: String, url: String) {
-        val trimmed = url.trim()
+        val trimmed = HttpsUrlPolicy.withDefaultHttps(url)
         if (trimmed.isEmpty() || feedDao.byUrl(trimmed) != null) return
+        HttpsUrlPolicy.requireHttps(trimmed)
         feedDao.insert(
             EpgFeed(name = name.trim().ifBlank { trimmed }, url = trimmed, enabled = true),
         )
@@ -209,6 +218,13 @@ class EpgRepository(
     /** Downloads every enabled feed, merges, prunes, and re-runs the matcher. */
     suspend fun syncAll(nowUtcMillis: Long, force: Boolean = false): SyncSummary =
         withContext(Dispatchers.IO) {
+          syncMutex.withLock {
+            // A process death can leave private staging rows behind. They are never displayed;
+            // clear them before starting the next serialized sync.
+            database.withTransaction {
+                programmeDao.deleteStaging()
+                aliasDao.deleteStaging()
+            }
             val futureCutoffMillis = nowUtcMillis + retentionFutureMillis
             ensureFeeds()
             maybeAutoEnableRegionalFeed()
@@ -252,6 +268,7 @@ class EpgRepository(
 
             val (matched, total) = runMatcher()
             SyncSummary(succeeded, failed, written, matched, total)
+          }
         }
 
     private sealed interface FeedResult {
@@ -264,23 +281,20 @@ class EpgRepository(
         nowUtcMillis: Long,
         futureCutoffMillis: Long,
     ): FeedResult {
+        val stagingFeedId = -feed.id
         val batch = ArrayList<Programme>(BATCH_SIZE)
         val aliases = ArrayList<EpgChannelAlias>(256)
         var written = 0
+        var committed = false
 
         try {
-            // A playlist/provider is authoritative on each hourly refresh. Remove stale rows from
-            // the previous snapshot before writing the new snapshot, so programmes from channels
-            // that disappeared from the same source cannot remain matched forever.
-            programmeDao.deleteForFeed(feed.id)
-            aliasDao.deleteForFeed(feed.id)
             openFeedStream(feed).use { stream ->
                 val stats = XmltvParser.parse(
                     input = stream,
-                    feedId = feed.id,
+                    feedId = stagingFeedId,
                     onChannelAlias = { id, displayName ->
                         aliases += EpgChannelAlias(
-                            feedId = feed.id,
+                            feedId = stagingFeedId,
                             epgId = id,
                             displayName = displayName ?: id,
                             normalizedKey = ChannelNameNormalizer.normalize(displayName ?: id).groupKey,
@@ -309,17 +323,39 @@ class EpgRepository(
                     aliases.chunked(BATCH_SIZE).forEach { aliasDao.upsertAll(it) }
                 }
 
-                if (written == 0 && stats.programmeCount == 0) {
-                    return FeedResult.Failed("Downloaded, but contained no programmes.")
+                if (written == 0) {
+                    return FeedResult.Failed("Downloaded, but contained no programmes in the configured guide window.")
                 }
+                // The old guide is authoritative until the replacement is complete. This swap
+                // covers programmes and aliases atomically, so readers never observe an empty or
+                // half-written snapshot after a failed download.
+                database.withTransaction {
+                    programmeDao.deleteForFeed(feed.id)
+                    aliasDao.deleteForFeed(feed.id)
+                    programmeDao.moveFromFeed(stagingFeedId, feed.id)
+                    aliasDao.moveFromFeed(stagingFeedId, feed.id)
+                }
+                committed = true
                 return FeedResult.Success(written, stats.channelCount)
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            // Deliberately no cleanup. Whatever was written is newer than what was there,
-            // and what was there is still there.
-            return FeedResult.Failed(e.message ?: "Download failed.")
+            return FeedResult.Failed(
+                if (e is app.opentv.data.remote.HttpsRequiredException) HTTPS_REQUIRED_RESULT
+                else e.message ?: "Download failed.",
+            )
+        } finally {
+            if (!committed) {
+                withContext(NonCancellable) {
+                    runCatching {
+                        database.withTransaction {
+                            programmeDao.deleteForFeed(stagingFeedId)
+                            aliasDao.deleteForFeed(stagingFeedId)
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -334,12 +370,23 @@ class EpgRepository(
     private suspend fun openFeedStream(feed: EpgFeed): InputStream {
         val raw: InputStream = when {
             feed.providerSourceId != null -> {
-                val source: Source = sourceDao.byId(feed.providerSourceId)
+                val stored: Source = sourceDao.byId(feed.providerSourceId)
                     ?: throw IllegalStateException("Provider for this guide no longer exists.")
+                val source = stored.copy(
+                    url = HttpsUrlPolicy.withDefaultHttps(stored.url),
+                    epgUrl = stored.epgUrl?.let(HttpsUrlPolicy::withDefaultHttps),
+                )
+                HttpsUrlPolicy.requireHttps(source.epgUrl?.takeIf { it.isNotBlank() } ?: source.url)
                 api.openEpgStream(source)
             }
             feed.url != null -> {
-                val response = http.newCall(Request.Builder().url(feed.url).build()).execute()
+                val secureUrl = HttpsUrlPolicy.withDefaultHttps(feed.url)
+                try {
+                    HttpsUrlPolicy.requireHttps(secureUrl)
+                } catch (_: app.opentv.data.remote.HttpsRequiredException) {
+                    throw IllegalStateException(HTTPS_REQUIRED_RESULT)
+                }
+                val response = http.newCall(Request.Builder().url(secureUrl).build()).execute()
                 if (!response.isSuccessful) {
                     response.close()
                     throw IllegalStateException("Guide download failed (HTTP ${response.code}).")
@@ -441,6 +488,7 @@ class EpgRepository(
 
     companion object {
         private const val TAG = "EpgRepository"
+        const val HTTPS_REQUIRED_RESULT = "HTTPS_REQUIRED"
 
         /** Writes per transaction. Large enough to be fast, small enough not to hold WAL open. */
         const val BATCH_SIZE = 500

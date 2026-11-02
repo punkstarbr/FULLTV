@@ -128,6 +128,7 @@
     <string name="rec_cancel_reminder">Cancel reminder</string>
     <string name="rec_status_scheduled">Scheduled · %1$s</string>
     <string name="rec_status_recording">● Recording · %1$s · %2$s</string>
+    <string name="rec_status_connecting">● Connecting · %1$s</string>
     <string name="rec_status_failed">Failed · %1$s</string>
     <string name="rec_error_unknown">unknown error</string>
     <string name="rec_notification_one">Recording 1 programme</string>
@@ -135,6 +136,7 @@
     <string name="rec_channel_name">Recording</string>
     <string name="rec_channel_desc">Shown while FullTV is recording</string>
     <string name="rec_error_nothing">Nothing was recorded</string>
+    <string name="rec_error_stalker_unavailable">Could not resolve the Stalker channel URL. Check the provider connection.</string>
     <string name="rec_error_usb_no_folder">No USB folder chosen. Open Recording settings and pick a folder on your drive.</string>
     <string name="rec_error_usb_unavailable">USB drive not available. Re-plug the drive and choose the folder again in Recording settings.</string>
     <string name="rec_background_prompt_title">Keep recording when you leave?</string>
@@ -254,7 +256,7 @@
     <string name="settings_subtitles_title">Show subtitles when available</string>
     <string name="settings_subtitles_subtitle">The default for new channels. While watching, the Subtitles button on the player lets you pick a specific track or turn them off.</string>
     <string name="settings_ai_subtitles_title">Generate Portuguese subtitles with AI</string>
-    <string name="settings_ai_subtitles_subtitle">Uses Whisper on this device, then translates on-device. First use downloads about 78 MB for speech and about 30 MB for translation. Uses extra CPU and memory; supported on arm64 devices with at least 512 MB app memory. Enable before opening a channel.</string>
+    <string name="settings_ai_subtitles_subtitle">Uses the multilingual Whisper tiny Q5 model on this device, then translates locally. After you enable it and open a channel, first use downloads about 31 MiB for speech; translation models download only when needed. The speech model is loaded into memory only while the player is open with this option on. Uses extra CPU and memory; requires arm64 and at least 512 MB app memory.</string>
     <string name="settings_resume_title">Resume last channel on startup</string>
     <string name="settings_resume_subtitle">Open the app straight into the channel you were last watching, instead of the guide. Press Back to reach the guide.</string>
     <string name="settings_sleep_timer">Sleep timer</string>
@@ -364,6 +366,13 @@
     <string name="recset_background_on_title">Background recording is on</string>
     <string name="recset_background_on_desc">Recordings will keep running when you leave FullTV or the TV goes to sleep.</string>
     <string name="recset_background_toast">Background recording enabled — recordings will keep going in the background.</string>
+    <string name="recset_exact_alarm_title">Scheduled recording alarms</string>
+    <string name="recset_exact_alarm_desc">Android can revoke exact-alarm access. If it is not allowed, scheduled recordings may start late or be missed. Check this status after changing system permissions.</string>
+    <string name="recset_exact_alarm_supported">This Android version allows exact alarms by default.</string>
+    <string name="recset_exact_alarm_allowed">Exact alarms are allowed on this device.</string>
+    <string name="recset_exact_alarm_denied">Exact alarms are not allowed. Scheduled recordings may start late or be missed.</string>
+    <string name="recset_exact_alarm_open_settings">Open exact-alarm settings</string>
+    <string name="recset_exact_alarm_open_failed">Could not open alarm settings. Check FullTV under Android app settings.</string>
 
     <!-- ============================ TV guide (EPG) settings ============================ -->
     <string name="epg_updating">Updating…</string>
@@ -373,7 +382,9 @@
     <string name="epg_name_optional">Name (optional)</string>
     <string name="epg_xmltv_url">XMLTV URL (.xml or .xml.gz)</string>
     <string name="epg_add_guide">Add guide</string>
+    <string name="epg_add_failed">Could not add this guide.</string>
     <string name="epg_multiple_guides_note">Guide URLs are detected anywhere in an M3U. Every unique guide found is added and enabled automatically. Playlists with many regions can use substantial network and storage; pause feeds you do not need in Settings. Plain HTTP guide URLs are blocked for privacy; use HTTPS where available.</string>
+    <string name="epg_https_required">This guide does not use HTTPS, which FullTV requires. Change it to an HTTPS URL; the previous guide stays available until a successful update.</string>
     <string name="epg_pause_extra_guides">Pause extra playlist guides</string>
     <string name="epg_pause_extra_confirm_title">Pause and clear extra M3U guides?</string>
     <string name="epg_pause_extra_confirm_body">This disables feeds discovered in M3U playlists and removes only their stored guide entries. The first guide for each playlist, channels, favourites and recordings are kept. You can enable a feed again later.</string>
@@ -438,6 +449,7 @@
     <string name="sync_nas_auto">Auto-sync when the app opens</string>
     <string name="sync_backup_title">Device backup</string>
     <string name="sync_backup_desc">Export a password-encrypted file to move sources, credentials, settings, favourites and watch history to another device. Keep the passphrase separate. Video recordings and cached catalogues are not copied; restored sources are refreshed over the internet. USB folder permissions must be chosen again on the new device.</string>
+    <string name="sync_backup_scope_note">Configuration and playback metadata only: recorded video files are not included. Local/USB recordings must be copied separately; NAS recordings remain on the NAS. Choose the USB folder again after restoring.</string>
     <string name="sync_backup_passphrase">Backup passphrase (8+ characters)</string>
     <string name="sync_backup_export">Export backup</string>
     <string name="sync_backup_import">Import backup</string>
@@ -481,14 +493,16 @@
     <string name="onboarding_m3u_url">M3U playlist URL</string>
     <string name="onboarding_youtube_live">YouTube Live search</string>
     <string name="onboarding_stalker_portal">Stalker portal</string>
+    <string name="onboarding_source_order_note">With multiple sources, channels are grouped by the order sources were added. Within an M3U, the playlist order is preserved; quality variants may appear separately.</string>
+    <string name="source_https_required">FullTV accepts HTTPS addresses only. HTTP and other URL schemes are blocked; if your provider does not offer HTTPS, this source is not supported.</string>
     <string name="onboarding_server_address">Server address</string>
     <string name="onboarding_playlist_url">Playlist URL</string>
     <string name="onboarding_youtube_search_url">YouTube search results URL</string>
     <string name="onboarding_portal_url">Portal URL</string>
-    <string name="onboarding_server_help">For example http://example.com:8080 — paste the whole line from your provider if it\'s easier, extra bits get trimmed.</string>
-    <string name="onboarding_playlist_help">The full http link to your .m3u or .m3u8 file.</string>
+    <string name="onboarding_server_help">For example https://example.com:8080 — paste the whole line from your provider if it\'s easier, extra bits get trimmed.</string>
+    <string name="onboarding_playlist_help">The full HTTPS link to your .m3u or .m3u8 file.</string>
     <string name="onboarding_youtube_search_help">Paste a YouTube /results URL. FullTV applies the Live filter and imports up to five videos that are live now.</string>
-    <string name="onboarding_portal_help">The portal address from your provider, e.g. http://host:port/c/ — extra bits get trimmed.</string>
+    <string name="onboarding_portal_help">The portal address from your provider, e.g. https://host:port/c/ — extra bits get trimmed.</string>
     <string name="onboarding_mac_address">MAC address</string>
     <string name="onboarding_mac_help">The MAC your provider tied to your line, e.g. 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">Hide advanced</string>

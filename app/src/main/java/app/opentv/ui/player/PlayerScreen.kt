@@ -7,6 +7,8 @@ package app.opentv.ui.player
 
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.annotation.OptIn
 import androidx.compose.animation.AnimatedVisibility
@@ -125,6 +127,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.net.URI
 import java.text.SimpleDateFormat
@@ -248,9 +251,19 @@ fun PlayerScreen(
     val rootFocus = remember { FocusRequester() }
     val listFocus = remember { FocusRequester() }
 
-    // The channel list you were browsing, for channel up/down and the in-player list. Snapshotted
-    // on entry so it doesn't shift under you mid-session.
-    val queue = remember { PlaybackQueue.items }
+    // Consume the guide's one-use handoff. Search, resume and notification launches have no
+    // browsing queue, so fall back to the database's stable source/sortIndex order.
+    val queueStartId = channelId ?: settings.lastChannelId
+    var queue by remember(queueStartId) {
+        mutableStateOf(if (queueStartId != 0L) PlaybackQueue.consumeFor(queueStartId) else emptyList())
+    }
+    LaunchedEffect(queueStartId) {
+        if (queue.isEmpty() && queueStartId != 0L) {
+            queue = graph.catalogRepository.observeChannels().first().map { channel ->
+                PlaybackQueue.Item(channel.id, channel.shownName, channel.logoUrl, channel.number)
+            }
+        }
+    }
     val zappingCarouselState = rememberLazyListState()
 
     LaunchedEffect(Unit) {
@@ -368,13 +381,27 @@ fun PlayerScreen(
     fun toggleRecord() {
         val active = activeRecordings.firstOrNull { it.channelId == currentId }
         if (active != null) {
-            graph.recordingEngine.stop(active.id)
+            runCatching { graph.recordingEngine.stop(active.id) }
+                .onFailure { Log.e("OpenTV", "Could not stop recording", it) }
         } else {
             val channel = variants.firstOrNull { it.id == currentId } ?: return
-            scope.launch { graph.recordingEngine.startChannel(channel) }
-            if (RecordingBackgroundPrompt.shouldShow(context)) {
-                RecordingBackgroundPrompt.markShown()
-                showBackgroundPrompt = true
+            scope.launch {
+                try {
+                    graph.recordingEngine.startChannel(channel)
+                    if (RecordingBackgroundPrompt.shouldShow(context)) {
+                        RecordingBackgroundPrompt.markShown()
+                        showBackgroundPrompt = true
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Exception) {
+                    Log.e("OpenTV", "Could not start recording", error)
+                    Toast.makeText(
+                        context,
+                        context.getString(R.string.rec_error_nothing),
+                        Toast.LENGTH_LONG,
+                    ).show()
+                }
             }
         }
         interaction++

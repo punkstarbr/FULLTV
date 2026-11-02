@@ -92,12 +92,12 @@ object M3uParser {
                         val attributes = pendingAttributes
                         val streamId = attributes["tvg-id"]
                             ?.takeIf { it.isNotBlank() }
-                            ?.let { "tvg:$it" }
+                            ?.let { "tvg:$it:${stableHash(line)}" }
                             ?: "url:${stableHash(line)}"
 
-                        // Providers repeat the same tvg-id across quality variants. Keep the
-                        // first and drop later duplicates rather than letting them collide on
-                        // the unique index and abort the whole import.
+                        // One tvg-id can legitimately identify several stream variants. Include
+                        // the URL so each distinct stream survives, while an exact repeated URL
+                        // remains a duplicate and cannot collide on the unique index.
                         if (seenStreamIds.add(streamId)) {
                             channels += Channel(
                                 sourceId = sourceId,

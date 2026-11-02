@@ -153,6 +153,7 @@ object SmbClient {
                 file.outputStream, locator,
             )
         } catch (t: Throwable) {
+            runCatching { q.share.rm(parsed.path.replace('/', '\\')) }
             runCatching { q.share.close() }
             runCatching { q.session.close() }
             runCatching { q.connection.close() }

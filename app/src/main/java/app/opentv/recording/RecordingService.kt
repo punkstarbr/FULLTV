@@ -19,8 +19,10 @@ import androidx.core.app.NotificationCompat
 import app.opentv.R
 import app.opentv.core.AppSettings
 import app.opentv.core.ServiceLocator
+import app.opentv.data.model.SourceKind
 import app.opentv.player.StreamlinkResolver
 import app.opentv.player.YouTubeChannelUrl
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -30,6 +32,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.Request
+import java.io.FileOutputStream
+import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -42,7 +46,11 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class RecordingService : Service() {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(
+        SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, error ->
+            Log.e(TAG, "Uncaught recording service task failure", error)
+        },
+    )
     private val captures = ConcurrentHashMap<Long, Capture>()
     // MP4 conversions running after their capture finished. They keep the service (and its
     // foreground notification) alive until the remux is done, so a long recording is not
@@ -140,35 +148,78 @@ class RecordingService : Service() {
         var total = 0L
         var error: String? = null
         var sink: RecordingStorage.Sink? = null
+        var outputLocator = recording.filePath
+        var lastReport = 0L
         try {
+            val source = graph.sourceRepository.byId(recording.sourceId)
+            val captureUrl = if (source?.kind == SourceKind.STALKER) {
+                val channel = graph.catalogRepository.channel(recording.channelId)
+                    ?: throw IOException(getString(R.string.rec_error_stalker_unavailable))
+                val resolved = graph.catalogRepository.resolvePlaybackUrl(channel, source)
+                if (resolved.isBlank() || resolved == channel.streamUrl) {
+                    throw IOException(getString(R.string.rec_error_stalker_unavailable))
+                }
+                resolved
+            } else {
+                recording.streamUrl
+            }
             repo.markStarted(id, System.currentTimeMillis())
-            // Announce the live capture so the player can watch this file while it grows.
-            RecordingLiveState.markActive(id, recording.filePath)
-            sink = RecordingStorage.openSink(applicationContext, graph.settings, recording.filePath)
-            // A USB (SAF) sink only learns its real content:// URI when the document is created —
-            // persist it onto the row so the finished recording plays back and deletes correctly.
-            sink.resolvedLocator?.let { actual ->
-                if (actual != recording.filePath) {
-                    repo.setFilePath(id, actual)
-                    RecordingLiveState.updatePath(id, actual)
+            // Do not create the visible video file until a real media chunk has arrived. If the
+            // process dies while a provider is connecting or returning an empty response, no
+            // zero-byte recording is left behind.
+            suspend fun writeChunk(bytes: ByteArray, offset: Int, length: Int) {
+                var newlyOpened = false
+                val destination = sink ?: RecordingStorage.openSink(
+                    applicationContext,
+                    graph.settings,
+                    recording.filePath,
+                ).also { opened ->
+                    sink = opened
+                    outputLocator = opened.resolvedLocator ?: recording.filePath
+                    newlyOpened = true
+                }
+                try {
+                    destination.output.write(bytes, offset, length)
+                    if (newlyOpened) {
+                        destination.output.flush()
+                        (destination.output as? FileOutputStream)?.fd?.sync()
+                    }
+                } catch (writeError: IOException) {
+                    throw RecordingOutputException(writeError)
+                }
+                total += length
+                if (newlyOpened) {
+                    destination.resolvedLocator?.let { actual ->
+                        outputLocator = actual
+                        if (actual != recording.filePath) repo.setFilePath(id, actual)
+                    }
+                    // Announce only after the first media bytes exist, so a tail watcher never
+                    // receives a path to an empty file.
+                    RecordingLiveState.markActive(id, outputLocator)
+                }
+                if (lastReport == 0L || total - lastReport >= SIZE_REPORT_BYTES) {
+                    lastReport = total
+                    repo.setSize(id, total)
                 }
             }
 
             val scheduledEnd = recording.scheduledEndMillis
-            val youtubeLiveUrl = YouTubeChannelUrl.asLiveUrlOrNull(recording.streamUrl)
+            val youtubeLiveUrl = YouTubeChannelUrl.asLiveUrlOrNull(captureUrl)
             if (youtubeLiveUrl != null) {
-                total = copyStreamlinkRecording(id, youtubeLiveUrl, scheduledEnd, repo, sink)
+                total = copyStreamlinkRecording(id, youtubeLiveUrl, scheduledEnd) { chunk ->
+                    writeChunk(chunk, 0, chunk.size)
+                }
             } else {
                 val buffer = ByteArray(BUFFER_BYTES)
-                var lastReport = 0L
                 var deadReconnects = 0
+                var lastNetworkError: String? = null
 
                 // Direct IPTV `.ts` endpoints often close a rolling socket and expect reconnects.
                 while (kotlin.coroutines.coroutineContext[Job]?.isActive == true) {
                     if (scheduledEnd > 0 && System.currentTimeMillis() >= scheduledEnd) break
 
                     val request = Request.Builder()
-                        .url(recording.streamUrl)
+                        .url(captureUrl)
                         .header("User-Agent", recording.userAgent)
                         .build()
                     val call = graph.streamingHttpClient.newCall(request)
@@ -182,32 +233,33 @@ class RecordingService : Service() {
                             while (kotlin.coroutines.coroutineContext[Job]?.isActive == true) {
                                 val read = input.read(buffer)
                                 if (read < 0) break
-                                sink.output.write(buffer, 0, read)
-                                total += read
+                                writeChunk(buffer, 0, read)
                                 leg += read
                                 if (scheduledEnd > 0 && System.currentTimeMillis() >= scheduledEnd) break
-                                if (total - lastReport >= SIZE_REPORT_BYTES) {
-                                    lastReport = total
-                                    repo.setSize(id, total)
-                                }
                             }
                             leg
                         }
                     } catch (t: kotlinx.coroutines.CancellationException) {
                         throw t
                     } catch (t: java.io.IOException) {
+                        if (t is RecordingOutputException) throw t
+                        lastNetworkError = t.message
                         Log.i(TAG, "Recording $id connection dropped (${t.message}); reconnecting")
                         0L
                     }
 
                     if (bytesThisLeg <= 0L) {
                         if (++deadReconnects >= MAX_DEAD_RECONNECTS) {
-                            if (total == 0L) error = getString(R.string.rec_error_nothing)
+                            if (total == 0L) {
+                                error = lastNetworkError?.takeIf(String::isNotBlank)
+                                    ?: getString(R.string.rec_error_nothing)
+                            }
                             break
                         }
                         kotlinx.coroutines.delay(RECONNECT_BACKOFF_MILLIS)
                     } else {
                         deadReconnects = 0
+                        lastNetworkError = null
                     }
                 }
             }
@@ -223,6 +275,10 @@ class RecordingService : Service() {
             // The file is now at its final size — anyone watching it should see the true end.
             RecordingLiveState.markInactive(id)
             runCatching { sink?.close() }
+            if (sink != null && total == 0L) {
+                Log.i(TAG, "Recording $id received no media bytes; removing the empty destination")
+                runCatching { RecordingStorage.delete(applicationContext, graph.settings, outputLocator) }
+            }
             val ok = total > 0 && error == null
             runCatching {
                 repo.markFinished(
@@ -272,11 +328,9 @@ class RecordingService : Service() {
         id: Long,
         liveUrl: String,
         scheduledEndMillis: Long,
-        repo: app.opentv.data.repo.RecordingRepository,
-        sink: RecordingStorage.Sink,
+        writeChunk: suspend (ByteArray) -> Unit,
     ): Long {
         var total = 0L
-        var lastReport = 0L
         var deadReconnects = 0
         val resolver = ServiceLocator.get(applicationContext).streamlinkResolver
 
@@ -300,17 +354,14 @@ class RecordingService : Service() {
                     if (scheduledEndMillis > 0 && System.currentTimeMillis() >= scheduledEndMillis) break
                     val chunk = reader.read(BUFFER_BYTES)
                     if (chunk.isEmpty()) break
-                    sink.output.write(chunk)
+                    writeChunk(chunk)
                     total += chunk.size
                     bytesThisLeg += chunk.size
-                    if (total - lastReport >= SIZE_REPORT_BYTES) {
-                        lastReport = total
-                        repo.setSize(id, total)
-                    }
                 }
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
+                if (error is RecordingOutputException) throw error
                 Log.i(TAG, "Recording $id Streamlink reader ended (${error.message}); reconnecting")
             } finally {
                 captures[id]?.streamlinkReader = null
@@ -440,7 +491,7 @@ class RecordingService : Service() {
         private const val CHANNEL_ID = "recordings"
         private const val NOTIFICATION_ID = 4210
         private const val BUFFER_BYTES = 64 * 1024
-        private const val SIZE_REPORT_BYTES = 4L * 1024 * 1024
+        private const val SIZE_REPORT_BYTES = 1L * 1024 * 1024
         private const val MAX_WAKE_MILLIS = 6L * 60 * 60 * 1000 // 6h safety cap
         // Providers close a live .ts socket every ~30s; reconnect and keep appending. Give up only
         // after this many consecutive reconnects deliver nothing (the stream is genuinely gone).
@@ -473,3 +524,6 @@ class RecordingService : Service() {
         }
     }
 }
+
+private class RecordingOutputException(cause: IOException) :
+    IOException(cause.message ?: "The recording destination could not be written.", cause)

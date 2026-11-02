@@ -29,6 +29,7 @@ import app.opentv.data.parser.VodTitleCleaner
 import app.opentv.data.remote.StalkerApi
 import app.opentv.data.remote.TmdbClient
 import app.opentv.data.remote.XtreamApi
+import app.opentv.data.remote.HttpsUrlPolicy
 import app.opentv.player.YouTubeLiveSearchResolver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -632,12 +633,21 @@ class CatalogRepository(
 
     /** Live channels only — the fast path so the guide can show before VOD and the guide load. */
     suspend fun syncLive(source: Source, nowUtcMillis: Long): SyncResult = withContext(Dispatchers.IO) {
+        val secureSource = source.copy(
+            url = HttpsUrlPolicy.withDefaultHttps(source.url),
+            epgUrl = source.epgUrl?.let(HttpsUrlPolicy::withDefaultHttps),
+        )
+        if (!HttpsUrlPolicy.isHttps(secureSource.url) ||
+            (!secureSource.epgUrl.isNullOrBlank() && !HttpsUrlPolicy.isHttps(secureSource.epgUrl))
+        ) {
+            return@withContext SyncResult.Failed(HttpsUrlPolicy.REQUIRED_RESULT, null)
+        }
         try {
-            when (source.kind) {
-                SourceKind.XTREAM -> syncXtreamLive(source, nowUtcMillis)
-                SourceKind.M3U -> syncM3u(source, nowUtcMillis)
-                SourceKind.YOUTUBE_LIVE_SEARCH -> syncYouTubeLiveSearch(source, nowUtcMillis)
-                SourceKind.STALKER -> syncStalkerLive(source, nowUtcMillis)
+            when (secureSource.kind) {
+                SourceKind.XTREAM -> syncXtreamLive(secureSource, nowUtcMillis)
+                SourceKind.M3U -> syncM3u(secureSource, nowUtcMillis)
+                SourceKind.YOUTUBE_LIVE_SEARCH -> syncYouTubeLiveSearch(secureSource, nowUtcMillis)
+                SourceKind.STALKER -> syncStalkerLive(secureSource, nowUtcMillis)
             }
         } catch (e: CancellationException) {
             throw e
@@ -650,7 +660,9 @@ class CatalogRepository(
     /** Movies + series — best-effort, meant to run in the background so a huge VOD list never
      * blocks live TV. Silent on failure: an account with no VOD is normal, not an error. */
     suspend fun syncVod(source: Source, nowUtcMillis: Long) = withContext(Dispatchers.IO) {
-        runCatching { if (source.kind == SourceKind.XTREAM) syncXtreamVod(source, nowUtcMillis) }
+        val secureSource = source.copy(url = HttpsUrlPolicy.withDefaultHttps(source.url))
+        if (!HttpsUrlPolicy.isHttps(secureSource.url)) return@withContext
+        runCatching { if (secureSource.kind == SourceKind.XTREAM) syncXtreamVod(secureSource, nowUtcMillis) }
             .onFailure { Log.w(TAG, "VOD sync failed for source ${source.id}", it) }
     }
 

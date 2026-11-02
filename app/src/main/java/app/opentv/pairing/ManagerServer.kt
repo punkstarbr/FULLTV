@@ -384,14 +384,18 @@ class ManagerServer(
             writeJson(output, AddResultDto.serializer(), AddResultDto(ok = false, error = "Fill in the required fields for this provider type."))
             return
         }
-        val result = runBlocking {
-            val id = sourceRepository.save(draft)
-            val saved = sourceRepository.byId(id)
-                ?: return@runBlocking AddResultDto(ok = false, error = "Could not save the source.")
-            when (val r = catalog.syncLive(saved, System.currentTimeMillis())) {
-                is CatalogRepository.SyncResult.Success -> AddResultDto(ok = true, channels = r.channelCount)
-                is CatalogRepository.SyncResult.Failed -> AddResultDto(ok = false, error = r.reason)
+        val result = runCatching {
+            runBlocking {
+                val id = sourceRepository.save(draft)
+                val saved = sourceRepository.byId(id)
+                    ?: return@runBlocking AddResultDto(ok = false, error = "Could not save the source.")
+                when (val r = catalog.syncLive(saved, System.currentTimeMillis())) {
+                    is CatalogRepository.SyncResult.Success -> AddResultDto(ok = true, channels = r.channelCount)
+                    is CatalogRepository.SyncResult.Failed -> AddResultDto(ok = false, error = r.reason)
+                }
             }
+        }.getOrElse { error ->
+            AddResultDto(ok = false, error = error.message ?: "Could not save the source.")
         }
         writeJson(output, AddResultDto.serializer(), result)
     }

@@ -9,6 +9,7 @@ import app.opentv.data.db.SourceDao
 import app.opentv.data.model.Source
 import app.opentv.data.model.SourceKind
 import app.opentv.data.parser.YouTubeLiveSearchUrl
+import app.opentv.data.remote.HttpsUrlPolicy
 import app.opentv.data.remote.StalkerApi
 import app.opentv.data.remote.XtreamApi
 import kotlinx.coroutines.Dispatchers
@@ -27,7 +28,7 @@ class SourceRepository(
     suspend fun byId(id: Long): Source? = dao.byId(id)
 
     suspend fun save(source: Source): Long = withContext(Dispatchers.IO) {
-        val normalised = source.copy(url = normaliseUrl(source.url, source.kind))
+        val normalised = normaliseAndValidate(source)
         if (source.id == 0L) dao.insert(normalised)
         else {
             dao.update(normalised)
@@ -38,11 +39,10 @@ class SourceRepository(
     /** Checks the details work before the user is committed to them. */
     suspend fun test(source: Source): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
-            when (source.kind) {
+            val secure = normaliseAndValidate(source)
+            when (secure.kind) {
                 SourceKind.XTREAM -> {
-                    val info = api.authenticate(
-                        source.copy(url = normaliseUrl(source.url, source.kind)),
-                    )
+                    val info = api.authenticate(secure)
                     buildString {
                         append("Connected")
                         info.username?.let { append(" as $it") }
@@ -52,7 +52,7 @@ class SourceRepository(
                         }
                     }
                 }
-                SourceKind.M3U -> "Playlist address looks valid. It will be checked on first sync."
+                SourceKind.M3U -> "HTTPS playlist URL format is valid. This check does not contact the server; the first sync will verify it."
                 SourceKind.YOUTUBE_LIVE_SEARCH -> {
                     if (YouTubeLiveSearchUrl.normalize(source.url) == null) {
                         error("Enter a YouTube /results URL with a search_query parameter.")
@@ -60,7 +60,7 @@ class SourceRepository(
                     "YouTube search URL format looks valid. Live results are checked during sync."
                 }
                 SourceKind.STALKER -> {
-                    stalkerApi.handshakeTest(source.copy(url = normaliseUrl(source.url, source.kind)))
+                    stalkerApi.handshakeTest(secure)
                     "Portal accepted the MAC address. Loading channels…"
                 }
             }
@@ -82,9 +82,7 @@ class SourceRepository(
         fun normaliseUrl(raw: String, kind: SourceKind): String {
             var url = raw.trim()
             if (url.isEmpty()) return url
-            if (!url.startsWith("http://", true) && !url.startsWith("https://", true)) {
-                url = "http://$url"
-            }
+            url = HttpsUrlPolicy.withDefaultHttps(url)
             if (kind == SourceKind.M3U) return url
             if (kind == SourceKind.YOUTUBE_LIVE_SEARCH) {
                 return YouTubeLiveSearchUrl.normalize(url) ?: url
@@ -98,6 +96,19 @@ class SourceRepository(
                 .substringBefore("/get.php")
                 .substringBefore("/xmltv.php")
             return url.trimEnd('/')
+        }
+
+        private fun normaliseAndValidate(source: Source): Source {
+            val epgUrl = source.epgUrl?.trim()?.takeIf { it.isNotEmpty() }
+                ?.let(HttpsUrlPolicy::withDefaultHttps)
+            val normalized = source.copy(
+                url = normaliseUrl(source.url, source.kind),
+                epgUrl = epgUrl,
+            )
+            require(normalized.url.isNotBlank()) { "Enter a source URL." }
+            HttpsUrlPolicy.requireHttps(normalized.url)
+            HttpsUrlPolicy.requireHttps(normalized.epgUrl)
+            return normalized
         }
     }
 }

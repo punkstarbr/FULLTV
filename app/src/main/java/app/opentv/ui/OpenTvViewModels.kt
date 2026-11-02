@@ -25,6 +25,8 @@ import app.opentv.data.model.StremioStream
 import app.opentv.data.model.StreamKind
 import app.opentv.data.parser.displayTitle
 import app.opentv.data.parser.ChannelNameNormalizer
+import app.opentv.data.remote.HttpsRequiredException
+import app.opentv.data.remote.HttpsUrlPolicy
 import app.opentv.data.repo.CatalogRepository
 import app.opentv.data.repo.GenreGroup
 import app.opentv.data.repo.MovieVariantGroup
@@ -103,10 +105,13 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             _ui.value = _ui.value.copy(testing = true, testResult = null, testError = null)
             val result = graph.sourceRepository.test(draft)
+            val error = result.exceptionOrNull()
             _ui.value = _ui.value.copy(
                 testing = false,
                 testResult = result.getOrNull(),
-                testError = result.exceptionOrNull()?.message,
+                testError = if (error is HttpsRequiredException) {
+                    getApplication<Application>().getString(R.string.source_https_required)
+                } else error?.message,
             )
         }
     }
@@ -115,7 +120,16 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
     fun saveAndSync(draft: Source, onDone: (Boolean) -> Unit = {}) {
         viewModelScope.launch {
             _ui.value = _ui.value.copy(syncing = true, syncMessage = "Saving source…")
-            val id = graph.sourceRepository.save(draft)
+            val id = try {
+                graph.sourceRepository.save(draft)
+            } catch (error: Exception) {
+                val message = if (error is HttpsRequiredException) {
+                    getApplication<Application>().getString(R.string.source_https_required)
+                } else error.message ?: "Could not save source."
+                _ui.value = _ui.value.copy(syncing = false, syncMessage = message)
+                onDone(false)
+                return@launch
+            }
             val saved = graph.sourceRepository.byId(id)
             if (saved == null) {
                 _ui.value = _ui.value.copy(syncing = false, syncMessage = "Could not save source.")
@@ -130,7 +144,10 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
             // "loading channels" is a few seconds, not a twenty-minute blank screen.
             when (val result = graph.catalogRepository.syncLive(saved, now)) {
                 is CatalogRepository.SyncResult.Failed -> {
-                    _ui.value = _ui.value.copy(syncing = false, syncMessage = result.reason)
+                    val message = if (result.reason == HttpsUrlPolicy.REQUIRED_RESULT) {
+                        getApplication<Application>().getString(R.string.source_https_required)
+                    } else result.reason
+                    _ui.value = _ui.value.copy(syncing = false, syncMessage = message)
                     onDone(false)
                     return@launch
                 }
@@ -679,8 +696,15 @@ class EpgViewModel(app: Application) : AndroidViewModel(app) {
 
     fun addCustom(name: String, url: String) {
         viewModelScope.launch {
-            graph.epgRepository.addCustomFeed(name, url)
-            refresh()
+            try {
+                graph.epgRepository.addCustomFeed(name, url)
+                refresh()
+            } catch (error: Exception) {
+                val message = if (error is HttpsRequiredException) {
+                    getApplication<Application>().getString(R.string.epg_https_required)
+                } else error.message ?: getApplication<Application>().getString(R.string.epg_add_failed)
+                _ui.value = _ui.value.copy(statusLine = message)
+            }
         }
     }
 

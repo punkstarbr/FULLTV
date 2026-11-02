@@ -12,6 +12,7 @@ import app.opentv.data.model.Programme
 import app.opentv.data.model.Recording
 import app.opentv.data.model.RecordingStatus
 import app.opentv.data.model.SeriesRule
+import app.opentv.data.model.SourceKind
 import app.opentv.data.db.ChannelDao
 import app.opentv.data.model.Source
 import app.opentv.data.repo.EpgRepository
@@ -54,7 +55,7 @@ class RecordingEngine(
             title = title,
             description = programme?.description,
             filePath = locator,
-            streamUrl = recordUrlFor(channel.streamUrl),
+            streamUrl = RecordingUrlPolicy.forCapture(channel.streamUrl, source?.kind),
             userAgent = ua,
             scheduledStartMillis = programme?.startUtcMillis ?: 0,
             // Keep going past the listed end by the padding, so an overrun isn't cut off.
@@ -135,7 +136,7 @@ class RecordingEngine(
             title = programme.title,
             description = programme.description,
             filePath = locator,
-            streamUrl = recordUrlFor(recordFrom.streamUrl),
+            streamUrl = RecordingUrlPolicy.forCapture(recordFrom.streamUrl, source?.kind),
             userAgent = ua,
             scheduledStartMillis = scheduledStart,
             scheduledEndMillis = scheduledEnd,
@@ -300,16 +301,23 @@ class RecordingEngine(
         }
     }
 
-    /**
-     * Live Xtream URLs are cached as `.m3u8` (HLS) for playback, but the raw `.ts` MPEG-TS variant
-     * is a single continuous body that captures to a directly-playable file with no segment
-     * stitching. Other URL shapes (plain M3U) are recorded verbatim.
-     */
-    private fun recordUrlFor(streamUrl: String): String =
-        if (streamUrl.endsWith(".m3u8")) streamUrl.removeSuffix(".m3u8") + ".ts" else streamUrl
-
     private companion object {
         /** A programme starting within this window counts as "on now" and records immediately. */
         const val LEAD_MILLIS = 20_000L
+    }
+}
+
+/** Xtream exposes a sibling raw MPEG-TS endpoint; generic M3U URLs must not be rewritten. */
+internal object RecordingUrlPolicy {
+    fun forCapture(streamUrl: String, sourceKind: SourceKind?): String {
+        if (sourceKind != SourceKind.XTREAM) return streamUrl
+
+        val suffixStart = listOf(streamUrl.indexOf('?'), streamUrl.indexOf('#'))
+            .filter { it >= 0 }
+            .minOrNull() ?: streamUrl.length
+        val path = streamUrl.substring(0, suffixStart)
+        if (!path.endsWith(".m3u8", ignoreCase = true)) return streamUrl
+
+        return path.dropLast(".m3u8".length) + ".ts" + streamUrl.substring(suffixStart)
     }
 }

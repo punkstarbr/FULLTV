@@ -12,6 +12,7 @@ import app.opentv.core.LocaleUtils
 import app.opentv.core.ServiceLocator
 import app.opentv.data.repo.CatalogRepository
 import app.opentv.data.work.SyncWorker
+import app.opentv.recording.RecordingStorage
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.disk.DiskCache
@@ -82,7 +83,18 @@ class OpenTvApp : Application(), ImageLoaderFactory {
         // Cold-start reconciliation: a recording still marked "in progress" at process start is an
         // orphan from a killed capture. Done here, once per process — NOT when the Recordings screen
         // opens — so checking on a recording you just started never marks it interrupted.
-        appScope.launch { runCatching { graph.recordingRepository.failInterrupted() } }
+        appScope.launch {
+            val interrupted = runCatching { graph.recordingRepository.active() }
+                .onFailure { Log.w(TAG, "Could not inspect interrupted recordings", it) }
+                .getOrDefault(emptyList())
+            runCatching { graph.recordingRepository.failInterrupted() }
+                .onFailure { Log.w(TAG, "Could not mark interrupted recordings", it) }
+            interrupted
+                .filter { RecordingStorage.sizeOf(it.filePath) == 0L }
+                .forEach { recording ->
+                    RecordingStorage.delete(this@OpenTvApp, graph.settings, recording.filePath)
+                }
+        }
 
         // Re-arm scheduled recordings on every launch, for the same reason as the reminders below:
         // a force-stop or app update drops their exact alarms and only a reboot is covered by the

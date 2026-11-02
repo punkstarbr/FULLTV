@@ -6,6 +6,7 @@
 package app.opentv.player
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.ByteBuffer
@@ -50,6 +51,16 @@ class PcmStreamWindowBuilderTest {
         assertEquals(1, afterFormatChange.size)
         assertEquals(0, afterFormatChange.single().sequence)
         assertEquals(-0.25f, afterFormatChange.single().samples[30_000], 0.001f)
+    }
+
+    @Test
+    fun `silent windows are marked inactive for the transcription worker`() {
+        val builder = PcmStreamWindowBuilder()
+
+        val windows = builder.push(monoPcm16(frames = 48_000 * 5, sample = 0), 48_000, 1)
+
+        assertEquals(1, windows.size)
+        assertFalse(windows.single().hasVoiceActivity)
     }
 
     private fun stereoPcm16(frames: Int, sample: Short): ByteArray {

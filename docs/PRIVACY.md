@@ -38,10 +38,14 @@ If you record a YouTube live, Streamlink reads the HLS media bytes on the device
 recording service writes them to the storage destination you selected. FullTV does not relay or
 store those bytes on a FullTV server.
 
-If you enable automatic Portuguese captions, FullTV downloads the Whisper speech model from
-Hugging Face (about 78 MB) and the required Google ML Kit translation model (about 30 MB) on first
-use. Audio is decoded, transcribed and translated on the device; FullTV does not upload audio or
-transcripts. The downloaded models remain in app-private storage until the app is uninstalled.
+If you enable automatic Portuguese captions and open a channel, FullTV downloads the multilingual
+Whisper tiny Q5 speech model from Hugging Face (about 31 MiB). It is loaded into memory only while
+the player is open with captions enabled, and is released when the player closes. Short audio
+windows pass through a local energy-based voice-activity detector; silent windows are not sent to
+Whisper. A Google ML Kit translation model (about 30 MB) is downloaded only when needed for speech
+in a supported non-Portuguese language. Audio is decoded, transcribed and translated on the device;
+FullTV does not upload audio or transcripts. Downloaded model files stay in app-private storage
+until removed from Settings or the app is uninstalled.
 
 ## Cleartext HTTP
 

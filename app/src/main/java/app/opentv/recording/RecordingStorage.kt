@@ -108,7 +108,12 @@ object RecordingStorage {
         else -> {
             val file = File(locator)
             file.parentFile?.mkdirs()
-            val out = FileOutputStream(file)
+            val out = try {
+                FileOutputStream(file)
+            } catch (error: Exception) {
+                if (file.exists() && file.length() == 0L) runCatching { file.delete() }
+                throw error
+            }
             Sink(out) { runCatching { out.close() } }
         }
     }
@@ -127,8 +132,15 @@ object RecordingStorage {
         }
         val doc = tree.createFile(mimeForFilename(filename), filename)
             ?: throw IOException(context.getString(R.string.rec_error_usb_unavailable))
-        val out = context.contentResolver.openOutputStream(doc.uri)
-            ?: throw IOException(context.getString(R.string.rec_error_usb_unavailable))
+        val out = try {
+            context.contentResolver.openOutputStream(doc.uri)
+        } catch (error: Exception) {
+            runCatching { doc.delete() }
+            throw error
+        } ?: run {
+            runCatching { doc.delete() }
+            throw IOException(context.getString(R.string.rec_error_usb_unavailable))
+        }
         return Sink(out, resolvedLocator = doc.uri.toString()) {
             runCatching { out.flush(); out.close() }
         }

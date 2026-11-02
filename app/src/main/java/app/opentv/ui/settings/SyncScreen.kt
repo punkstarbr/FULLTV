@@ -175,6 +175,12 @@ private fun BackupPane() {
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.sync_backup_scope_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(
                 value = passphrase,

@@ -16,9 +16,45 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.launch
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.abs
+import kotlin.math.sqrt
 
 /** A short mono 16 kHz PCM window, ready to be written as a WAV file for Whisper. */
-internal data class PcmAudioWindow(val sequence: Int, val samples: FloatArray)
+internal data class PcmAudioWindow(
+    val sequence: Int,
+    val samples: FloatArray,
+    val hasVoiceActivity: Boolean = true,
+)
+
+/** Lightweight energy-based VAD. Runs on the PCM worker, never on Media3's playback thread. */
+internal object PcmVoiceActivityDetector {
+    private const val FRAME_SAMPLES = 320 // 20 ms at the normalized 16 kHz sample rate.
+    private const val MIN_RMS = 0.008f
+    private const val MIN_PEAK = 0.020f
+    private const val MIN_ACTIVE_FRAMES = 4
+
+    fun containsSpeech(samples: FloatArray): Boolean {
+        if (samples.size < FRAME_SAMPLES * MIN_ACTIVE_FRAMES) return false
+
+        var activeFrames = 0
+        var frameStart = 0
+        while (frameStart < samples.size) {
+            val frameEnd = (frameStart + FRAME_SAMPLES).coerceAtMost(samples.size)
+            var squareSum = 0.0
+            var peak = 0f
+            for (index in frameStart until frameEnd) {
+                val sample = samples[index]
+                squareSum += sample.toDouble() * sample
+                peak = maxOf(peak, abs(sample))
+            }
+            val frameSize = frameEnd - frameStart
+            val rms = sqrt(squareSum / frameSize).toFloat()
+            if (rms >= MIN_RMS && peak >= MIN_PEAK) activeFrames++
+            frameStart = frameEnd
+        }
+        return activeFrames >= MIN_ACTIVE_FRAMES
+    }
+}
 
 /**
  * Non-blocking Media3 tee sink. The playback thread only copies a bounded PCM buffer into a
@@ -49,8 +85,9 @@ internal class LivePcmAudioCapture(
                     Event.Reset -> builder.reset()
                     is Event.Audio -> {
                         event.bytes.let { bytes ->
-                            builder.push(bytes, event.format.sampleRateHz, event.format.channelCount)
-                                .forEach(onWindow)
+                                builder.push(bytes, event.format.sampleRateHz, event.format.channelCount)
+                                    .filter(PcmAudioWindow::hasVoiceActivity)
+                                    .forEach(onWindow)
                         }
                     }
                 }
@@ -141,7 +178,11 @@ internal class PcmStreamWindowBuilder {
                 outputSamples++
                 if (samples.size >= WINDOW_SAMPLES) {
                     val window = FloatArray(WINDOW_SAMPLES) { samples[it] }
-                    windows += PcmAudioWindow(nextSequence++, window)
+                    windows += PcmAudioWindow(
+                        sequence = nextSequence++,
+                        samples = window,
+                        hasVoiceActivity = PcmVoiceActivityDetector.containsSpeech(window),
+                    )
                     val retained = ArrayList(samples.subList(HOP_SAMPLES, samples.size))
                     samples.clear()
                     samples.addAll(retained)

@@ -448,7 +448,11 @@ private fun statusLine(rec: Recording): String {
         RecordingStatus.SCHEDULED ->
             stringResource(R.string.rec_status_scheduled_at, whenStr, rec.channelName)
         RecordingStatus.RECORDING ->
-            stringResource(R.string.rec_status_recording, rec.channelName, formatSize(rec.sizeBytes))
+            if (rec.sizeBytes <= 0L) {
+                stringResource(R.string.rec_status_connecting, rec.channelName)
+            } else {
+                stringResource(R.string.rec_status_recording, rec.channelName, formatSize(rec.sizeBytes))
+            }
         RecordingStatus.COMPLETED ->
             listOf(whenStr, rec.channelName, formatDuration(rec.durationMillis), formatSize(rec.sizeBytes))
                 .filter { it.isNotBlank() }.joinToString(" · ")
@@ -466,9 +470,11 @@ private fun statusColor(status: RecordingStatus): Color = when (status) {
 }
 
 private fun formatSize(bytes: Long): String {
-    if (bytes <= 0) return "0 MB"
+    if (bytes <= 0) return "0 B"
+    if (bytes < 1024) return "$bytes B"
+    if (bytes < 1024 * 1024) return String.format("%.0f KiB", bytes / 1024.0)
     val mb = bytes / (1024.0 * 1024.0)
-    return if (mb >= 1024) String.format("%.1f GB", mb / 1024.0) else String.format("%.0f MB", mb)
+    return if (mb >= 1024) String.format("%.1f GB", mb / 1024.0) else String.format("%.1f MiB", mb)
 }
 
 private fun formatDuration(millis: Long): String {

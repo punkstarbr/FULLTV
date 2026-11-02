@@ -267,6 +267,7 @@ private fun OpenTvApp(isTelevision: Boolean) {
     }
     LaunchedEffect(start) {
         if (start == Routes.HOME && bootSettings.resumeLastChannel.value && bootSettings.lastChannelId != 0L) {
+            app.opentv.player.PlaybackQueue.clear()
             navController.navigate(Routes.player(bootSettings.lastChannelId))
         }
     }
@@ -278,6 +279,7 @@ private fun OpenTvApp(isTelevision: Boolean) {
         val id = playRequest
         if (id != null && id != 0L) {
             app.opentv.core.PlayRequests.consume()
+            app.opentv.player.PlaybackQueue.clear()
             navController.navigate(Routes.player(id))
         }
     }
@@ -419,7 +421,10 @@ private fun OpenTvApp(isTelevision: Boolean) {
 
             composable(Routes.SEARCH) {
                 SearchScreen(
-                    onPlayChannel = { channel -> navController.navigate(Routes.player(channel.id)) },
+                    onPlayChannel = { channel ->
+                        app.opentv.player.PlaybackQueue.clear()
+                        navController.navigate(Routes.player(channel.id))
+                    },
                     onPlayMovie = { movie ->
                         navController.navigate(
                             Routes.vodPlayer(

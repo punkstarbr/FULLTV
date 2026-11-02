@@ -88,6 +88,7 @@
     <string name="rec_cancel_reminder">Cancelar lembrete</string>
     <string name="rec_status_scheduled">Agendado · %1$s</string>
     <string name="rec_status_recording">● A gravar · %1$s · %2$s</string>
+    <string name="rec_status_connecting">● A ligar · %1$s</string>
     <string name="rec_status_failed">Falhou · %1$s</string>
     <string name="rec_error_unknown">erro desconhecido</string>
     <string name="rec_notification_one">A gravar 1 programa</string>
@@ -97,6 +98,7 @@
     <string name="rec_error_nothing">Nada foi gravado</string>
     <string name="rec_error_usb_no_folder">Nenhuma pasta USB escolhida. Abra as definições de Gravação e escolha uma pasta na sua unidade.</string>
     <string name="rec_error_usb_unavailable">Unidade USB não disponível. Volte a ligar a unidade e escolha novamente a pasta nas definições de Gravação.</string>
+    <string name="rec_error_stalker_unavailable">Não foi possível resolver o URL do canal Stalker. Verifique a ligação ao fornecedor.</string>
     <string name="rec_background_prompt_title">Continuar a gravar ao sair?</string>
     <string name="rec_background_prompt_body">O Android pode interromper esta gravação quando o ecrã adormece ou sai do FullTV. Permita que o FullTV ignore a otimização de bateria para que as gravações continuem, mesmo em standby — tal como uma set-top box.</string>
     <string name="rec_background_prompt_allow">Permitir</string>
@@ -172,6 +174,8 @@
     <string name="settings_section_playback">Reprodução</string>
     <string name="settings_subtitles_title">Mostrar legendas quando disponíveis</string>
     <string name="settings_subtitles_subtitle">A predefinição para novos canais. Durante a visualização, o botão Legendas no leitor permite escolher uma faixa específica ou desativá-las.</string>
+    <string name="settings_ai_subtitles_title">Gerar legendas em português com IA</string>
+    <string name="settings_ai_subtitles_subtitle">Usa o modelo multilíngue Whisper tiny Q5 no aparelho e traduz localmente. Depois de ativar e abrir um canal, o primeiro uso descarrega cerca de 31 MiB para a fala; os modelos de tradução são descarregados apenas quando necessários. O modelo de fala só fica carregado na memória enquanto o leitor está aberto com esta opção ativada. Consome mais CPU e memória; requer ARM64 e pelo menos 512 MB de memória para a aplicação.</string>
     <string name="settings_resume_title">Retomar o último canal ao iniciar</string>
     <string name="settings_resume_subtitle">Abre a aplicação diretamente no último canal que estava a ver, em vez do guia. Prima Voltar para aceder ao guia.</string>
     <string name="settings_sleep_timer">Temporizador de suspensão</string>
@@ -263,6 +267,13 @@
     <string name="recset_background_on_title">A gravação em segundo plano está ativa</string>
     <string name="recset_background_on_desc">As gravações continuam a decorrer quando sai do FullTV ou a TV entra em suspensão.</string>
     <string name="recset_background_toast">Gravação em segundo plano ativada — as gravações continuam em segundo plano.</string>
+    <string name="recset_exact_alarm_title">Alarmes de gravações agendadas</string>
+    <string name="recset_exact_alarm_desc">O Android pode revogar o acesso a alarmes exatos. Sem essa permissão, as gravações agendadas podem começar tarde ou falhar. Verifique este estado depois de alterar as permissões do sistema.</string>
+    <string name="recset_exact_alarm_supported">Esta versão do Android permite alarmes exatos por predefinição.</string>
+    <string name="recset_exact_alarm_allowed">Os alarmes exatos estão permitidos neste dispositivo.</string>
+    <string name="recset_exact_alarm_denied">Os alarmes exatos não estão permitidos. As gravações agendadas podem começar tarde ou falhar.</string>
+    <string name="recset_exact_alarm_open_settings">Abrir definições de alarmes exatos</string>
+    <string name="recset_exact_alarm_open_failed">Não foi possível abrir as definições de alarmes. Verifique o FullTV nas definições de aplicações do Android.</string>
     <string name="epg_updating">A atualizar…</string>
     <string name="epg_update_now">Atualizar guia agora</string>
     <string name="epg_desc">O guia do seu fornecedor é usado automaticamente. Se estiver vazio — muitos estão — ative um guia gratuito para o seu país e os canais são associados a ele pelo nome.</string>
@@ -270,7 +281,10 @@
     <string name="epg_name_optional">Nome (opcional)</string>
     <string name="epg_xmltv_url">URL XMLTV (.xml ou .xml.gz)</string>
     <string name="epg_add_guide">Adicionar guia</string>
+    <string name="epg_add_failed">Não foi possível adicionar este guia.</string>
     <string name="epg_multiple_guides_note">Os URLs dos guias são detetados em qualquer linha da M3U. Todos os guias exclusivos encontrados são adicionados e ativados automaticamente. Listas com muitas regiões podem consumir bastante rede e armazenamento; pause os guias que não utiliza nas Definições. URLs HTTP sem encriptação são bloqueados por segurança; prefira HTTPS.</string>
+    <string name="epg_https_required">Este guia não usa HTTPS, obrigatório no FullTV. Altere para um URL HTTPS; o guia anterior mantém-se disponível até uma atualização bem-sucedida.</string>
+    <string name="sync_backup_scope_note">A cópia inclui apenas configurações e metadados de reprodução, não os ficheiros de vídeo. As gravações locais/USB têm de ser copiadas separadamente; as gravações no NAS permanecem no NAS. Escolha novamente a pasta USB depois de restaurar.</string>
     <string name="epg_pause_extra_guides">Pausar guias extra das listas</string>
     <string name="epg_pause_extra_confirm_title">Pausar e limpar guias extra da M3U?</string>
     <string name="epg_pause_extra_confirm_body">Isto desativa os guias encontrados nas listas M3U e remove apenas os dados de programação guardados por eles. O primeiro guia de cada lista, canais, favoritos e gravações são mantidos. Pode voltar a ativar um guia mais tarde.</string>
@@ -356,12 +370,14 @@
     <string name="onboarding_xtream_login">Início de sessão Xtream Codes</string>
     <string name="onboarding_m3u_url">URL da lista M3U</string>
     <string name="onboarding_stalker_portal">Portal Stalker</string>
+    <string name="onboarding_source_order_note">Com várias fontes, os canais são agrupados pela ordem em que foram adicionadas. Em cada M3U, a ordem da lista é preservada; as variantes de qualidade podem surgir separadamente.</string>
+    <string name="source_https_required">O FullTV só aceita endereços HTTPS. URLs HTTP e outros esquemas são bloqueados; se o seu fornecedor não oferecer HTTPS, esta fonte não é suportada.</string>
     <string name="onboarding_server_address">Endereço do servidor</string>
     <string name="onboarding_playlist_url">URL da lista</string>
     <string name="onboarding_portal_url">URL do portal</string>
-    <string name="onboarding_server_help">Por exemplo http://example.com:8080 — cole a linha completa do seu fornecedor se for mais fácil, os elementos extra são removidos.</string>
-    <string name="onboarding_playlist_help">A ligação http completa para o seu ficheiro .m3u ou .m3u8.</string>
-    <string name="onboarding_portal_help">O endereço do portal do seu fornecedor, por exemplo http://host:port/c/ — os elementos extra são removidos.</string>
+    <string name="onboarding_server_help">Por exemplo https://example.com:8080 — cole a linha completa do seu fornecedor se for mais fácil, os elementos extra são removidos.</string>
+    <string name="onboarding_playlist_help">A ligação HTTPS completa para o seu ficheiro .m3u ou .m3u8.</string>
+    <string name="onboarding_portal_help">O endereço do portal do seu fornecedor, por exemplo https://host:port/c/ — os elementos extra são removidos.</string>
     <string name="onboarding_mac_address">Endereço MAC</string>
     <string name="onboarding_mac_help">O MAC que o seu fornecedor associou à sua linha, por exemplo 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">Ocultar avançado</string>

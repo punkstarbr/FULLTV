@@ -127,6 +127,10 @@ internal class AutoPortugueseSubtitleEngine(context: Context) : AutoCloseable {
 
                 for (window in windows) {
                     currentCoroutineContext().ensureActive()
+                    if (!window.hasVoiceActivity) {
+                        setPhase(AutoSubtitlePhase.WAITING_FOR_AUDIO)
+                        continue
+                    }
                     val model = whisperModel ?: break
                     val wavFile = writeWav(window.samples)
                     try {
@@ -141,6 +145,7 @@ internal class AutoPortugueseSubtitleEngine(context: Context) : AutoCloseable {
                                 printTimestamps = true,
                             ),
                         )
+                        currentCoroutineContext().ensureActive()
                         val candidate = result.segments
                             .lastOrNull { window.sequence == 0 || it.startMs >= OVERLAP_SKIP_MS }
                             ?.text
@@ -212,6 +217,8 @@ internal class AutoPortugueseSubtitleEngine(context: Context) : AutoCloseable {
 
     private suspend fun ensureWhisperModel(): File = withContext(Dispatchers.IO) {
         val directory = File(appContext.filesDir, "ai-models/whisper").apply { mkdirs() }
+        // Remove the previous unquantized asset so upgrades do not leave an unused 78 MB file.
+        File(directory, LEGACY_MODEL_FILE_NAME).delete()
         val model = File(directory, MODEL_FILE_NAME)
         if (model.length() == MODEL_SIZE_BYTES && sha256(model) == MODEL_SHA256) return@withContext model
         model.delete()
@@ -336,21 +343,29 @@ internal class AutoPortugueseSubtitleEngine(context: Context) : AutoCloseable {
         closed = true
         audioBufferSink.close()
         windows.close()
-        processingJob?.cancel()
         captionExpiryJob?.cancel()
+        val activeJob = processingJob
+        activeJob?.cancel()
+        if (activeJob == null || activeJob.isCompleted) releaseModelResources()
+        else activeJob.invokeOnCompletion { releaseModelResources() }
+        workerScope.cancel()
+    }
+
+    private fun releaseModelResources() {
         languageIdentifier?.close()
+        languageIdentifier = null
         translators.values.forEach { runCatching { it.close() } }
         translators.clear()
         whisperModel?.let { runCatching { Whisper.releaseModel(it) } }
         whisperModel = null
-        workerScope.cancel()
     }
 
     private companion object {
-        const val MODEL_FILE_NAME = "ggml-tiny.bin"
-        const val MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin?download=true"
-        const val MODEL_SIZE_BYTES = 77_691_713L
-        const val MODEL_SHA256 = "be07e048e1e599ad46341c8d2a135645097a538221678b7acdd1b1919c6e1b21"
+        const val MODEL_FILE_NAME = "ggml-tiny-q5_1.bin"
+        const val LEGACY_MODEL_FILE_NAME = "ggml-tiny.bin"
+        const val MODEL_URL = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny-q5_1.bin?download=true"
+        const val MODEL_SIZE_BYTES = 32_152_673L
+        const val MODEL_SHA256 = "818710568da3ca15689e31a743197b520007872ff9576237bda97bd1b469c3d7"
         const val PROGRESS_STEP_BYTES = 1_048_576L
         const val MIN_MEMORY_CLASS_MB = 512
         const val TARGET_SAMPLE_RATE = 16_000

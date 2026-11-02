@@ -47,6 +47,7 @@ import app.opentv.R
 import app.opentv.data.model.Source
 import app.opentv.data.model.SourceKind
 import app.opentv.data.parser.YouTubeLiveSearchUrl
+import app.opentv.data.remote.HttpsUrlPolicy
 import app.opentv.isRunningOnTelevision
 import app.opentv.ui.SourcesViewModel
 import app.opentv.ui.channels.readClipboardText
@@ -132,7 +133,9 @@ fun AddSourceScreen(
         )
     }
 
-    val canSubmit = url.isNotBlank() && when (kind) {
+    val hasUnsafeScheme = HttpsUrlPolicy.requiresSecureScheme(url) ||
+        (showAdvanced && HttpsUrlPolicy.requiresSecureScheme(epgUrl))
+    val canSubmit = url.isNotBlank() && !hasUnsafeScheme && when (kind) {
         SourceKind.XTREAM -> username.isNotBlank() && password.isNotBlank()
         SourceKind.M3U -> true
         SourceKind.YOUTUBE_LIVE_SEARCH -> YouTubeLiveSearchUrl.isSearchUrl(url)
@@ -186,6 +189,13 @@ fun AddSourceScreen(
                 )
             }
 
+            Spacer(Modifier.height(8.dp))
+            Text(
+                stringResource(R.string.onboarding_source_order_note),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+
             Spacer(Modifier.height(20.dp))
 
             OutlinedTextField(
@@ -214,14 +224,19 @@ fun AddSourceScreen(
                     )
                 },
                 supportingText = {
-                    Text(
-                        when (kind) {
-                            SourceKind.XTREAM -> stringResource(R.string.onboarding_server_help)
-                            SourceKind.M3U -> stringResource(R.string.onboarding_playlist_help)
-                            SourceKind.YOUTUBE_LIVE_SEARCH -> stringResource(R.string.onboarding_youtube_search_help)
-                            SourceKind.STALKER -> stringResource(R.string.onboarding_portal_help)
-                        },
-                    )
+                    Column {
+                        Text(
+                            when (kind) {
+                                SourceKind.XTREAM -> stringResource(R.string.onboarding_server_help)
+                                SourceKind.M3U -> stringResource(R.string.onboarding_playlist_help)
+                                SourceKind.YOUTUBE_LIVE_SEARCH -> stringResource(R.string.onboarding_youtube_search_help)
+                                SourceKind.STALKER -> stringResource(R.string.onboarding_portal_help)
+                            },
+                        )
+                        if (HttpsUrlPolicy.requiresSecureScheme(url)) {
+                            Text(stringResource(R.string.source_https_required), color = MaterialTheme.colorScheme.error)
+                        }
+                    }
                 },
                 trailingIcon = {
                     PasteButton { pasted ->
@@ -285,7 +300,12 @@ fun AddSourceScreen(
                     onValueChange = { epgUrl = it },
                     label = { Text(stringResource(R.string.onboarding_guide_url_optional)) },
                     supportingText = {
-                        Text(stringResource(R.string.onboarding_guide_blank_help))
+                        Column {
+                            Text(stringResource(R.string.onboarding_guide_blank_help))
+                            if (HttpsUrlPolicy.requiresSecureScheme(epgUrl)) {
+                                Text(stringResource(R.string.source_https_required), color = MaterialTheme.colorScheme.error)
+                            }
+                        }
                     },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),

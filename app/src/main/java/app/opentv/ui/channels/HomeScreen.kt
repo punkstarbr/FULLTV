@@ -238,9 +238,9 @@ fun HomeScreen(
     // live is funnelled through [requestLive]: with a recording active it asks first.
     var pendingLiveChannel by remember { mutableStateOf<Channel?>(null) }
     fun startLive(channel: Channel) {
-        PlaybackQueue.items = rows.map {
+        PlaybackQueue.publish(channel.id, rows.map {
             PlaybackQueue.Item(it.primary.id, it.primary.shownName, it.primary.logoUrl, it.primary.number)
-        }
+        })
         previewController.stop()
         onPlayChannel(channel)
     }

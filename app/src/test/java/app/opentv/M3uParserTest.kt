@@ -71,9 +71,8 @@ class M3uParserTest {
     }
 
     @Test
-    fun `duplicate tvg-ids do not collide`() {
-        // Providers routinely list SD and HD variants under one tvg-id. The unique index on
-        // (sourceId, streamId) would otherwise abort the entire import.
+    fun `same tvg-id retains distinct stream variants in playlist order`() {
+        // A guide id is shared across SD/HD variants; stream identity must include the URL.
         val playlist = """
             #EXTM3U
             #EXTINF:-1 tvg-id="dup",Channel SD
@@ -84,8 +83,27 @@ class M3uParserTest {
 
         val result = M3uParser.parse(playlist, sourceId = 1)
 
+        assertThat(result.channels).hasSize(2)
+        assertThat(result.channels.map { it.name }).containsExactly("Channel SD", "Channel HD").inOrder()
+        assertThat(result.channels.map { it.epgChannelId }).containsExactly("dup", "dup").inOrder()
+        assertThat(result.channels.map { it.streamId }.distinct()).hasSize(2)
+        assertThat(result.channels.map { it.sortIndex }).containsExactly(0, 1).inOrder()
+    }
+
+    @Test
+    fun `same tvg-id and exact same URL is deduplicated`() {
+        val playlist = """
+            #EXTM3U
+            #EXTINF:-1 tvg-id="dup",Channel
+            https://example.com/live.m3u8
+            #EXTINF:-1 tvg-id="dup",Channel duplicate
+            https://example.com/live.m3u8
+        """.trimIndent()
+
+        val result = M3uParser.parse(playlist, sourceId = 1)
+
         assertThat(result.channels).hasSize(1)
-        assertThat(result.channels.single().name).isEqualTo("Channel SD")
+        assertThat(result.channels.single().name).isEqualTo("Channel")
     }
 
     @Test

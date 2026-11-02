@@ -39,6 +39,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.opentv.R
+import app.opentv.data.remote.HttpsUrlPolicy
+import app.opentv.data.repo.EpgRepository
 import app.opentv.core.AppSettings
 import app.opentv.core.ServiceLocator
 import app.opentv.data.model.EpgFeed
@@ -177,6 +179,11 @@ fun EpgSettingsScreen(
                                 value = newUrl,
                                 onValueChange = { newUrl = it },
                                 label = { Text(stringResource(R.string.epg_xmltv_url)) },
+                                supportingText = {
+                                    if (HttpsUrlPolicy.requiresSecureScheme(newUrl)) {
+                                        Text(stringResource(R.string.epg_https_required), color = MaterialTheme.colorScheme.error)
+                                    }
+                                },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                             )
@@ -187,7 +194,7 @@ fun EpgSettingsScreen(
                                         viewModel.addCustom(newName, newUrl)
                                         newName = ""; newUrl = ""; showAdd = false
                                     },
-                                    enabled = newUrl.isNotBlank(),
+                                    enabled = newUrl.isNotBlank() && !HttpsUrlPolicy.requiresSecureScheme(newUrl),
                                 ) { Text(stringResource(R.string.epg_add_guide)) }
                                 TextButton(onClick = { showAdd = false }) { Text(stringResource(R.string.common_cancel)) }
                             }
@@ -237,7 +244,9 @@ private fun FeedRow(
                 // A guide that fails must say so where the user can see it.
                 if (feed.lastResult.isNotEmpty()) {
                     Text(
-                        feed.lastResult,
+                        if (feed.lastResult == EpgRepository.HTTPS_REQUIRED_RESULT) {
+                            stringResource(R.string.epg_https_required)
+                        } else feed.lastResult,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.11.22
+
+- **HTTPS-only sources:** bare hosts now default to HTTPS; explicit HTTP/other schemes are blocked
+  before save with a clear message. M3U format checks state that they do not test reachability.
+- **EPG reliability:** download and parse a new guide into private staging rows, then replace the
+  previous programmes and aliases in one transaction. Failed, cancelled, invalid or empty refreshes
+  keep the previous guide available.
+- **Player zapping:** consume only the guide queue matching the launch channel; direct opens from
+  search, resume or notifications build a stable fallback list and discard stale queue state.
+- **Playlist completeness:** preserve SD/HD variants sharing one `tvg-id`, deduplicate only identical
+  stream URLs, and retain original playlist order with stable source/order tie-breakers.
+- **Scheduled recordings:** show exact-alarm permission status and link to Android settings when
+  access is unavailable. The backup screen now separately emphasizes that video files are not moved.
+- **Recording stability:** keep Streamlink limited to YouTube, resolve Stalker URLs when capture
+  starts, and rewrite `.m3u8` to `.ts` only for Xtream. The destination now opens only after the
+  first media chunk arrives; that chunk is flushed (and synced for local files), so a crash before
+  media creates no empty video and a later crash preserves the partial capture. Progress appears
+  from the first chunk, and old zero-byte internal files from interrupted captures are removed on
+  the next launch. Destination write errors no longer masquerade as stream reconnects.
+- **Automatic Portuguese captions:** use the multilingual Whisper tiny Q5 model (~31 MiB) instead
+  of the unquantized ~78 MB model; load it only when enabled for playback, release it when leaving
+  the player, and skip silent 5-second audio windows with an energy-based VAD. Remove the old model
+  file when the updated caption engine first starts.
+- **Validation:** targeted JVM tests for HTTPS, M3U order/variants, player queue handoff, PCM/VAD
+  and recording URL policy pass. The full suite has 105 tests: 101 pass; four XMLTV/Robolectric tests
+  cannot load Conscrypt's ARM64 native library in the build sandbox. No interactive Fire TV/Android
+  device test was available.
+- **Signing:** the release uses the same debug-key certificate as v0.11.21 for upgrade compatibility;
+  this is not a production signing key, so a future key change will require an install migration.
+
 ## 0.11.21
 
 - **Web manager:** show the manual HTTP address and required access token in readable groups, and
