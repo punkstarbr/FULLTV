@@ -60,7 +60,6 @@ fun StorageSettingsScreen(onBack: () -> Unit) {
     var snapshot by remember { mutableStateOf<StorageSnapshot?>(null) }
     var isWorking by remember { mutableStateOf(false) }
     var showOptimizeConfirm by remember { mutableStateOf(false) }
-    var showRemoveModelConfirm by remember { mutableStateOf(false) }
     var statusMessage by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(reloadKey) {
@@ -100,7 +99,6 @@ fun StorageSettingsScreen(onBack: () -> Unit) {
                         context.getString(R.string.storage_internal_recordings, current.recordingCount),
                         current.recordingBytes,
                     )
-                    StorageMetric(context, R.string.storage_whisper_model, current.whisperModelBytes)
                     StorageMetric(context, R.string.storage_image_cache, current.imageCacheBytes)
                     StorageMetric(context, R.string.storage_free_space, current.freeBytes)
                 }
@@ -135,11 +133,6 @@ fun StorageSettingsScreen(onBack: () -> Unit) {
                 Text(if (isWorking) stringResource(R.string.storage_working) else stringResource(R.string.storage_optimize_database))
             }
 
-            OutlinedButton(
-                onClick = { showRemoveModelConfirm = true },
-                enabled = !isWorking && current.whisperModelBytes > 0,
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text(stringResource(R.string.storage_remove_whisper_model)) }
         }
 
         if (statusMessage != 0) {
@@ -180,37 +173,6 @@ fun StorageSettingsScreen(onBack: () -> Unit) {
         )
     }
 
-    if (showRemoveModelConfirm) {
-        AlertDialog(
-            onDismissRequest = { if (!isWorking) showRemoveModelConfirm = false },
-            title = { Text(stringResource(R.string.storage_remove_model_confirm_title)) },
-            text = { Text(stringResource(R.string.storage_remove_model_confirm_body)) },
-            confirmButton = {
-                TextButton(
-                    enabled = !isWorking,
-                    onClick = {
-                        showRemoveModelConfirm = false
-                        isWorking = true
-                        scope.launch {
-                            val removed = withContext(Dispatchers.IO) {
-                                runCatching {
-                                    File(context.filesDir, "ai-models/whisper").deleteRecursively()
-                                }.getOrDefault(false)
-                            }
-                            statusMessage = if (removed) R.string.storage_model_removed else R.string.storage_model_not_found
-                            isWorking = false
-                            reloadKey++
-                        }
-                    },
-                ) { Text(stringResource(R.string.common_remove)) }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRemoveModelConfirm = false }) {
-                    Text(stringResource(R.string.common_cancel))
-                }
-            },
-        )
-    }
 }
 
 @Composable
@@ -232,7 +194,6 @@ private data class StorageSnapshot(
     val databaseBytes: Long,
     val recordingBytes: Long,
     val recordingCount: Int,
-    val whisperModelBytes: Long,
     val imageCacheBytes: Long,
     val freeBytes: Long,
 )
@@ -246,7 +207,6 @@ private fun measureStorage(context: Context): StorageSnapshot {
         .sumOf { if (it.isFile) it.length() else 0L }
     val recordingDir = context.getExternalFilesDir(null)?.resolve("recordings")
     val recordingUsage = recordingDir?.let(::directoryUsage) ?: FileUsage()
-    val whisperDir = File(context.filesDir, "ai-models/whisper")
     val imageCacheDir = File(context.cacheDir, "image_cache")
     val externalFiles = context.getExternalFilesDir(null)
     val appDataBytes = directorySize(context.dataDir) + (externalFiles?.let(::directorySize) ?: 0L)
@@ -260,7 +220,6 @@ private fun measureStorage(context: Context): StorageSnapshot {
         databaseBytes = databaseBytes,
         recordingBytes = recordingUsage.bytes,
         recordingCount = recordingUsage.fileCount,
-        whisperModelBytes = directorySize(whisperDir),
         imageCacheBytes = directorySize(imageCacheDir),
         freeBytes = freeBytes,
     )

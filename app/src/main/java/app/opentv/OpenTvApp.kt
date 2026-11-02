@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
 
 class OpenTvApp : Application(), ImageLoaderFactory {
     private val startupErrorHandler = CoroutineExceptionHandler { _, error ->
-        Log.e(TAG, "Background startup task failed; continuing app startup", error)
+        Log.e(TAG, "Background startup task failed (${error.javaClass.simpleName}); continuing app startup")
     }
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + startupErrorHandler)
 
@@ -43,6 +43,7 @@ class OpenTvApp : Application(), ImageLoaderFactory {
      */
     override fun newImageLoader(): ImageLoader =
         ImageLoader.Builder(this)
+            .okHttpClient(ServiceLocator.get(this).httpClient)
             .memoryCache {
                 MemoryCache.Builder(this)
                     .maxSizePercent(0.10)
@@ -67,7 +68,15 @@ class OpenTvApp : Application(), ImageLoaderFactory {
         super.onCreate()
         val graph = ServiceLocator.get(this)
         runCatching { SyncWorker.schedule(this) }
-            .onFailure { Log.e(TAG, "Could not schedule background refresh", it) }
+            .onFailure { Log.e(TAG, "Could not schedule background refresh (${it.javaClass.simpleName})") }
+        appScope.launch {
+            runCatching {
+                File(filesDir, "ai-models/whisper").deleteRecursively()
+                cacheDir.listFiles()
+                    ?.filter { it.name.startsWith("fulltv-caption-") && it.extension == "wav" }
+                    ?.forEach { it.delete() }
+            }.onFailure { Log.i(TAG, "Legacy speech-caption data cleanup failed (${it.javaClass.simpleName})") }
+        }
         // A killed MP4 conversion can leave its local input/output pair behind. These are only
         // staging files; completed recordings live in the configured recording target.
         File(cacheDir, "remux").listFiles()?.forEach { file ->
@@ -85,10 +94,10 @@ class OpenTvApp : Application(), ImageLoaderFactory {
         // opens — so checking on a recording you just started never marks it interrupted.
         appScope.launch {
             val interrupted = runCatching { graph.recordingRepository.active() }
-                .onFailure { Log.w(TAG, "Could not inspect interrupted recordings", it) }
+                .onFailure { Log.w(TAG, "Could not inspect interrupted recordings (${it.javaClass.simpleName})") }
                 .getOrDefault(emptyList())
             runCatching { graph.recordingRepository.failInterrupted() }
-                .onFailure { Log.w(TAG, "Could not mark interrupted recordings", it) }
+                .onFailure { Log.w(TAG, "Could not mark interrupted recordings (${it.javaClass.simpleName})") }
             interrupted
                 .filter { RecordingStorage.sizeOf(it.filePath) == 0L }
                 .forEach { recording ->
@@ -130,7 +139,7 @@ class OpenTvApp : Application(), ImageLoaderFactory {
                     .onSuccess {
                         prefs.edit().putInt("normalizer_version", CatalogRepository.NORMALIZER_VERSION).apply()
                     }
-                    .onFailure { Log.w(TAG, "Channel normalization will retry later", it) }
+                    .onFailure { Log.w(TAG, "Channel normalization will retry later (${it.javaClass.simpleName})") }
             }
         }
 
@@ -139,13 +148,13 @@ class OpenTvApp : Application(), ImageLoaderFactory {
             // terminate the foreground app process.
             val now = System.currentTimeMillis()
             runCatching { graph.epgRepository.syncAll(now, force = false) }
-                .onFailure { Log.w(TAG, "EPG startup refresh will retry later", it) }
+                .onFailure { Log.w(TAG, "EPG startup refresh will retry later (${it.javaClass.simpleName})") }
             runCatching {
                 graph.database.programmes().deleteOutsideWindow(
                     now - app.opentv.data.repo.EpgRepository.RETENTION_PAST_MILLIS,
                     now + graph.epgRepository.retentionFutureMillis,
                 )
-            }.onFailure { Log.w(TAG, "Could not prune expired EPG rows", it) }
+            }.onFailure { Log.w(TAG, "Could not prune expired EPG rows (${it.javaClass.simpleName})") }
         }
     }
 

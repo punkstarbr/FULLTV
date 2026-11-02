@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">Alamat server</string>
     <string name="onboarding_playlist_url">URL playlist</string>
     <string name="onboarding_portal_url">URL portal</string>
-    <string name="onboarding_server_help">Contoh http://example.com:8080 — tempelkan saja seluruh baris dari penyedia Anda jika lebih mudah, bagian tambahan akan dipangkas.</string>
+    <string name="onboarding_server_help">Contoh https://example.com:8080 — tempelkan saja seluruh baris dari penyedia Anda jika lebih mudah, bagian tambahan akan dipangkas.</string>
     <string name="onboarding_playlist_help">Tautan http lengkap ke file .m3u atau .m3u8 Anda.</string>
-    <string name="onboarding_portal_help">Alamat portal dari penyedia Anda, mis. http://host:port/c/ — bagian tambahan akan dipangkas.</string>
+    <string name="onboarding_portal_help">Alamat portal dari penyedia Anda, mis. https://host:port/c/ — bagian tambahan akan dipangkas.</string>
     <string name="onboarding_mac_address">Alamat MAC</string>
     <string name="onboarding_mac_help">MAC yang dikaitkan penyedia Anda ke saluran Anda, mis. 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">Sembunyikan lanjutan</string>

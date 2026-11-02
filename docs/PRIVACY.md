@@ -5,14 +5,19 @@ network call to any domain the project controls — because the project controls
 
 ## What is stored, and where
 
-Everything lives in a SQLite database in the app's private storage on your device:
+The catalogue lives in a SQLite/Room database in the app's private storage on your device:
 
 - Your provider's address, username and password
 - The channel, movie and series catalogue downloaded from your provider
 - The guide (EPG)
 - Your favourites, hidden channels and resume positions
 
-None of it is uploaded anywhere. There is no account to create and no server to sync with.
+The Room database is not additionally encrypted with SQLCipher. Android's app sandbox and device
+encryption protect ordinary devices, but a rooted/unlocked device or forensic access can expose
+provider fields and URLs stored in that database. Do not treat the app PIN as encryption. Selected
+settings secrets (SMB credentials, TMDB key and Stremio add-on URLs) are separately AES-GCM-encrypted
+with a non-exportable Android Keystore key; the parental PIN verifier is a Keystore-keyed HMAC.
+None of the database contents is uploaded to a FullTV server. There is no FullTV account.
 
 ## Who your device talks to
 
@@ -38,14 +43,13 @@ If you record a YouTube live, Streamlink reads the HLS media bytes on the device
 recording service writes them to the storage destination you selected. FullTV does not relay or
 store those bytes on a FullTV server.
 
-If you enable automatic Portuguese captions and open a channel, FullTV downloads the multilingual
-Whisper tiny Q5 speech model from Hugging Face (about 31 MiB). It is loaded into memory only while
-the player is open with captions enabled, and is released when the player closes. Short audio
-windows pass through a local energy-based voice-activity detector; silent windows are not sent to
-Whisper. A Google ML Kit translation model (about 30 MB) is downloaded only when needed for speech
-in a supported non-Portuguese language. Audio is decoded, transcribed and translated on the device;
-FullTV does not upload audio or transcripts. Downloaded model files stay in app-private storage
-until removed from Settings or the app is uninstalled.
+If you enable Portuguese subtitle translation, FullTV translates only readable text cues emitted
+by a subtitle track supplied by the channel and selected in the player. If the stream has no text
+subtitle track (or supplies bitmap-only captions), FullTV does not create captions and does not
+capture, transcribe or upload audio. Google ML Kit identifies the cue language and translates it
+on-device; the applicable translation model is downloaded only when a supported non-Portuguese
+subtitle cue needs it. Translation model files are managed by Google Play services and may not be
+included in FullTV's app-private storage measurement.
 
 ## Cleartext HTTP
 
@@ -54,13 +58,24 @@ poster and stream URLs to use HTTPS. This prevents provider credentials and medi
 being read or modified by an observer on the network. Older HTTP-only IPTV panels are not
 supported by the hardened build; use the HTTPS endpoint supplied by the provider.
 
-Phone pairing and device sync use short-lived, LAN-only sockets. They are inbound local services,
-not internet endpoints, and are stopped automatically when their session ends.
+Phone pairing, Web Manager and device sync use TLS 1.2 on short-lived LAN-only sockets; there is no
+HTTP downgrade. Pairing and Web Manager use an app-generated certificate, so a browser may show a
+self-signed-certificate warning. Compare the browser's certificate fingerprint with the value
+shown on the TV before entering provider credentials. Device sync additionally requires an explicit
+short code and pinned public-key fingerprint. The listeners are inbound local services, not internet
+endpoints, and are stopped automatically when their session ends.
 
-Automatic Android backup is disabled. Provider credentials normally remain in app-private storage;
-if you explicitly export a `.fulltv` transfer file, its contents (including provider and NAS
-credentials) are compressed and encrypted with AES-256-GCM using a passphrase-derived key before
-they are written to the destination you choose. FullTV does not upload that file or the passphrase.
+NAS sync files contain keyed HMAC identifiers rather than raw provider stream URLs or credentials.
+The shared HMAC key is exchanged directly between paired devices over pinned TLS and is included
+only inside a user-encrypted backup, never in a NAS sync file. A legacy v3 sync file may contain
+older raw URLs; FullTV migrates compatible entries in memory and rewrites the file in the newer
+format after successful processing.
+
+Automatic Android backup is disabled. If you explicitly export a `.fulltv` transfer file, its
+contents (including provider and NAS credentials) are encrypted with AES-256-GCM using a
+passphrase-derived key before they are written to the destination you choose. New exports use a
+stronger PBKDF2 work factor and authenticate the format/KDF header; legacy backups remain readable.
+FullTV does not upload that file or the passphrase.
 The passphrase cannot be recovered if lost. Video recording files and device-specific USB folder
 permissions are not included; choose the USB folder again on the receiving device.
 

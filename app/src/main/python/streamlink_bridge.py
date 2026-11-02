@@ -5,6 +5,10 @@ import json
 import threading
 import uuid
 
+from fulltv_lxml_guard import harden_lxml
+
+harden_lxml()
+
 from streamlink import Streamlink
 from streamlink.plugin.api import useragents
 

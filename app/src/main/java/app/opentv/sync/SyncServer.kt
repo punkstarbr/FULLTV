@@ -7,18 +7,18 @@ package app.opentv.sync
 
 import android.util.Log
 import app.opentv.pairing.PairingHttp
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import app.opentv.security.LanTlsServer
 import java.net.InetAddress
 import java.net.NetworkInterface
-import java.net.ServerSocket
 import java.net.Socket
 import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,8 +33,16 @@ import kotlinx.coroutines.launch
  */
 class SyncServer(private val scope: CoroutineScope) {
 
-    data class Session(val host: String, val port: Int, val code: String) {
-        val address: String get() = "$host:$port"
+    data class Session(
+        val host: String,
+        val port: Int,
+        val code: String,
+        /** 96-bit SHA-256 SPKI pin; compare and type it on the receiving FullTV device. */
+        val syncPin: String,
+        /** Full certificate fingerprint for out-of-band verification if needed. */
+        val certificateSha256: String,
+    ) {
+        val address: String get() = "https://$host:$port"
     }
 
     sealed interface State {
@@ -46,56 +54,110 @@ class SyncServer(private val scope: CoroutineScope) {
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
 
-    private var serverSocket: ServerSocket? = null
+    private var serverSocket: LanTlsServer.Listener? = null
     private var code: String = ""
     private var bundle: String = ""
-    private var wrongAttempts = 0
+    private val wrongAttempts = java.util.concurrent.atomic.AtomicInteger(0)
     @Volatile private var running = false
+    @Volatile private var starting = false
+    @Volatile private var generation = 0
+    private var startJob: Job? = null
+    private val requestSlots = java.util.concurrent.Semaphore(4)
 
+    @Synchronized
     fun start(bundleJson: String) {
-        if (running) return
-        val host = lanAddress() ?: run {
-            _state.value = State.Failed("This device isn't on a network, so it can't share.")
+        if (running || starting) return
+        if (bundleJson.toByteArray(Charsets.UTF_8).size > MAX_BUNDLE_BYTES) {
+            _state.value = State.Failed("This sync bundle is too large to transfer securely.")
             return
         }
-        val random = SecureRandom()
-        code = "%06d".format(random.nextInt(1_000_000))
-        bundle = bundleJson
-        wrongAttempts = 0
-
-        val socket = try {
-            ServerSocket(0)
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not open a socket", e)
-            _state.value = State.Failed("Could not start sharing on this device.")
-            return
-        }
-        serverSocket = socket
-        running = true
-        _state.value = State.Sharing(Session(host, socket.localPort, code))
-
-        thread(name = "opentv-sync", isDaemon = true) {
-            while (running) {
-                val client = try {
-                    socket.accept()
-                } catch (_: Exception) {
-                    break
+        starting = true
+        val runGeneration = ++generation
+        startJob = scope.launch(Dispatchers.IO) {
+            var listener: LanTlsServer.Listener? = null
+            try {
+                val host = lanAddress() ?: run {
+                    _state.value = State.Failed("This device isn't on a network, so it can't share.")
+                    return@launch
                 }
-                runCatching { handle(client) }.onFailure { Log.w(TAG, "Sync request failed", it) }
-                runCatching { client.close() }
-            }
-        }
+                val random = SecureRandom()
+                val nextCode = "%06d".format(random.nextInt(1_000_000))
+                val opened = LanTlsServer.open(host)
+                listener = opened
+                if (runGeneration != generation) return@launch
 
-        scope.launch(Dispatchers.Default) {
-            delay(TimeUnit.MINUTES.toMillis(TIMEOUT_MINUTES))
-            if (running) {
-                stop()
-                _state.value = State.Failed("Sharing timed out. Start again when you're ready.")
+                code = nextCode
+                bundle = bundleJson
+                wrongAttempts.set(0)
+                serverSocket = opened
+                running = true
+                _state.value = State.Sharing(
+                    Session(
+                        host = opened.host,
+                        port = opened.port,
+                        code = code,
+                        syncPin = opened.syncPin,
+                        certificateSha256 = LanTlsServer.formatCertificateFingerprint(opened.certificateSha256),
+                    ),
+                )
+
+                thread(name = "opentv-sync-tls", isDaemon = true) {
+                    while (running && runGeneration == generation) {
+                        val client = try {
+                            opened.acceptClient(SOCKET_TIMEOUT_MILLIS)
+                        } catch (error: Exception) {
+                            if (!running || runGeneration != generation) break
+                            Log.w(TAG, "Rejected sync TLS connection (${error.javaClass.simpleName})")
+                            continue
+                        }
+                        if (!PairingHttp.isPrivateAddress(client.inetAddress?.hostAddress) || !requestSlots.tryAcquire()) {
+                            runCatching { client.close() }
+                            continue
+                        }
+                        thread(name = "opentv-sync-request", isDaemon = true) {
+                            try {
+                                opened.completeHandshake(client)
+                                if (running && runGeneration == generation) {
+                                    handle(client, "${opened.host}:${opened.port}")
+                                }
+                            } catch (error: Exception) {
+                                Log.w(TAG, "Sync request failed (${error.javaClass.simpleName})")
+                            } finally {
+                                runCatching { client.close() }
+                                requestSlots.release()
+                            }
+                        }
+                    }
+                }
+                listener = null // ownership transferred to stop()/the accept loop
+
+                scope.launch(Dispatchers.Default) {
+                    delay(TimeUnit.MINUTES.toMillis(TIMEOUT_MINUTES))
+                    if (running && runGeneration == generation) {
+                        stop()
+                        _state.value = State.Failed("Sharing timed out. Start again when you're ready.")
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not start TLS sync (${error.javaClass.simpleName})")
+                if (runGeneration == generation) {
+                    _state.value = State.Failed("Could not start secure sharing on this device.")
+                }
+            } finally {
+                runCatching { listener?.close() }
+                if (runGeneration == generation) starting = false
             }
         }
     }
 
+    @Synchronized
     fun stop() {
+        generation++
+        starting = false
+        startJob?.cancel()
+        startJob = null
         running = false
         runCatching { serverSocket?.close() }
         serverSocket = null
@@ -104,33 +166,37 @@ class SyncServer(private val scope: CoroutineScope) {
         if (_state.value is State.Sharing) _state.value = State.Idle
     }
 
-    private fun handle(client: Socket) {
-        client.soTimeout = SOCKET_TIMEOUT_MILLIS
+    private fun handle(client: Socket, expectedAuthority: String) {
         if (!PairingHttp.isPrivateAddress(client.inetAddress?.hostAddress)) {
             client.getOutputStream().write(
                 PairingHttp.httpResponse("403 Forbidden", "text/plain", "Local network only."),
             )
             return
         }
-        val reader = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
-        val requestLine = reader.readLine() ?: return
-        val (method, path, query) = PairingHttp.parseRequestLine(requestLine) ?: return
-        // Drain headers.
-        while (true) {
-            val line = reader.readLine() ?: break
-            if (line.isEmpty()) break
-        }
-
         val output = client.getOutputStream()
-        val supplied = query["c"].orEmpty().filter { it.isDigit() }
+        val request = try {
+            PairingHttp.readRequest(client.getInputStream(), maxBodyBytes = 0)
+        } catch (error: PairingHttp.RequestException) {
+            output.write(PairingHttp.httpResponse(error.status, "text/plain", "Invalid request."))
+            return
+        } ?: return
+        if (!request.headers["host"].equals(expectedAuthority, ignoreCase = true)) {
+            output.write(PairingHttp.httpResponse("421 Misdirected Request", "text/plain", "Wrong local host."))
+            return
+        }
+        if (request.headers.containsKey("origin") || request.headers["x-fulltv-sync"] != "1") {
+            output.write(PairingHttp.httpResponse("403 Forbidden", "text/plain", "Browser requests are not accepted."))
+            return
+        }
+        val supplied = request.query["c"].orEmpty()
 
-        if (method != "GET" || !path.startsWith("/export")) {
+        if (request.method != "GET" || request.path != "/export") {
             output.write(PairingHttp.httpResponse("404 Not Found", "text/plain", "Not found."))
             return
         }
-        if (code.isEmpty() || !PairingHttp.secretsMatch(supplied, code)) {
-            wrongAttempts++
-            if (wrongAttempts >= MAX_ATTEMPTS) {
+        if (code.isEmpty() || !supplied.matches(Regex("\\d{6}")) || !PairingHttp.secretsMatch(supplied, code)) {
+            val attempts = wrongAttempts.incrementAndGet()
+            if (attempts >= MAX_ATTEMPTS) {
                 output.write(PairingHttp.httpResponse("403 Forbidden", "text/plain", "Too many attempts."))
                 stop()
                 _state.value = State.Failed("Too many incorrect codes. Sharing cancelled.")
@@ -165,5 +231,6 @@ class SyncServer(private val scope: CoroutineScope) {
         const val TIMEOUT_MINUTES = 5L
         const val SOCKET_TIMEOUT_MILLIS = 10_000
         const val MAX_ATTEMPTS = 5
+        const val MAX_BUNDLE_BYTES = 8 * 1024 * 1024
     }
 }

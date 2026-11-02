@@ -19,11 +19,11 @@ class YouTubeLiveSearchUrlTest {
     }
 
     @Test
-    fun replacesOtherSearchFiltersWithLiveOnlyFilter() {
+    fun preservesTheSearchFilterAndOrderRequestedByThePlaylist() {
         assertEquals(
-            "https://www.youtube.com/results?search_query=live&sp=EgJAAQ%253D%253D",
+            "https://www.youtube.com/results?search_query=live&sp=CAMSAkAB",
             YouTubeLiveSearchUrl.normalize(
-                "http://m.youtube.com/results?search_query=live&sp=old-filter",
+                "https://www.youtube.com/results?search_query=live&sp=CAMSAkAB",
             ),
         )
     }
@@ -40,7 +40,21 @@ class YouTubeLiveSearchUrlTest {
     fun acceptsTheUserProvidedLiveSearchUrl() {
         assertTrue(
             YouTubeLiveSearchUrl.isSearchUrl(
-                "https://www.youtube.com/results?search_query=fazenda+imagem&sp=EgJAAQ%253D%253D",
+                "https://www.youtube.com/results?search_query=A+Fazenda+ao+vivo&sp=CAMSAkAB",
+            ),
+        )
+    }
+
+    @Test
+    fun rejectsAmbiguousDuplicateSearchOrFilterParameters() {
+        assertNull(
+            YouTubeLiveSearchUrl.normalize(
+                "https://www.youtube.com/results?search_query=one&search_query=two",
+            ),
+        )
+        assertNull(
+            YouTubeLiveSearchUrl.normalize(
+                "https://www.youtube.com/results?search_query=live&sp=CAMSAkAB&sp=other",
             ),
         )
     }

@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">Serveradress</string>
     <string name="onboarding_playlist_url">Spellistans URL</string>
     <string name="onboarding_portal_url">Portal-URL</string>
-    <string name="onboarding_server_help">Till exempel http://example.com:8080 – klistra in hela raden från din leverantör om det är enklare, extra delar trimmas bort.</string>
+    <string name="onboarding_server_help">Till exempel https://example.com:8080 – klistra in hela raden från din leverantör om det är enklare, extra delar trimmas bort.</string>
     <string name="onboarding_playlist_help">Hela http-länken till din .m3u- eller .m3u8-fil.</string>
-    <string name="onboarding_portal_help">Portaladressen från din leverantör, t.ex. http://host:port/c/ – extra delar trimmas bort.</string>
+    <string name="onboarding_portal_help">Portaladressen från din leverantör, t.ex. https://host:port/c/ – extra delar trimmas bort.</string>
     <string name="onboarding_mac_address">MAC-adress</string>
     <string name="onboarding_mac_help">MAC-adressen som din leverantör knöt till din linje, t.ex. 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">Dölj avancerat</string>

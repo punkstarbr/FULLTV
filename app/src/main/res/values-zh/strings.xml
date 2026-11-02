@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">服务器地址</string>
     <string name="onboarding_playlist_url">播放列表 URL</string>
     <string name="onboarding_portal_url">门户 URL</string>
-    <string name="onboarding_server_help">例如 http://example.com:8080——如果更方便，也可以直接粘贴提供商给你的完整内容，多余部分会自动去除。</string>
+    <string name="onboarding_server_help">例如 https://example.com:8080——如果更方便，也可以直接粘贴提供商给你的完整内容，多余部分会自动去除。</string>
     <string name="onboarding_playlist_help">指向你的 .m3u 或 .m3u8 文件的完整 http 链接。</string>
-    <string name="onboarding_portal_help">提供商给你的门户地址，例如 http://host:port/c/——多余部分会自动去除。</string>
+    <string name="onboarding_portal_help">提供商给你的门户地址，例如 https://host:port/c/——多余部分会自动去除。</string>
     <string name="onboarding_mac_address">MAC 地址</string>
     <string name="onboarding_mac_help">提供商与你的线路绑定的 MAC 地址，例如 00:1A:79:xx:xx:xx。</string>
     <string name="onboarding_hide_advanced">隐藏高级选项</string>

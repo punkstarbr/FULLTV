@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">نشانی سرور</string>
     <string name="onboarding_playlist_url">نشانی URL پلی‌لیست</string>
     <string name="onboarding_portal_url">نشانی URL پورتال</string>
-    <string name="onboarding_server_help">برای مثال http://example.com:8080 — اگر ساده‌تر است، کل خط ارسالی ارائه‌دهنده خود را بچسبانید، بخش‌های اضافی حذف می‌شوند.</string>
+    <string name="onboarding_server_help">برای مثال https://example.com:8080 — اگر ساده‌تر است، کل خط ارسالی ارائه‌دهنده خود را بچسبانید، بخش‌های اضافی حذف می‌شوند.</string>
     <string name="onboarding_playlist_help">پیوند کامل http به فایل .m3u یا .m3u8 شما.</string>
-    <string name="onboarding_portal_help">نشانی پورتال از ارائه‌دهنده شما، مثلاً http://host:port/c/ — بخش‌های اضافی حذف می‌شوند.</string>
+    <string name="onboarding_portal_help">نشانی پورتال از ارائه‌دهنده شما، مثلاً https://host:port/c/ — بخش‌های اضافی حذف می‌شوند.</string>
     <string name="onboarding_mac_address">نشانی MAC</string>
     <string name="onboarding_mac_help">نشانی MAC که ارائه‌دهنده شما به خط شما متصل کرده، مثلاً 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">پنهان کردن تنظیمات پیشرفته</string>

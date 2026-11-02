@@ -10,7 +10,13 @@ captures/
 *.apk
 *.aab
 *.keystore
-!debug.keystore
+*.jks
+*.p12
+*.pfx
+release.properties
+.env
+.env.*
+!.env.example
 
 .claude/
 

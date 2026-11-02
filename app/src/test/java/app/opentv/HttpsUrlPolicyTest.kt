@@ -50,4 +50,21 @@ class HttpsUrlPolicyTest {
         assertThat(HttpsUrlPolicy.requiresSecureScheme("provider.example:8443")).isFalse()
         assertThat(HttpsUrlPolicy.requiresSecureScheme("http://provider.example:8443")).isTrue()
     }
+
+    @Test
+    fun `rejects userinfo fragments malformed hosts and control characters`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            HttpsUrlPolicy.requireHttps("https://user:pass@provider.example/list.m3u")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            HttpsUrlPolicy.requireHttps("https://provider.example/list.m3u#fragment")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            HttpsUrlPolicy.requireHttps("https://provider.example:bad/list.m3u")
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            HttpsUrlPolicy.requireHttps("https://provider.example/a\nheader")
+        }
+        HttpsUrlPolicy.requireHttps("https://provider.example/list.m3u?token=a%2Fb")
+    }
 }

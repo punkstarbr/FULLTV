@@ -29,12 +29,12 @@ data class GitHubRelease(
      * Selects the APK matching the installed application id. Debug builds have the
      * `.debug` suffix and cannot be upgraded to the release package id (or vice versa).
      */
-    fun apkAsset(preferDebug: Boolean = false): GitHubAsset? {
-        val apks = assets.filter { it.name.endsWith(".apk", ignoreCase = true) }
-        if (preferDebug) {
-            apks.firstOrNull { it.name.contains("debug", ignoreCase = true) }?.let { return it }
-        }
-        return apks.firstOrNull { !it.name.contains("debug", ignoreCase = true) } ?: apks.firstOrNull()
+    fun apkAsset(releaseTag: String = this.tagName, preferDebug: Boolean = false): GitHubAsset? {
+        val version = releaseTag.trim().removePrefix("v").removePrefix("V")
+        if (!version.matches(Regex("\\d+(?:\\.\\d+){1,3}"))) return null
+        val suffix = if (preferDebug) "debug" else "universal"
+        val expectedName = "FullTV-$version-$suffix.apk"
+        return assets.singleOrNull { it.name.equals(expectedName, ignoreCase = true) }
     }
 }
 
@@ -43,4 +43,6 @@ data class GitHubAsset(
     val name: String = "",
     @SerialName("browser_download_url") val browserDownloadUrl: String = "",
     val size: Long = 0,
+    /** GitHub REST API SHA-256 digest, e.g. `sha256:abcdef…`. */
+    val digest: String? = null,
 )

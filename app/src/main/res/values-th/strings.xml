@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">ที่อยู่เซิร์ฟเวอร์</string>
     <string name="onboarding_playlist_url">URL เพลย์ลิสต์</string>
     <string name="onboarding_portal_url">URL พอร์ทัล</string>
-    <string name="onboarding_server_help">ตัวอย่างเช่น http://example.com:8080 — วางทั้งบรรทัดจากผู้ให้บริการของคุณได้เลยหากง่ายกว่า ส่วนเกินจะถูกตัดออกให้</string>
+    <string name="onboarding_server_help">ตัวอย่างเช่น https://example.com:8080 — วางทั้งบรรทัดจากผู้ให้บริการของคุณได้เลยหากง่ายกว่า ส่วนเกินจะถูกตัดออกให้</string>
     <string name="onboarding_playlist_help">ลิงก์ http แบบเต็มไปยังไฟล์ .m3u หรือ .m3u8 ของคุณ</string>
-    <string name="onboarding_portal_help">ที่อยู่พอร์ทัลจากผู้ให้บริการของคุณ เช่น http://host:port/c/ — ส่วนเกินจะถูกตัดออกให้</string>
+    <string name="onboarding_portal_help">ที่อยู่พอร์ทัลจากผู้ให้บริการของคุณ เช่น https://host:port/c/ — ส่วนเกินจะถูกตัดออกให้</string>
     <string name="onboarding_mac_address">ที่อยู่ MAC</string>
     <string name="onboarding_mac_help">MAC ที่ผู้ให้บริการของคุณผูกไว้กับสายของคุณ เช่น 00:1A:79:xx:xx:xx</string>
     <string name="onboarding_hide_advanced">ซ่อนขั้นสูง</string>

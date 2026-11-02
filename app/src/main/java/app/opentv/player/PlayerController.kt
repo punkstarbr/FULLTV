@@ -6,6 +6,8 @@
 package app.opentv.player
 
 import android.content.Context
+import android.provider.DocumentsContract
+import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -13,16 +15,13 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
+import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
-import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.audio.AudioSink
-import androidx.media3.exoplayer.audio.DefaultAudioSink
-import androidx.media3.exoplayer.audio.TeeAudioProcessor
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
@@ -34,6 +33,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import java.io.File
 import okhttp3.OkHttpClient
 
 /**
@@ -88,8 +88,11 @@ class PlayerController(
      * is a network round-trip — rides over the gaps instead of stalling on every one.
      */
     private val liveRecording: Boolean = false,
-    private val audioBufferSink: TeeAudioProcessor.AudioBufferSink? = null,
 ) {
+
+    private val appContext = context.applicationContext
+    private val allowsSmb = smbDataSourceFactory != null
+    private val allowsGrowingRecordings = growingDataSourceFactory != null
 
     /** Channel-surf debounce for this controller — longer for the preview so browsing is calm. */
     private val switchDebounceMillis = if (preview) PREVIEW_SWITCH_DEBOUNCE_MILLIS else SWITCH_DEBOUNCE_MILLIS
@@ -117,6 +120,10 @@ class PlayerController(
     /** The current stream's tracks (audio/text/video), for the in-player pickers. */
     private val _tracks = MutableStateFlow(Tracks.EMPTY)
     val tracks: StateFlow<Tracks> = _tracks.asStateFlow()
+
+    /** Text emitted by the currently selected stream subtitle track; never sourced from audio. */
+    private val _subtitleCueTexts = MutableStateFlow<List<String>>(emptyList())
+    val subtitleCueTexts: StateFlow<List<String>> = _subtitleCueTexts.asStateFlow()
 
     private var switchJob: Job? = null
     private var current: Request? = null
@@ -184,23 +191,7 @@ class PlayerController(
             .build()
     }
 
-    private val renderersFactory = audioBufferSink?.let { sink ->
-        object : DefaultRenderersFactory(context) {
-            override fun buildAudioSink(
-                context: Context,
-                enableFloatOutput: Boolean,
-                enableAudioOutputPlaybackParams: Boolean,
-            ): AudioSink? = DefaultAudioSink.Builder(context)
-                .setEnableFloatOutput(false)
-                .setAudioProcessors(arrayOf(TeeAudioProcessor(sink)))
-                .build()
-        }
-    }
-
-    private val playerBuilder = renderersFactory?.let { ExoPlayer.Builder(context, it) }
-        ?: ExoPlayer.Builder(context)
-
-    val player: ExoPlayer = playerBuilder
+    val player: ExoPlayer = ExoPlayer.Builder(context)
         .setSeekBackIncrementMs(SEEK_INCREMENT_MILLIS)
         .setSeekForwardIncrementMs(SEEK_INCREMENT_MILLIS)
         .setMediaSourceFactory(
@@ -238,6 +229,10 @@ class PlayerController(
             addListener(object : Player.Listener {
                 override fun onTracksChanged(tracks: Tracks) {
                     _tracks.value = tracks
+                }
+
+                override fun onCues(cueGroup: CueGroup) {
+                    _subtitleCueTexts.value = SubtitleCueText.from(cueGroup.cues.map { it.text })
                 }
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
@@ -285,9 +280,21 @@ class PlayerController(
         // reaches the player, so we never stack prepares.
         switchJob?.cancel()
         current = request
+        _subtitleCueTexts.value = emptyList()
 
         switchJob = scope.launch {
             if (debounce) delay(switchDebounceMillis)
+
+            if (!isSafeMediaUrl(request.url) || !isSafeUserAgent(request.userAgent)) {
+                player.stop()
+                player.clearMediaItems()
+                _state.value = State.Error(
+                    request.title,
+                    "This media URL is not allowed by FullTV's security policy.",
+                    canRetry = false,
+                )
+                return@launch
+            }
 
             consecutiveFailures = 0
             httpFactory.setDefaultRequestProperties(mapOf("User-Agent" to request.userAgent))
@@ -325,10 +332,52 @@ class PlayerController(
         current?.let { play(it, debounce = false) }
     }
 
+    private fun isSafeMediaUrl(raw: String): Boolean {
+        if (raw.isBlank() || raw.length > MAX_MEDIA_URL_CHARS || raw.any { it.code <= 0x20 || it.code == 0x7f }) {
+            return false
+        }
+        val uri = runCatching { Uri.parse(raw) }.getOrNull() ?: return false
+        if (uri.userInfo != null || uri.fragment != null) return false
+        return when (uri.scheme?.lowercase()) {
+            "https" -> !uri.host.isNullOrBlank()
+            "smb" -> allowsSmb && !uri.host.isNullOrBlank()
+            "optvrec" -> allowsGrowingRecordings && !uri.host.isNullOrBlank()
+            "content" -> isPersistedReadableContentUri(uri)
+            "file", null -> isPrivateRecordingPath(uri.path ?: raw)
+            else -> false
+        }
+    }
+
+    private fun isPersistedReadableContentUri(uri: Uri): Boolean =
+        runCatching {
+            appContext.contentResolver.persistedUriPermissions.any { permission ->
+                if (!permission.isReadPermission || permission.uri.authority != uri.authority) return@any false
+                if (permission.uri == uri) return@any true
+                if (!DocumentsContract.isTreeUri(permission.uri) ||
+                    !DocumentsContract.isDocumentUri(appContext, uri)
+                ) return@any false
+                val treeId = DocumentsContract.getTreeDocumentId(permission.uri)
+                val documentId = DocumentsContract.getDocumentId(uri)
+                documentId == treeId || documentId.startsWith("$treeId/")
+            }
+        }.getOrDefault(false)
+
+    private fun isPrivateRecordingPath(rawPath: String): Boolean {
+        val candidate = runCatching { File(rawPath).canonicalFile }.getOrNull() ?: return false
+        val roots = listOfNotNull(appContext.getExternalFilesDir(null), appContext.filesDir)
+            .mapNotNull { runCatching { it.canonicalPath }.getOrNull() }
+        return roots.any { root -> candidate.path.startsWith(root.trimEnd(File.separatorChar) + File.separator) } &&
+            candidate.isFile
+    }
+
+    private fun isSafeUserAgent(value: String): Boolean =
+        value.length <= MAX_USER_AGENT_CHARS && value.none { it == '\r' || it == '\n' || it.code == 0x7f }
+
     /** Stops the previous tune and keeps the normal buffering UI visible while a URL is resolved. */
     fun beginExternalResolution(title: String) {
         switchJob?.cancel()
         current = null
+        _subtitleCueTexts.value = emptyList()
         consecutiveFailures = 0
         player.stop()
         player.clearMediaItems()
@@ -400,6 +449,7 @@ class PlayerController(
     fun stop() {
         switchJob?.cancel()
         current = null
+        _subtitleCueTexts.value = emptyList()
         player.stop()
         player.clearMediaItems()
         _state.value = State.Idle
@@ -422,6 +472,8 @@ class PlayerController(
         const val MAX_BACKOFF_MILLIS = 8_000L
         const val MAX_LOAD_RETRIES = 5
         const val MAX_AUTO_RESTARTS = 3
+        const val MAX_MEDIA_URL_CHARS = 16_384
+        const val MAX_USER_AGENT_CHARS = 1_024
         const val AUTO_RESTART_DELAY_MILLIS = 1_500L
 
         /**

@@ -54,6 +54,8 @@
     <application
         android:name=".OpenTvApp"
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
         android:banner="@drawable/banner"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -62,26 +64,31 @@
         android:usesCleartextTraffic="false"
         tools:targetApi="34">
 
-        <!-- Cleartext network traffic is disabled by default. Provider credentials and streams
-             must use HTTPS; local pairing is an inbound LAN server and is not affected. -->
+        <!-- Cleartext network traffic is disabled. LAN pairing/manager/sync use TLS listeners. -->
 
         <activity
             android:name=".MainActivity"
-            android:exported="true"
+            android:exported="false"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode"
             android:launchMode="singleTask"
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true"
             android:screenOrientation="fullUser"
-            android:theme="@style/Theme.OpenTV">
+            android:theme="@style/Theme.OpenTV" />
 
-            <!-- Phones and tablets -->
+        <!-- Public launcher ignores all caller extras; internal notification actions target the
+             non-exported MainActivity directly and cannot be forged by another app. -->
+        <activity
+            android:name=".LauncherActivity"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:icon="@mipmap/ic_launcher"
+            android:banner="@drawable/banner"
+            android:theme="@style/Theme.OpenTV">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
-            <!-- Android TV / Fire TV home screen -->
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER" />

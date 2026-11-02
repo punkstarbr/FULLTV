@@ -10,6 +10,7 @@ import app.opentv.data.model.Category
 import app.opentv.data.model.Channel
 import app.opentv.data.model.Source
 import app.opentv.data.model.StreamKind
+import app.opentv.data.parser.BoundedInputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -46,6 +47,10 @@ class StalkerApi(
     private val http: OkHttpClient,
     private val json: Json = Json { ignoreUnknownKeys = true; isLenient = true },
 ) {
+
+    private val noRedirectHttp by lazy {
+        http.newBuilder().followRedirects(false).followSslRedirects(false).build()
+    }
 
     class StalkerException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
@@ -116,7 +121,13 @@ class StalkerApi(
             b.addQueryParameter("disable_ad", "0")
         }
         val linkCmd = (js as? JsonObject)?.str("cmd") ?: return@withContext null
-        stripCmdPrefix(linkCmd)
+        val resolved = stripCmdPrefix(linkCmd) ?: return@withContext null
+        resolved.takeIf {
+            NetworkDestinationPolicy.isAllowedHttps(
+                it,
+                trustedOriginUrl = source.url,
+            )
+        }
     }
 
     // ---- Session / handshake -----------------------------------------------------------------
@@ -155,10 +166,11 @@ class StalkerApi(
             .addQueryParameter("JsHttpRequest", "1-xml")
             .build()
         val js = (execute(source, url, token = null) as? JsonObject)?.obj("js") ?: return null
-        val token = js.str("token")?.takeIf { it.isNotBlank() } ?: return null
+        val token = js.str("token")?.takeIf { it.length <= MAX_TOKEN_CHARS && TOKEN_REGEX.matches(it) }
+            ?: return null
         // Some Ministra versions return a `random` at handshake that the box folds into the
         // get_profile signature; capture it so we can.
-        return Handshake(token, js.str("random").orEmpty())
+        return Handshake(token, js.str("random").orEmpty().take(MAX_RANDOM_CHARS))
     }
 
     /**
@@ -252,6 +264,7 @@ class StalkerApi(
     }
 
     private fun execute(source: Source, url: HttpUrl, token: String?): JsonElement? {
+        if (!url.isHttps) return null
         val mac = source.macAddress?.trim().orEmpty()
         // adid (the lower-case device id) rides in the cookie the way a real box sends it; some
         // portals key off it alongside the MAC.
@@ -263,27 +276,56 @@ class StalkerApi(
             // send it in both so those portals recognise the session and return the channel list.
             if (token != null) append("; token=").append(token)
         }
-        val request = Request.Builder()
-            .url(url)
-            .header("User-Agent", stbUserAgent(source))
-            .header("X-User-Agent", "Model: MAG250; Link: WiFi")
-            .header("Referer", "${url.scheme}://${url.host}:${url.port}/c/")
-            .header("Cookie", cookie)
-            .apply { if (token != null) header("Authorization", "Bearer $token") }
-            .build()
-        return runCatching {
-            http.newCall(request).execute().use { response ->
-                if (!response.isSuccessful) return null
-                val text = response.body?.string().orEmpty()
-                if (text.isBlank()) return null
-                json.parseToJsonElement(text)
+        var target = url
+        repeat(MAX_REDIRECTS + 1) { hop ->
+            var nextUrl: HttpUrl? = null
+            val result = try {
+                val request = Request.Builder()
+                    .url(target)
+                    .header("User-Agent", stbUserAgent(source))
+                    .header("X-User-Agent", "Model: MAG250; Link: WiFi")
+                    .header("Referer", "${target.scheme}://${target.host}:${target.port}/c/")
+                    .header("Cookie", cookie)
+                    .apply { if (token != null) header("Authorization", "Bearer $token") }
+                    .build()
+                noRedirectHttp.newCall(request).execute().use { response ->
+                    if (response.isRedirect) {
+                        if (hop >= MAX_REDIRECTS) return null
+                        val location = response.header("Location") ?: return null
+                        val redirect = target.resolve(location) ?: return null
+                        if (!redirect.isHttps || redirect.host != url.host || redirect.port != url.port) {
+                            return null
+                        }
+                        nextUrl = redirect
+                        null
+                    } else {
+                        if (!response.isSuccessful) return null
+                        val body = response.body ?: return null
+                        if (body.contentLength() > MAX_RESPONSE_BYTES) return null
+                        val text = BoundedInputStream(
+                            body.byteStream(),
+                            MAX_RESPONSE_BYTES,
+                            "Stalker response",
+                        ).use { String(it.readBytes(), Charsets.UTF_8) }
+                        if (text.isBlank()) return null
+                        json.parseToJsonElement(text)
+                    }
+                }
+            } catch (error: Exception) {
+                Log.w(TAG, "Stalker request failed (${error.javaClass.simpleName})")
+                return null
             }
-        }.onFailure { Log.w(TAG, "Stalker request failed", it) }.getOrNull()
+            if (result != null) return result
+            target = nextUrl ?: return null
+        }
+        return null
     }
 
     /** Candidate API endpoints for a portal URL, most common first. First that handshakes wins. */
     private fun endpoints(source: Source): List<HttpUrl> {
-        val raw = source.url.trim().trimEnd('/')
+        val raw = HttpsUrlPolicy.withDefaultHttps(source.url).trim().trimEnd('/')
+        HttpsUrlPolicy.requireHttps(raw)
+        val base = raw.toHttpUrlOrNull() ?: throw StalkerException("The portal URL is invalid.")
         // A portal URL is often given as ".../c" (the web-client path); the API lives at the root.
         val root = raw.removeSuffix("/c").trimEnd('/')
         return listOf(
@@ -293,28 +335,43 @@ class StalkerApi(
             "$root/stalker_portal/server/load.php",
             "$root/magLoad.php",
         ).mapNotNull { it.toHttpUrlOrNull() }
+            .filter { it.isHttps && it.host == base.host && it.port == base.port }
     }
 
     /** A MAG-box style STB User-Agent when the source hasn't set a specific one. */
     private fun stbUserAgent(source: Source): String {
         val ua = source.userAgent
-        return if (ua.isBlank() || ua == Source.DEFAULT_USER_AGENT) DEFAULT_STB_UA else ua
+        return if (ua.isBlank() || ua.length > MAX_USER_AGENT_CHARS || ua == Source.DEFAULT_USER_AGENT) {
+            DEFAULT_STB_UA
+        } else ua
     }
 
     /** Provider logos are often relative to the portal host. */
-    private fun absoluteLogo(endpoint: HttpUrl, logo: String): String =
-        if (logo.startsWith("http")) logo
-        else "${endpoint.scheme}://${endpoint.host}:${endpoint.port}/${logo.trimStart('/')}"
+    private fun absoluteLogo(endpoint: HttpUrl, logo: String): String? {
+        val resolved = logo.toHttpUrlOrNull() ?: endpoint.resolve(logo)
+        return resolved?.takeIf {
+            it.isHttps && it.username.isEmpty() && it.password.isEmpty() && it.fragment == null
+        }?.toString()
+    }
 
-    /** create_link returns e.g. "ffmpeg http://…" / "auto http://…" / a bare URL; keep just the URL. */
-    private fun stripCmdPrefix(cmd: String): String {
+    /** Strip a Stalker command prefix, then accept only a credential-free HTTPS playback URL. */
+    private fun stripCmdPrefix(cmd: String): String? {
         val trimmed = cmd.trim()
         val httpIdx = trimmed.indexOf("http")
-        return if (httpIdx > 0) trimmed.substring(httpIdx).trim() else trimmed
+        val candidate = if (httpIdx > 0) trimmed.substring(httpIdx).trim() else trimmed
+        val url = candidate.toHttpUrlOrNull() ?: return null
+        return url.takeIf { it.isHttps && it.username.isEmpty() && it.password.isEmpty() && it.fragment == null }
+            ?.toString()
     }
 
     private companion object {
         const val TAG = "StalkerApi"
+        const val MAX_RESPONSE_BYTES = 64L * 1024 * 1024
+        const val MAX_REDIRECTS = 3
+        const val MAX_TOKEN_CHARS = 4_096
+        const val MAX_RANDOM_CHARS = 256
+        const val MAX_USER_AGENT_CHARS = 1_024
+        val TOKEN_REGEX = Regex("[A-Za-z0-9._~+/=-]+")
         const val TOKEN_TTL_MILLIS = 4 * 60 * 1000L // handshake tokens are short-lived; re-mint often
         const val DEFAULT_STB_UA =
             "Mozilla/5.0 (QtEmbedded; U; Linux; C) AppleWebKit/533.3 (KHTML, like Gecko) " +

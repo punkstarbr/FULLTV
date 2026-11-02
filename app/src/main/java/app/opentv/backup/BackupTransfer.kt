@@ -12,6 +12,7 @@ import app.opentv.core.ServiceLocator
 import app.opentv.data.model.LiveStreamFormat
 import app.opentv.data.model.Source
 import app.opentv.data.model.SourceKind
+import app.opentv.data.remote.HttpsUrlPolicy
 import app.opentv.data.repo.CatalogRepository
 import app.opentv.data.repo.SourceRepository
 import app.opentv.data.work.SyncWorker
@@ -19,6 +20,7 @@ import app.opentv.sync.SyncEngine
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
 import java.util.zip.GZIPInputStream
@@ -44,8 +46,8 @@ class BackupTransfer(
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
     suspend fun export(uri: Uri, passphrase: String) {
-        require(passphrase.length >= BackupCryptography.MIN_PASSPHRASE_LENGTH) {
-            "Choose a passphrase with at least 8 characters."
+        require(passphrase.length >= BackupCryptography.MIN_NEW_PASSPHRASE_LENGTH) {
+            "Choose a passphrase with at least 12 characters."
         }
         val bundle = FullTvBackup(
             createdAtMillis = System.currentTimeMillis(),
@@ -74,7 +76,9 @@ class BackupTransfer(
                     )
                 },
             settings = graph.settings.toBackupSettings(),
-            syncBundle = SyncEngine(graph).gather(),
+            // The shared HMAC key is safe here because the entire backup is encrypted with the
+            // user's passphrase before it leaves this device.
+            syncBundle = SyncEngine(graph).gather(includeSyncKey = true),
         )
         val plain = json.encodeToString(bundle).toByteArray(StandardCharsets.UTF_8)
         val encrypted = withContext(Dispatchers.IO) { BackupCryptography.encrypt(plain, passphrase) }
@@ -164,7 +168,10 @@ class BackupTransfer(
 
         val epgResult = graph.epgRepository.syncAll(now, force = true)
         syncFailures += epgResult.feedsFailed
-        val merged = SyncEngine(graph).apply(backup.syncBundle)
+        // Version 3 sync bundles contained raw stream URLs. Preserve the rest of an old backup,
+        // but deliberately skip that unsafe nested snapshot during restore.
+        val merged = if (backup.syncBundle.version < 4 || backup.syncBundle.groupId.isBlank()) SyncEngine.MergeResult()
+        else SyncEngine(graph).apply(backup.syncBundle)
         runCatching { graph.recordingEngine.rescanSeriesRules() }
         return BackupRestoreResult(
             sourcesImported = importedSources.size,
@@ -179,18 +186,24 @@ class BackupTransfer(
         require(backup.epgFeeds.size <= MAX_FEEDS) { "Backup contains too many EPG feeds." }
         backup.sources.forEach { source ->
             require(source.name.isNotBlank() && source.name.length <= 200) { "Invalid source name in backup." }
-            require(source.url.length <= MAX_URL_LENGTH && isHttpUrl(source.url)) { "Invalid source URL in backup." }
-            require(runCatching { SourceKind.valueOf(source.kind) }.isSuccess) { "Unsupported source type." }
+            require(source.url.length <= MAX_URL_LENGTH) { "Invalid source URL in backup." }
+            val kind = runCatching { SourceKind.valueOf(source.kind) }
+                .getOrElse { throw IllegalArgumentException("Unsupported source type.") }
+            HttpsUrlPolicy.requireHttps(SourceRepository.normaliseUrl(source.url, kind))
+            require(source.username.orEmpty().length <= MAX_CREDENTIAL_LENGTH &&
+                source.password.orEmpty().length <= MAX_CREDENTIAL_LENGTH &&
+                source.macAddress.orEmpty().length <= MAX_MAC_LENGTH &&
+                source.userAgent.length <= MAX_USER_AGENT_LENGTH
+            ) { "Source credentials or User-Agent exceed the safety limit." }
+            source.epgUrl?.let(HttpsUrlPolicy::requireHttps)
         }
         backup.epgFeeds.forEach { feed ->
-            require(feed.name.length <= 200 && feed.url.length <= MAX_URL_LENGTH && isHttpUrl(feed.url)) {
+            require(feed.name.length <= 200 && feed.url.length <= MAX_URL_LENGTH) {
                 "Invalid EPG feed in backup."
             }
+            HttpsUrlPolicy.requireHttps(feed.url)
         }
     }
-
-    private fun isHttpUrl(value: String): Boolean =
-        value.startsWith("http://", ignoreCase = true) || value.startsWith("https://", ignoreCase = true)
 
     private fun sourceKey(kind: SourceKind, url: String): String =
         "${kind.name}:${SourceRepository.normaliseUrl(url, kind)}"
@@ -291,6 +304,9 @@ class BackupTransfer(
         const val MAX_SOURCES = 100
         const val MAX_FEEDS = 500
         const val MAX_URL_LENGTH = 8_192
+        const val MAX_CREDENTIAL_LENGTH = 4_096
+        const val MAX_MAC_LENGTH = 64
+        const val MAX_USER_AGENT_LENGTH = 1_024
         const val MAX_LANGUAGE_TAG_LENGTH = 64
         const val MAX_SETTING_TEXT_LENGTH = 4_096
     }
@@ -299,17 +315,20 @@ class BackupTransfer(
 /** Passphrase-based AES-256-GCM container. Authentication failure rejects wrong passwords/tampering. */
 internal object BackupCryptography {
     const val MIN_PASSPHRASE_LENGTH = 8
+    const val MIN_NEW_PASSPHRASE_LENGTH = 12
     const val MAX_ENCRYPTED_BYTES = 64 * 1024 * 1024
     private const val MAX_PLAINTEXT_BYTES = 96 * 1024 * 1024
-    private const val PBKDF2_ITERATIONS = 120_000
+    private const val CURRENT_PBKDF2_ITERATIONS = 600_000
+    private const val LEGACY_PBKDF2_ITERATIONS = 120_000
     private const val SALT_BYTES = 16
     private const val NONCE_BYTES = 12
-    private const val HEADER_VERSION = 1
+    private const val HEADER_VERSION = 2
+    private const val ITERATIONS_BYTES = 4
     private val MAGIC = "FULLTVBK".toByteArray(StandardCharsets.US_ASCII)
     private val random = SecureRandom()
 
     fun encrypt(plain: ByteArray, passphrase: String): ByteArray {
-        require(passphrase.length >= MIN_PASSPHRASE_LENGTH) { "Passphrase must contain at least 8 characters." }
+        require(passphrase.length >= MIN_NEW_PASSPHRASE_LENGTH) { "Passphrase must contain at least 12 characters." }
         require(plain.size <= MAX_PLAINTEXT_BYTES) { "Backup data is too large." }
         val compressed = ByteArrayOutputStream().also { output ->
             GZIPOutputStream(output).use { it.write(plain) }
@@ -319,31 +338,53 @@ internal object BackupCryptography {
         }
         val salt = ByteArray(SALT_BYTES).also(random::nextBytes)
         val nonce = ByteArray(NONCE_BYTES).also(random::nextBytes)
-        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.ENCRYPT_MODE, deriveKey(passphrase, salt), GCMParameterSpec(128, nonce))
-        val ciphertext = cipher.doFinal(compressed)
-        return ByteArrayOutputStream(HEADER_BYTES + ciphertext.size).apply {
+        val header = ByteArrayOutputStream(HEADER_BYTES).apply {
             write(MAGIC)
             write(HEADER_VERSION)
+            write(ByteBuffer.allocate(ITERATIONS_BYTES).putInt(CURRENT_PBKDF2_ITERATIONS).array())
             write(salt)
             write(nonce)
+        }.toByteArray()
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(
+            Cipher.ENCRYPT_MODE,
+            deriveKey(passphrase, salt, CURRENT_PBKDF2_ITERATIONS),
+            GCMParameterSpec(128, nonce),
+        )
+        cipher.updateAAD(header)
+        val ciphertext = cipher.doFinal(compressed)
+        return ByteArrayOutputStream(HEADER_BYTES + ciphertext.size).apply {
+            write(header)
             write(ciphertext)
         }.toByteArray()
     }
 
     fun decrypt(file: ByteArray, passphrase: String): ByteArray {
         require(passphrase.length >= MIN_PASSPHRASE_LENGTH) { "Passphrase must contain at least 8 characters." }
-        require(file.size in (HEADER_BYTES + GCM_TAG_BYTES)..MAX_ENCRYPTED_BYTES) { "Invalid backup file." }
+        require(file.size in (MIN_HEADER_BYTES + GCM_TAG_BYTES)..MAX_ENCRYPTED_BYTES) { "Invalid backup file." }
         require(MAGIC.indices.all { file[it] == MAGIC[it] }) { "This is not a FullTV backup file." }
-        require((file[MAGIC.size].toInt() and 0xff) == HEADER_VERSION) { "Unsupported backup file version." }
-        val saltStart = MAGIC.size + 1
+        val version = file[MAGIC.size].toInt() and 0xff
+        val (iterations, saltStart) = when (version) {
+            1 -> LEGACY_PBKDF2_ITERATIONS to (MAGIC.size + 1)
+            HEADER_VERSION -> {
+                require(file.size >= HEADER_BYTES + GCM_TAG_BYTES) { "Invalid backup file." }
+                val iterationsOffset = MAGIC.size + 1
+                val storedIterations = ByteBuffer.wrap(file, iterationsOffset, ITERATIONS_BYTES).int
+                require(storedIterations in CURRENT_PBKDF2_ITERATIONS..MAX_PBKDF2_ITERATIONS) {
+                    "Unsupported backup security parameters."
+                }
+                storedIterations to (iterationsOffset + ITERATIONS_BYTES)
+            }
+            else -> throw IllegalArgumentException("Unsupported backup file version.")
+        }
         val nonceStart = saltStart + SALT_BYTES
         val cipherStart = nonceStart + NONCE_BYTES
         val salt = file.copyOfRange(saltStart, nonceStart)
         val nonce = file.copyOfRange(nonceStart, cipherStart)
         val ciphertext = file.copyOfRange(cipherStart, file.size)
         val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-        cipher.init(Cipher.DECRYPT_MODE, deriveKey(passphrase, salt), GCMParameterSpec(128, nonce))
+        cipher.init(Cipher.DECRYPT_MODE, deriveKey(passphrase, salt, iterations), GCMParameterSpec(128, nonce))
+        if (version == HEADER_VERSION) cipher.updateAAD(file.copyOfRange(0, cipherStart))
         val compressed = try {
             cipher.doFinal(ciphertext)
         } catch (_: AEADBadTagException) {
@@ -352,8 +393,8 @@ internal object BackupCryptography {
         return gunzipLimited(compressed)
     }
 
-    private fun deriveKey(passphrase: String, salt: ByteArray): SecretKeySpec {
-        val spec = PBEKeySpec(passphrase.toCharArray(), salt, PBKDF2_ITERATIONS, 256)
+    private fun deriveKey(passphrase: String, salt: ByteArray, iterations: Int): SecretKeySpec {
+        val spec = PBEKeySpec(passphrase.toCharArray(), salt, iterations, 256)
         return try {
             SecretKeySpec(
                 SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded,
@@ -379,5 +420,7 @@ internal object BackupCryptography {
     }
 
     private const val GCM_TAG_BYTES = 16
-    private val HEADER_BYTES = MAGIC.size + 1 + SALT_BYTES + NONCE_BYTES
+    private const val MAX_PBKDF2_ITERATIONS = 2_000_000
+    private val MIN_HEADER_BYTES = MAGIC.size + 1 + SALT_BYTES + NONCE_BYTES
+    private val HEADER_BYTES = MAGIC.size + 1 + ITERATIONS_BYTES + SALT_BYTES + NONCE_BYTES
 }

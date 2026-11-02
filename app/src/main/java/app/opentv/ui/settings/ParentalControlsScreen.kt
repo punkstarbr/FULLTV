@@ -49,8 +49,8 @@ import app.opentv.ui.ChannelsViewModel
  *
  * Hidden categories vanish from Live TV — rail, All channels, and search — until the session is
  * unlocked here. If a PIN is set, this screen is itself behind the PIN, so a child cannot simply
- * come here and unlock. The PIN is a family lock, not a vault: it's a four-digit code stored as a
- * salted hash, enough to stop casual access, not a serious attacker.
+ * come here and unlock. The four-digit PIN verifier uses a non-exportable Keystore HMAC and a
+ * persistent progressive lockout; this remains a family access control, not a device security boundary.
  */
 @Composable
 fun ParentalControlsScreen(

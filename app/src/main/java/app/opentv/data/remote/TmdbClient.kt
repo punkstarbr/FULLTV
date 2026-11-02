@@ -95,7 +95,7 @@ class TmdbClient(
         if (query.isBlank() && tmdbId.isNullOrBlank()) return null
         val id = tmdbId?.takeIf { it.isNotBlank() } ?: searchId(isMovie, query, year, key) ?: return null
         return runCatching { details(isMovie, id, key) }
-            .onFailure { Log.w(TAG, "TMDB details failed for $id", it) }
+            .onFailure { Log.w(TAG, "TMDB details request failed (${it.javaClass.simpleName})") }
             .getOrNull()
     }
 
@@ -167,7 +167,7 @@ class TmdbClient(
                 val body = response.body?.string() ?: return null
                 json.parseToJsonElement(body)
             }
-        }.onFailure { Log.w(TAG, "TMDB request failed", it) }.getOrNull()
+        }.onFailure { Log.w(TAG, "TMDB request failed (${it.javaClass.simpleName})") }.getOrNull()
     }
 
     /** Strips a trailing "(2023)"/year and collapses whitespace so the title searches cleanly. */

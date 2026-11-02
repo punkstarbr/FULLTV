@@ -7,11 +7,14 @@ package app.opentv.update
 
 import app.opentv.BuildConfig
 import app.opentv.data.remote.GitHubRelease
+import java.io.ByteArrayOutputStream
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
  * Checks whether a newer OpenTV release has been published, so a sideloaded install can
@@ -42,6 +45,7 @@ class UpdateChecker(
         val notes: String,
         val apkUrl: String,
         val apkSizeBytes: Long,
+        val apkSha256: String,
         val releaseUrl: String,
     )
 
@@ -51,30 +55,62 @@ class UpdateChecker(
     suspend fun check(): Update? = withContext(Dispatchers.IO) {
         if (repoSlug.isBlank()) return@withContext null
         runCatching {
+            val safeHttp = http.newBuilder()
+                .followRedirects(false)
+                .followSslRedirects(false)
+                .callTimeout(20, TimeUnit.SECONDS)
+                .build()
             val request = Request.Builder()
                 .url("https://api.github.com/repos/$repoSlug/releases/latest")
                 .header("Accept", "application/vnd.github+json")
                 .header("User-Agent", "OpenTV")
                 .build()
 
-            http.newCall(request).execute().use { response ->
+            safeHttp.newCall(request).execute().use { response ->
+                if (!response.request.url.isHttps || response.request.url.host != "api.github.com") {
+                    return@withContext null
+                }
                 if (!response.isSuccessful) return@withContext null
-                val body = response.body?.string().orEmpty()
+                val bodyStream = response.body?.byteStream() ?: return@withContext null
+                val bodyBytes = ByteArrayOutputStream()
+                bodyStream.use { stream ->
+                    val buffer = ByteArray(8 * 1024)
+                    while (true) {
+                        val count = stream.read(buffer)
+                        if (count < 0) break
+                        if (bodyBytes.size() + count > MAX_RELEASE_JSON_BYTES) return@withContext null
+                        bodyBytes.write(buffer, 0, count)
+                    }
+                }
+                val body = bodyBytes.toByteArray().toString(Charsets.UTF_8)
                 if (body.isBlank()) return@withContext null
 
                 val release = json.decodeFromString<GitHubRelease>(body)
                 if (release.draft || release.prerelease) return@withContext null
+                if (!release.tagName.matches(VERSION_TAG)) return@withContext null
 
-                val asset = release.apkAsset(preferDebug = BuildConfig.APPLICATION_ID.endsWith(".debug"))
+                val asset = release.apkAsset(
+                    releaseTag = release.tagName,
+                    preferDebug = BuildConfig.APPLICATION_ID.endsWith(".debug"),
+                )
                     ?: return@withContext null
                 if (!isNewer(release.tagName, currentVersionName)) return@withContext null
+                val sha256 = asset.digest.orEmpty().removePrefix("sha256:").lowercase()
+                if (!sha256.matches(SHA256_HEX)) return@withContext null
+                val downloadUrl = asset.browserDownloadUrl.toHttpUrlOrNull() ?: return@withContext null
+                val expectedPath = "/$repoSlug/releases/download/${release.tagName}/${asset.name}"
+                if (!downloadUrl.isHttps || downloadUrl.host != "github.com" ||
+                    downloadUrl.encodedPath != expectedPath || downloadUrl.query != null || downloadUrl.fragment != null
+                ) return@withContext null
+                if (asset.size !in 1L..MAX_APK_BYTES) return@withContext null
 
                 Update(
                     versionName = release.tagName.trimStart('v', 'V'),
                     title = release.name.ifBlank { release.tagName },
                     notes = cleanNotes(release.body),
-                    apkUrl = asset.browserDownloadUrl,
+                    apkUrl = downloadUrl.toString(),
                     apkSizeBytes = asset.size,
+                    apkSha256 = sha256,
                     releaseUrl = release.htmlUrl,
                 )
             }
@@ -84,6 +120,10 @@ class UpdateChecker(
     companion object {
         /** Upstream project, kept for reference; fork builds use BuildConfig.UPDATE_REPO_SLUG. */
         const val REPO_SLUG = "opentvproject/opentv"
+        private const val MAX_RELEASE_JSON_BYTES = 1 * 1024 * 1024
+        private const val MAX_APK_BYTES = 512L * 1024 * 1024
+        private val VERSION_TAG = Regex("v?\\d+(?:\\.\\d+){1,3}")
+        private val SHA256_HEX = Regex("[0-9a-f]{64}")
 
         /**
          * The GitHub release body is written for developers and has GitHub's auto-generated

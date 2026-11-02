@@ -7,6 +7,7 @@ package app.opentv.core
 
 import android.content.Context
 import app.opentv.data.model.StremioAddon
+import app.opentv.security.EncryptedSecretStore
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,6 +26,7 @@ class AppSettings private constructor(context: Context) {
 
     private val prefs =
         context.applicationContext.getSharedPreferences("opentv_settings", Context.MODE_PRIVATE)
+    private val secretStore = EncryptedSecretStore(context)
 
     private val addonJson = Json { ignoreUnknownKeys = true }
 
@@ -79,7 +81,7 @@ class AppSettings private constructor(context: Context) {
     private val _subtitlesEnabled = MutableStateFlow(prefs.getBoolean(KEY_SUBTITLES, true))
     val subtitlesEnabled: StateFlow<Boolean> = _subtitlesEnabled.asStateFlow()
 
-    /** Whether local Whisper transcription and on-device translation to Portuguese are enabled. */
+    /** Whether text subtitle cues supplied by channels are translated to Portuguese on-device. */
     private val _autoPortugueseSubtitles =
         MutableStateFlow(prefs.getBoolean(KEY_AUTO_PT_SUBTITLES, false))
     val autoPortugueseSubtitles: StateFlow<Boolean> = _autoPortugueseSubtitles.asStateFlow()
@@ -103,7 +105,7 @@ class AppSettings private constructor(context: Context) {
 
     // ---- Parental controls -------------------------------------------------------------------
 
-    /** Whether a parental PIN is set. The PIN itself is only ever stored as a salted hash. */
+    /** Whether a parental PIN is set. Its verifier is a Keystore-keyed HMAC, never the PIN. */
     private val _pinIsSet = MutableStateFlow(prefs.getString(KEY_PIN_HASH, null) != null)
     val pinIsSet: StateFlow<Boolean> = _pinIsSet.asStateFlow()
 
@@ -120,19 +122,52 @@ class AppSettings private constructor(context: Context) {
     val hiddenUnlocked: StateFlow<Boolean> = _hiddenUnlocked.asStateFlow()
 
     fun setPin(pin: String) {
-        prefs.edit().putString(KEY_PIN_HASH, hashPin(pin)).apply()
+        require(pin.length == PIN_LENGTH && pin.all(Char::isDigit)) { "PIN must contain four digits." }
+        prefs.edit()
+            .putString(KEY_PIN_HASH, PIN_HMAC_PREFIX + hashPin(pin))
+            .remove(KEY_PIN_FAILURES)
+            .remove(KEY_PIN_LOCK_UNTIL)
+            .apply()
         _pinIsSet.value = true
     }
 
     fun clearPin() {
-        prefs.edit().remove(KEY_PIN_HASH).apply()
+        prefs.edit().remove(KEY_PIN_HASH).remove(KEY_PIN_FAILURES).remove(KEY_PIN_LOCK_UNTIL).apply()
         _pinIsSet.value = false
         _hiddenUnlocked.value = true
     }
 
     fun verifyPin(pin: String): Boolean {
-        val stored = prefs.getString(KEY_PIN_HASH, null) ?: return true
-        return stored == hashPin(pin)
+        synchronized(PIN_LOCK) {
+            val stored = prefs.getString(KEY_PIN_HASH, null) ?: return true
+            val now = System.currentTimeMillis()
+            if (now < prefs.getLong(KEY_PIN_LOCK_UNTIL, 0L)) return false
+            val candidate = runCatching {
+                if (stored.startsWith(PIN_HMAC_PREFIX)) {
+                    PIN_HMAC_PREFIX + hashPin(pin)
+                } else {
+                    legacyHashPin(pin)
+                }
+            }.getOrElse { return false }
+            val matches = java.security.MessageDigest.isEqual(
+                stored.toByteArray(Charsets.US_ASCII),
+                candidate.toByteArray(Charsets.US_ASCII),
+            )
+            if (matches) {
+                val update = prefs.edit().remove(KEY_PIN_FAILURES).remove(KEY_PIN_LOCK_UNTIL)
+                if (!stored.startsWith(PIN_HMAC_PREFIX)) {
+                    update.putString(KEY_PIN_HASH, PIN_HMAC_PREFIX + hashPin(pin))
+                }
+                update.apply()
+                return true
+            }
+            val failures = prefs.getInt(KEY_PIN_FAILURES, 0) + 1
+            val lockMillis = pinLockMillis(failures)
+            prefs.edit().putInt(KEY_PIN_FAILURES, failures)
+                .putLong(KEY_PIN_LOCK_UNTIL, if (lockMillis == 0L) 0L else now + lockMillis)
+                .apply()
+            return false
+        }
     }
 
     fun setHiddenCategories(keys: Set<String>) {
@@ -144,10 +179,20 @@ class AppSettings private constructor(context: Context) {
         _hiddenUnlocked.value = unlocked
     }
 
-    private fun hashPin(pin: String): String {
+    private fun hashPin(pin: String): String = secretStore.hmac(PIN_HMAC_KEY, pin)
+        .joinToString("") { "%02x".format(it) }
+
+    private fun legacyHashPin(pin: String): String {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         val bytes = digest.digest("opentv-pin::$pin".toByteArray())
         return bytes.joinToString("") { "%02x".format(it) }
+    }
+
+    private fun pinLockMillis(failures: Int): Long = when {
+        failures < 5 -> 0L
+        failures < 10 -> (failures - 4) * 10_000L
+        failures < 15 -> (failures - 9) * 60_000L
+        else -> 30 * 60_000L
     }
 
     fun setThemeMode(mode: ThemeMode) {
@@ -450,10 +495,10 @@ class AppSettings private constructor(context: Context) {
     private val _smbFolder = MutableStateFlow(prefs.getString(KEY_SMB_FOLDER, "OpenTV").orEmpty())
     val smbFolder: StateFlow<String> = _smbFolder.asStateFlow()
 
-    private val _smbUser = MutableStateFlow(prefs.getString(KEY_SMB_USER, "").orEmpty())
+    private val _smbUser = MutableStateFlow(readSecret(KEY_SMB_USER))
     val smbUser: StateFlow<String> = _smbUser.asStateFlow()
 
-    private val _smbPassword = MutableStateFlow(prefs.getString(KEY_SMB_PASS, "").orEmpty())
+    private val _smbPassword = MutableStateFlow(readSecret(KEY_SMB_PASS))
     val smbPassword: StateFlow<String> = _smbPassword.asStateFlow()
 
     fun setRecordingTarget(target: RecordingTarget) {
@@ -471,12 +516,14 @@ class AppSettings private constructor(context: Context) {
             .getOrDefault(RecordingContainer.TS)
 
     fun setSmbConfig(host: String, share: String, folder: String, user: String, password: String) {
+        writeSecret(KEY_SMB_USER, user)
+        writeSecret(KEY_SMB_PASS, password)
         prefs.edit()
             .putString(KEY_SMB_HOST, host.trim())
             .putString(KEY_SMB_SHARE, share.trim())
             .putString(KEY_SMB_FOLDER, folder.trim())
-            .putString(KEY_SMB_USER, user)
-            .putString(KEY_SMB_PASS, password)
+            .remove(KEY_SMB_USER)
+            .remove(KEY_SMB_PASS)
             .apply()
         _smbHost.value = host.trim()
         _smbShare.value = share.trim()
@@ -527,12 +574,12 @@ class AppSettings private constructor(context: Context) {
      * credentials, used to fill in artwork/metadata a provider left blank. Blank = the TMDB
      * fallback is off. Each user brings their own key, so no single key carries everyone's traffic.
      */
-    private val _tmdbApiKey = MutableStateFlow(prefs.getString(KEY_TMDB_KEY, "").orEmpty())
+    private val _tmdbApiKey = MutableStateFlow(readSecret(KEY_TMDB_KEY))
     val tmdbApiKey: StateFlow<String> = _tmdbApiKey.asStateFlow()
 
     fun setTmdbApiKey(key: String) {
         val trimmed = key.trim()
-        prefs.edit().putString(KEY_TMDB_KEY, trimmed).apply()
+        writeSecret(KEY_TMDB_KEY, trimmed)
         _tmdbApiKey.value = trimmed
     }
 
@@ -556,14 +603,39 @@ class AppSettings private constructor(context: Context) {
     }
 
     private fun persistStremioAddons(list: List<StremioAddon>) {
-        prefs.edit().putString(KEY_STREMIO_ADDONS, addonJson.encodeToString(list)).apply()
+        writeSecret(KEY_STREMIO_ADDONS, addonJson.encodeToString(list))
         _stremioAddons.value = list
     }
 
     private fun readStremioAddons(): List<StremioAddon> =
         runCatching {
-            prefs.getString(KEY_STREMIO_ADDONS, null)?.let { addonJson.decodeFromString<List<StremioAddon>>(it) }
+            readSecret(KEY_STREMIO_ADDONS).takeIf { it.isNotEmpty() }
+                ?.let { addonJson.decodeFromString<List<StremioAddon>>(it) }
         }.getOrNull() ?: emptyList()
+
+    /** Encrypts a legacy preference once, then removes the plaintext source value. */
+    private fun readSecret(key: String): String {
+        val encrypted = secretStore.get(key)
+        if (encrypted != null) {
+            if (prefs.contains(key)) prefs.edit().remove(key).commit()
+            return encrypted
+        }
+        val legacy = prefs.getString(key, null) ?: return ""
+        return runCatching {
+            secretStore.put(key, legacy)
+            check(prefs.edit().remove(key).commit()) { "Could not remove plaintext secret." }
+            legacy
+        }.getOrElse {
+            // Fail closed: do not preserve a plaintext fallback if Keystore is unavailable.
+            prefs.edit().remove(key).commit()
+            ""
+        }
+    }
+
+    private fun writeSecret(key: String, value: String) {
+        secretStore.put(key, value)
+        prefs.edit().remove(key).apply()
+    }
 
     companion object {
         private const val KEY_THEME = "theme_mode"
@@ -576,6 +648,8 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_PREVIEW_VIDEO = "guide_preview_video"
         private const val KEY_PREVIEW_SOUND = "guide_preview_sound"
         private const val KEY_PIN_HASH = "parental_pin_hash"
+        private const val KEY_PIN_FAILURES = "parental_pin_failed_attempts"
+        private const val KEY_PIN_LOCK_UNTIL = "parental_pin_lock_until"
         private const val KEY_HIDDEN_CATS = "hidden_categories"
         private const val KEY_ACTIVE_PROFILE = "active_profile_id"
         private const val KEY_RESUME_LAST = "resume_last_channel"
@@ -609,6 +683,10 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_VOD_SYNCED_AT = "vod_synced_at"
         private const val KEY_TMDB_KEY = "tmdb_api_key"
         private const val KEY_STREMIO_ADDONS = "stremio_addons"
+        private const val PIN_LENGTH = 4
+        private const val PIN_HMAC_KEY = "parental_pin_v1"
+        private const val PIN_HMAC_PREFIX = "hmac-v1:"
+        private val PIN_LOCK = Any()
         private const val KEY_MANUAL_REC_MIN = "rec_manual_minutes"
         private const val KEY_PAD_START = "rec_pad_start_min"
         private const val KEY_PAD_END = "rec_pad_end_min"

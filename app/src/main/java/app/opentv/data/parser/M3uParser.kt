@@ -7,17 +7,14 @@ package app.opentv.data.parser
 
 import app.opentv.data.model.Channel
 import java.io.BufferedReader
+import java.io.IOException
 import java.io.InputStream
+import java.net.URI
 
 /**
- * Streaming M3U/M3U8 playlist parser.
- *
- * Deliberately reads line-by-line rather than loading the whole playlist into memory:
- * real provider playlists routinely run to tens of megabytes and 50,000+ entries, and
- * loading that as a single String is a reliable way to OOM a cheap Android TV box.
- *
- * Tolerant by design. A malformed entry is skipped, not fatal — one bad line in a
- * 40,000-line playlist must never cost the user their entire channel list.
+ * Streaming M3U/M3U8 parser with byte, line, channel and URL quotas. Only HTTPS stream, guide and
+ * logo URLs are accepted; local/file/custom schemes and URL userinfo cannot turn a playlist into
+ * a local-file reader or hide credentials in URI authority fields.
  */
 object M3uParser {
 
@@ -27,23 +24,21 @@ object M3uParser {
         val channels: List<Channel>,
         /** First `url-tvg`/`x-tvg-url` found anywhere in the playlist. */
         val declaredEpgUrl: String?,
-        /**
-         * Every guide URL declared anywhere in the playlist, in order and de-duplicated.
-         *
-         * Playlists routinely repeat `url-tvg="…"` dozens of times (one per country/region),
-         * and sometimes put several URLs in a single value separated by whitespace. A plain
-         * `associate` keeps only the last one, which is why a list advertising 80 guides used
-         * to import exactly one. This keeps them all so the app can auto-add a feed per URL.
-         */
+        /** All bounded, unique HTTPS guide URLs declared by the playlist, in order. */
         val declaredEpgUrls: List<String> = emptyList(),
         val skippedEntries: Int = 0,
     )
 
     fun parse(input: InputStream, sourceId: Long): Result =
-        input.bufferedReader().use { parse(it, sourceId) }
+        BoundedInputStream(input, MAX_PLAYLIST_BYTES, "M3U playlist")
+            .bufferedReader().use { parse(it, sourceId) }
 
-    fun parse(text: String, sourceId: Long): Result =
-        parse(text.reader().buffered(), sourceId)
+    fun parse(text: String, sourceId: Long): Result {
+        require(text.toByteArray(Charsets.UTF_8).size <= MAX_PLAYLIST_BYTES) {
+            "M3U playlist exceeds the safety limit."
+        }
+        return parse(text.reader().buffered(), sourceId)
+    }
 
     fun parse(reader: BufferedReader, sourceId: Long): Result {
         val channels = ArrayList<Channel>()
@@ -51,62 +46,60 @@ object M3uParser {
         var declaredEpgUrl: String? = null
         val declaredEpgUrls = LinkedHashSet<String>()
         var skipped = 0
-
         var pendingName: String? = null
         var pendingAttributes: Map<String, String> = emptyMap()
         var pendingNumber: Int? = null
-        // #EXTVLCOPT / #EXTHTTP lines that apply to the next URL.
         var index = 0
 
-        reader.forEachLine { rawLine ->
+        while (true) {
+            val rawLine = readLineLimited(reader) ?: break
             val line = rawLine.trim()
             val attributes = if (line.startsWith("#")) parseAttributePairs(line) else emptyList()
             for ((key, value) in attributes) {
                 if (key != "url-tvg" && key != "x-tvg-url") continue
                 for (url in splitGuideUrls(value)) {
-                    if (declaredEpgUrls.add(url) && declaredEpgUrl == null) {
-                        declaredEpgUrl = url
-                    }
+                    if (declaredEpgUrls.size >= MAX_DISCOVERED_EPG_URLS) break
+                    if (declaredEpgUrls.add(url) && declaredEpgUrl == null) declaredEpgUrl = url
                 }
             }
+
             when {
                 line.isEmpty() -> Unit
-
                 line.startsWith("#EXTM3U", ignoreCase = true) -> Unit
-
                 line.startsWith("#EXTINF", ignoreCase = true) -> {
                     pendingAttributes = attributes.toMap()
                     pendingName = displayNameOf(line, pendingAttributes)
+                        ?.take(MAX_DISPLAY_TEXT_CHARS)
                     pendingNumber = pendingAttributes["tvg-chno"]?.toIntOrNull()
                 }
-
-                // Any other directive: ignore, but keep the pending EXTINF alive.
-                line.startsWith("#") -> Unit
-
+                line.startsWith("#") -> Unit // Keep a pending EXTINF across directives such as #EXTVLCOPT.
                 else -> {
                     val name = pendingName
-                    if (name.isNullOrBlank()) {
-                        // A URL with no preceding #EXTINF. Nothing sensible to label it with.
+                    if (name.isNullOrBlank() || !isSafeHttpsUrl(line, MAX_STREAM_URL_CHARS)) {
                         skipped++
                     } else {
+                        if (channels.size >= MAX_CHANNELS) {
+                            throw IOException("M3U playlist contains too many channels.")
+                        }
                         val attributes = pendingAttributes
-                        val streamId = attributes["tvg-id"]
-                            ?.takeIf { it.isNotBlank() }
+                        val tvgId = attributes["tvg-id"]?.takeIf {
+                            it.isNotBlank() && it.length <= MAX_ID_CHARS
+                        }
+                        // One tvg-id can identify SD/HD variants. Keep distinct HTTPS URLs and
+                        // deduplicate only exact repeated stream URLs.
+                        val streamId = tvgId
                             ?.let { "tvg:$it:${stableHash(line)}" }
                             ?: "url:${stableHash(line)}"
-
-                        // One tvg-id can legitimately identify several stream variants. Include
-                        // the URL so each distinct stream survives, while an exact repeated URL
-                        // remains a duplicate and cannot collide on the unique index.
                         if (seenStreamIds.add(streamId)) {
                             channels += Channel(
                                 sourceId = sourceId,
                                 streamId = streamId,
                                 name = name,
-                                categoryId = attributes["group-title"]?.takeIf { it.isNotBlank() },
+                                categoryId = attributes["group-title"]?.takeIf { it.isNotBlank() }
+                                    ?.take(MAX_DISPLAY_TEXT_CHARS),
                                 logoUrl = (attributes["tvg-logo"] ?: attributes["logo"])
-                                    ?.takeIf { it.isNotBlank() },
-                                epgChannelId = attributes["tvg-id"]?.takeIf { it.isNotBlank() },
+                                    ?.takeIf { isSafeHttpsUrl(it, MAX_ICON_URL_CHARS) },
+                                epgChannelId = tvgId,
                                 number = pendingNumber,
                                 streamUrl = line,
                                 sortIndex = index++,
@@ -123,44 +116,65 @@ object M3uParser {
         return Result(channels, declaredEpgUrl, declaredEpgUrls.toList(), skipped)
     }
 
-    /**
-     * The display name is whatever follows the last comma on the #EXTINF line. Falling back
-     * to `tvg-name` matters because a fair number of playlists emit `#EXTINF:-1 ...,` with
-     * nothing after the comma.
-     */
+    /** The display name follows the last comma, falling back to tvg-name when it is empty. */
     private fun displayNameOf(line: String, attributes: Map<String, String>): String? {
         val afterComma = line.substringAfterLast(',', missingDelimiterValue = "").trim()
         return afterComma.takeIf { it.isNotBlank() }
             ?: attributes["tvg-name"]?.takeIf { it.isNotBlank() }
     }
 
-    private fun parseAttributes(line: String): Map<String, String> =
-        parseAttributePairs(line).toMap()
-
-    /** Every `key="value"` pair, duplicates preserved and in playlist order. */
     private fun parseAttributePairs(line: String): List<Pair<String, String>> =
         ATTRIBUTE_REGEX.findAll(line).map { match ->
             match.groupValues[1].lowercase() to match.groupValues[2]
         }.toList()
 
-    /**
-     * A single `url-tvg` value can hold several guides: some lists separate them with commas,
-     * others with a space (e.g. `url-tvg="https://a/x.xml https://b/y.xml"`). Split on both.
-     */
     private fun splitGuideUrls(value: String): List<String> =
         value.split(GUIDE_URL_SEPARATOR)
-            .map { it.trim() }
-            .filter { it.startsWith("http://", true) || it.startsWith("https://", true) }
+            .asSequence()
+            .map(String::trim)
+            .filter { isSafeHttpsUrl(it, MAX_EPG_URL_CHARS) }
+            .take(MAX_DISCOVERED_EPG_URLS)
+            .toList()
 
-    private val GUIDE_URL_SEPARATOR = Regex("""[\s,]+""")
+    private fun isSafeHttpsUrl(raw: String, maxLength: Int): Boolean {
+        if (raw.length !in 9..maxLength) return false
+        val uri = runCatching { URI(raw) }.getOrNull() ?: return false
+        return uri.scheme.equals("https", ignoreCase = true) && !uri.host.isNullOrBlank() &&
+            uri.rawUserInfo == null && uri.rawFragment == null
+    }
 
-    /** FNV-1a. Stable across processes and platforms, unlike [String.hashCode] guarantees. */
+    /** readLine() can allocate an attacker-sized String before the parser gets a chance to check it. */
+    private fun readLineLimited(reader: BufferedReader): String? {
+        val line = StringBuilder()
+        var seen = false
+        while (true) {
+            val value = reader.read()
+            if (value < 0) return if (!seen) null else line.toString()
+            seen = true
+            if (value == '\n'.code || value == '\r'.code) return line.toString()
+            if (line.length >= MAX_LINE_CHARS) throw IOException("M3U playlist line exceeds the safety limit.")
+            line.append(value.toChar())
+        }
+    }
+
+    /** FNV-1a: stable across processes and platforms, unlike String.hashCode. */
     private fun stableHash(value: String): String {
-        var hash = 0xcbf29ce484222325uL.toLong() // FNV-1a 64-bit offset basis
+        var hash = 0xcbf29ce484222325uL.toLong()
         for (byte in value.encodeToByteArray()) {
             hash = hash xor (byte.toLong() and 0xff)
-            hash *= 0x100000001b3L // FNV-1a 64-bit prime
+            hash *= 0x100000001b3L
         }
         return java.lang.Long.toHexString(hash)
     }
+
+    const val MAX_PLAYLIST_BYTES = 64L * 1024 * 1024
+    private const val MAX_LINE_CHARS = 16 * 1024
+    private const val MAX_CHANNELS = 100_000
+    private const val MAX_DISCOVERED_EPG_URLS = 128
+    private const val MAX_STREAM_URL_CHARS = 8_192
+    private const val MAX_EPG_URL_CHARS = 8_192
+    private const val MAX_ICON_URL_CHARS = 2_048
+    private const val MAX_ID_CHARS = 512
+    private const val MAX_DISPLAY_TEXT_CHARS = 256
+    private val GUIDE_URL_SEPARATOR = Regex("""[\s,]+""")
 }

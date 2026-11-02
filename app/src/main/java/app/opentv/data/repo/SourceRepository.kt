@@ -10,6 +10,7 @@ import app.opentv.data.model.Source
 import app.opentv.data.model.SourceKind
 import app.opentv.data.parser.YouTubeLiveSearchUrl
 import app.opentv.data.remote.HttpsUrlPolicy
+import app.opentv.data.remote.NetworkDestinationPolicy
 import app.opentv.data.remote.StalkerApi
 import app.opentv.data.remote.XtreamApi
 import kotlinx.coroutines.Dispatchers
@@ -23,12 +24,15 @@ class SourceRepository(
 ) {
     fun observeAll(): Flow<List<Source>> = dao.observeAll()
 
-    suspend fun enabled(): List<Source> = dao.enabled()
+    suspend fun enabled(): List<Source> = dao.enabled().also { sources ->
+        sources.forEach(::registerConfiguredOrigins)
+    }
 
-    suspend fun byId(id: Long): Source? = dao.byId(id)
+    suspend fun byId(id: Long): Source? = dao.byId(id)?.also(::registerConfiguredOrigins)
 
     suspend fun save(source: Source): Long = withContext(Dispatchers.IO) {
         val normalised = normaliseAndValidate(source)
+        registerConfiguredOrigins(normalised)
         if (source.id == 0L) dao.insert(normalised)
         else {
             dao.update(normalised)
@@ -40,6 +44,7 @@ class SourceRepository(
     suspend fun test(source: Source): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             val secure = normaliseAndValidate(source)
+            registerConfiguredOrigins(secure)
             when (secure.kind) {
                 SourceKind.XTREAM -> {
                     val info = api.authenticate(secure)
@@ -65,6 +70,11 @@ class SourceRepository(
                 }
             }
         }
+    }
+
+    private fun registerConfiguredOrigins(source: Source) {
+        NetworkDestinationPolicy.registerTrustedOrigin(source.url)
+        source.epgUrl?.let(NetworkDestinationPolicy::registerTrustedOrigin)
     }
 
     companion object {
@@ -99,6 +109,7 @@ class SourceRepository(
         }
 
         private fun normaliseAndValidate(source: Source): Source {
+            require(source.url.length <= MAX_URL_CHARS) { "Source URL exceeds the safety limit." }
             val epgUrl = source.epgUrl?.trim()?.takeIf { it.isNotEmpty() }
                 ?.let(HttpsUrlPolicy::withDefaultHttps)
             val normalized = source.copy(
@@ -106,9 +117,25 @@ class SourceRepository(
                 epgUrl = epgUrl,
             )
             require(normalized.url.isNotBlank()) { "Enter a source URL." }
+            require(normalized.name.isNotBlank() && normalized.name.length <= MAX_NAME_CHARS &&
+                normalized.name.none { it.code < 0x20 || it.code == 0x7f }
+            ) { "Source name is invalid or too long." }
+            require(normalized.username.orEmpty().length <= MAX_CREDENTIAL_CHARS &&
+                normalized.password.orEmpty().length <= MAX_CREDENTIAL_CHARS &&
+                normalized.macAddress.orEmpty().length <= MAX_MAC_CHARS
+            ) { "Source credentials exceed the safety limit." }
+            require(normalized.userAgent.length <= MAX_USER_AGENT_CHARS &&
+                normalized.userAgent.none { it == '\r' || it == '\n' || it.code == 0x7f }
+            ) { "User-Agent is invalid or too long." }
             HttpsUrlPolicy.requireHttps(normalized.url)
             HttpsUrlPolicy.requireHttps(normalized.epgUrl)
             return normalized
         }
+
+        private const val MAX_NAME_CHARS = 120
+        private const val MAX_CREDENTIAL_CHARS = 4_096
+        private const val MAX_MAC_CHARS = 64
+        private const val MAX_USER_AGENT_CHARS = 1_024
+        private const val MAX_URL_CHARS = 16_384
     }
 }

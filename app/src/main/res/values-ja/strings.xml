@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">サーバーアドレス</string>
     <string name="onboarding_playlist_url">プレイリスト URL</string>
     <string name="onboarding_portal_url">ポータル URL</string>
-    <string name="onboarding_server_help">例：http://example.com:8080——プロバイダーから受け取った内容をそのまま貼り付けても構いません。余分な部分は自動的に取り除かれます。</string>
+    <string name="onboarding_server_help">例：https://example.com:8080——プロバイダーから受け取った内容をそのまま貼り付けても構いません。余分な部分は自動的に取り除かれます。</string>
     <string name="onboarding_playlist_help">.m3uまたは.m3u8ファイルへの完全なhttpリンク。</string>
-    <string name="onboarding_portal_help">プロバイダーから受け取ったポータルアドレス。例：http://host:port/c/——余分な部分は自動的に取り除かれます。</string>
+    <string name="onboarding_portal_help">プロバイダーから受け取ったポータルアドレス。例：https://host:port/c/——余分な部分は自動的に取り除かれます。</string>
     <string name="onboarding_mac_address">MACアドレス</string>
     <string name="onboarding_mac_help">プロバイダーが回線に紐づけたMACアドレス。例：00:1A:79:xx:xx:xx。</string>
     <string name="onboarding_hide_advanced">詳細設定を隠す</string>

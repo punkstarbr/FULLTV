@@ -1,83 +1,42 @@
-# Releasing
+# Publicação manual
 
-Releases are cut by pushing a tag. GitHub Actions does the rest.
+O FullTV **não publica releases por GitHub Actions**. O workflow privilegiado de release foi removido; os workflows restantes fazem testes/análise ou publicam a documentação, sem permissão para anexar APKs a uma release.
 
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+## Preparar a release
 
-`.github/workflows/release.yml` runs the tests, assembles the release and debug APKs, and attaches
-both to a new GitHub Release. Each version must use a new tag; GitHub keeps previous Releases and
-their APKs, so a new release never replaces an older version.
-
-The app is configured to check `punkstarbr/FULLTV` automatically every six hours. When a newer
-Release is found, it asks the user before downloading and opening Android's installer. Debug
-installations receive the debug APK, while release installations receive the release APK; this
-avoids an Android package/signature mismatch.
-
-## Manual release when Actions are unavailable
-
-Build from the release commit with JDK 17, Android SDK 35 and Python 3.11, then run the targeted
-tests and assemble both variants locally:
-
-```bash
-./gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
-```
-
-Before publishing, verify both APK signatures with `apksigner`, confirm the release `applicationId`
-and version, and compare its certificate with the currently published APK. Upload the release APK,
-debug APK and a `SHA256SUMS.txt` file with `gh release create <tag> ... --notes-file <file>` or the
-GitHub Releases page. Creating the release this way does not depend on Actions; pushing the tag may
-still trigger any enabled repository workflows. Never replace or change a signing key if the APK
-must update an existing installation.
-
-## Signing
-
-**Right now, release builds are signed with the Android debug key.** This is deliberate, and
-it is temporary.
-
-An *unsigned* APK cannot be installed on Android at all — the installer rejects it before the
-user sees anything, with an error that explains nothing. That would mean no one can test the
-app until signing infrastructure exists. So `app/build.gradle.kts` falls back to the debug key
-when no keystore is configured, and the result installs fine.
-
-The cost, stated plainly: **when the project moves to a real keystore, Android will refuse to
-upgrade over a debug-signed install.** Everyone testing today will have to uninstall and
-reinstall, losing their settings. That is fine for a handful of early testers and completely
-unacceptable once there are hundreds. **Set up real signing before announcing the project
-publicly.**
-
-### Setting up real signing
-
-1. Generate a keystore:
+1. Atualize `versionCode` e `versionName` em `app/build.gradle.kts`; o `versionCode` deve aumentar em toda versão.
+2. Use JDK 17, Android SDK compatível e Python 3.11 para o Chaquopy.
+3. Rode os testes relevantes e faça uma build limpa dos dois APKs:
 
    ```bash
-   keytool -genkeypair -v -keystore upload.jks -keyalg RSA -keysize 4096 \
-     -validity 10000 -alias opentv
+   ./gradlew --no-daemon clean :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
    ```
 
-2. Add these repository secrets under **Settings → Secrets and variables → Actions**:
-   `KEYSTORE_BASE64` (the output of `base64 -i upload.jks`), `KEYSTORE_PASSWORD`, `KEY_ALIAS`,
-   `KEY_PASSWORD`.
+4. O `assembleRelease` exige `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` e `KEY_PASSWORD`. A tarefa falha antes de empacotar se a assinatura não estiver configurada. Não coloque keystore, senhas ou tokens no repositório, em logs ou em uma pull request.
+5. Verifique package, versão, SDK mínimo, ABIs e certificado com `apkanalyzer`/`apksigner`. Compare o SHA-256 do certificado com a última release que os usuários instalaram. Se o certificado mudar, o Android não atualizará por cima da instalação atual.
+6. Copie os APKs para uma pasta vazia e gere `SHA256SUMS.txt`. Publique manualmente usando os nomes canônicos `FullTV-<versão>-universal.apk` e `FullTV-<versão>-debug.apk`:
 
-3. That is all — `release.yml` and `build.gradle.kts` already pick them up. The release notes
-   will report `signed: yes` instead of `debug-key`.
+   ```bash
+   sha256sum FullTV-<versão>-universal.apk FullTV-<versão>-debug.apk > SHA256SUMS.txt
+   gh release create v<versão> \
+     FullTV-<versão>-universal.apk \
+     FullTV-<versão>-debug.apk \
+     SHA256SUMS.txt \
+     --repo punkstarbr/FULLTV \
+     --title "FullTV v<versão>" \
+     --notes-file release-notes.md
+   ```
 
-**The keystore must belong to the project, not to one person.** A single maintainer holding
-the only copy is the same single point of failure this project exists to avoid — if they go
-quiet, nobody can ship an upgrade, and every user is stranded on whatever version they have.
-Share it among at least two maintainers, and back it up somewhere that is not one laptop.
+Não reutilize uma tag existente nem publique um APK sem validar o certificado e os hashes. O atualizador exige asset canônico, digest SHA-256, package/version esperados e certificado igual ao app instalado.
 
-Losing the keystore is unrecoverable. There is no reset.
+## Assinatura e compatibilidade
 
-## Version numbers
+A release pública `v0.11.22` foi assinada com a chave debug do ambiente de build porque não havia keystore de produção. O código agora **não usa essa chave automaticamente**. Para build release, forneça um keystore e segredos por variáveis de ambiente, nunca por argumentos da linha de comando que possam aparecer no histórico.
 
-Bump `versionCode` and `versionName` in `app/build.gradle.kts`. `versionCode` must increase on
-every release; Android uses it, not `versionName`, to decide what counts as an upgrade. Then create
-a new tag instead of reusing an existing one:
+Para preservar a compatibilidade de atualização das instalações `v0.11.22`, qualquer build de transição precisa usar exatamente o mesmo certificado da release já publicada. `FULLTV_ALLOW_DEBUG_SIGNED_RELEASE=true` é uma exceção explícita e insegura, destinada apenas a manter o certificado legado no ambiente que possui aquela chave; não a use como solução de produção nem em outro computador. A chave privada não está no repositório. Sem ela, uma nova assinatura exigirá desinstalar/reinstalar o app e poderá apagar os dados locais. Planeje e comunique essa transição antes de publicar.
 
-```bash
-git tag v0.11.12
-git push origin v0.11.12
-```
+O APK `debug` usa outro `applicationId` (`app.fulltv.debug`) e pode coexistir com o app release. Nunca o publique como atualização do app release.
+
+## Integridade do Gradle Wrapper
+
+O repositório fixa SHA-256 da distribuição Gradle 8.13 em `gradle-wrapper.properties` e mantém o hash oficial do Wrapper JAR em `gradle/wrapper/gradle-wrapper.jar.sha256`. O CI valida esse JAR antes de executar Gradle; confira ambos novamente ao atualizar o Wrapper.

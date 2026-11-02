@@ -37,6 +37,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -44,6 +45,7 @@ import app.opentv.R
 import app.opentv.data.model.Source
 import app.opentv.pairing.PairingServer
 import app.opentv.pairing.QrCodes
+import app.opentv.ui.ProtectSensitiveScreen
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -61,6 +63,7 @@ fun PhonePairingScreen(
     onReceived: (Source) -> Unit,
     onCancel: () -> Unit,
 ) {
+    ProtectSensitiveScreen()
     val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
     val server = remember { PairingServer(scope) }
     val state by server.state.collectAsState()
@@ -167,6 +170,22 @@ private fun Listening(session: PairingServer.Session, onCancel: () -> Unit) {
             )
             Spacer(Modifier.height(4.dp))
             Text(session.shortUrl, style = MaterialTheme.typography.titleLarge)
+
+            Spacer(Modifier.height(14.dp))
+            Text(
+                stringResource(R.string.lan_tls_browser_warning),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                stringResource(R.string.lan_tls_certificate_fingerprint),
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Text(
+                session.certificateSha256.chunked(24).joinToString("\n"),
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+            )
 
             Spacer(Modifier.height(32.dp))
             OutlinedButton(onClick = onCancel) { Text(stringResource(R.string.pairing_type_on_tv)) }

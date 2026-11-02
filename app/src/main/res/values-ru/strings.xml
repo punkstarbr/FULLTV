@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">Адрес сервера</string>
     <string name="onboarding_playlist_url">Ссылка на плейлист</string>
     <string name="onboarding_portal_url">Ссылка на портал</string>
-    <string name="onboarding_server_help">Например, http://example.com:8080 — если удобнее, вставьте всю строку от провайдера целиком, лишнее будет убрано.</string>
+    <string name="onboarding_server_help">Например, https://example.com:8080 — если удобнее, вставьте всю строку от провайдера целиком, лишнее будет убрано.</string>
     <string name="onboarding_playlist_help">Полная http-ссылка на ваш файл .m3u или .m3u8.</string>
-    <string name="onboarding_portal_help">Адрес портала от вашего провайдера, например http://host:port/c/ — лишнее будет убрано.</string>
+    <string name="onboarding_portal_help">Адрес портала от вашего провайдера, например https://host:port/c/ — лишнее будет убрано.</string>
     <string name="onboarding_mac_address">MAC-адрес</string>
     <string name="onboarding_mac_help">MAC-адрес, привязанный провайдером к вашей линии, например 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">Скрыть дополнительные параметры</string>

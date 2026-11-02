@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">Serveradres</string>
     <string name="onboarding_playlist_url">Afspeellijst-URL</string>
     <string name="onboarding_portal_url">Portaal-URL</string>
-    <string name="onboarding_server_help">Bijvoorbeeld http://example.com:8080 — plak de hele regel van je provider als dat makkelijker is, extra onderdelen worden verwijderd.</string>
+    <string name="onboarding_server_help">Bijvoorbeeld https://example.com:8080 — plak de hele regel van je provider als dat makkelijker is, extra onderdelen worden verwijderd.</string>
     <string name="onboarding_playlist_help">De volledige http-link naar je .m3u- of .m3u8-bestand.</string>
-    <string name="onboarding_portal_help">Het portaaladres van je provider, bijv. http://host:port/c/ — extra onderdelen worden verwijderd.</string>
+    <string name="onboarding_portal_help">Het portaaladres van je provider, bijv. https://host:port/c/ — extra onderdelen worden verwijderd.</string>
     <string name="onboarding_mac_address">MAC-adres</string>
     <string name="onboarding_mac_help">Het MAC-adres dat je provider aan jouw lijn heeft gekoppeld, bijv. 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">Geavanceerd verbergen</string>

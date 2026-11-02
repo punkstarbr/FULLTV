@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">Dirección del servidor</string>
     <string name="onboarding_playlist_url">URL de la lista de reproducción</string>
     <string name="onboarding_portal_url">URL del portal</string>
-    <string name="onboarding_server_help">Por ejemplo http://ejemplo.com:8080 — pega la línea completa de tu proveedor si te resulta más fácil, las partes adicionales se recortan.</string>
+    <string name="onboarding_server_help">Por ejemplo https://ejemplo.com:8080 — pega la línea completa de tu proveedor si te resulta más fácil, las partes adicionales se recortan.</string>
     <string name="onboarding_playlist_help">El enlace http completo a tu archivo .m3u o .m3u8.</string>
-    <string name="onboarding_portal_help">La dirección del portal de tu proveedor, p. ej. http://host:puerto/c/ — las partes adicionales se recortan.</string>
+    <string name="onboarding_portal_help">La dirección del portal de tu proveedor, p. ej. https://host:puerto/c/ — las partes adicionales se recortan.</string>
     <string name="onboarding_mac_address">Dirección MAC</string>
     <string name="onboarding_mac_help">La MAC que tu proveedor vinculó a tu línea, p. ej. 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">Ocultar avanzado</string>

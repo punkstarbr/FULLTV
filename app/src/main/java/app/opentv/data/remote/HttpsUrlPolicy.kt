@@ -5,6 +5,8 @@
  */
 package app.opentv.data.remote
 
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+
 /** A user-facing validation failure: unencrypted HTTP is blocked by the Android network policy. */
 class HttpsRequiredException : IllegalArgumentException(
     "HTTP is blocked for privacy. Use an HTTPS URL.",
@@ -33,5 +35,16 @@ object HttpsUrlPolicy {
     fun requireHttps(raw: String?) {
         if (raw.isNullOrBlank()) return
         if (!isHttps(raw)) throw HttpsRequiredException()
+        val value = raw.trim()
+        require(value.length <= MAX_URL_CHARS) { "URL is too long." }
+        require(value.none { it.code <= 0x20 || it.code == 0x7f }) { "URL contains invalid control characters." }
+        val parsed = value.toHttpUrlOrNull() ?: throw IllegalArgumentException("Invalid HTTPS URL.")
+        require(parsed.isHttps && parsed.host.isNotBlank()) { "Invalid HTTPS URL host." }
+        require(parsed.username.isEmpty() && parsed.password.isEmpty()) {
+            "Credentials must not be embedded in the URL authority."
+        }
+        require(parsed.fragment == null) { "URL fragments are not sent to the server." }
     }
+
+    private const val MAX_URL_CHARS = 16_384
 }

@@ -8,6 +8,9 @@ package app.opentv.core
 import android.content.Context
 import app.opentv.data.db.OpenTvDatabase
 import app.opentv.data.remote.StalkerApi
+import app.opentv.data.remote.PinnedPublicDns
+import app.opentv.data.remote.SafeNetworkRequestInterceptor
+import app.opentv.data.remote.SafeNetworkRedirectInterceptor
 import app.opentv.data.remote.StremioClient
 import app.opentv.data.remote.XtreamApi
 import app.opentv.data.repo.CatalogRepository
@@ -41,6 +44,7 @@ object ServiceLocator {
 
     class Graph(context: Context) {
         private val appContext = context.applicationContext
+        val applicationContext: Context get() = appContext
 
         val settings: AppSettings by lazy { AppSettings.get(appContext) }
 
@@ -48,6 +52,9 @@ object ServiceLocator {
 
         val httpClient: OkHttpClient by lazy {
             OkHttpClient.Builder()
+                .dns(PinnedPublicDns())
+                .addInterceptor(SafeNetworkRequestInterceptor())
+                .addNetworkInterceptor(SafeNetworkRedirectInterceptor())
                 .connectTimeout(15, TimeUnit.SECONDS)
                 // Generous: catalogue endpoints on a busy panel can take a long time to
                 // produce 40,000 rows, and timing out mid-list is worse than waiting.
@@ -63,15 +70,15 @@ object ServiceLocator {
          * infinite HTTP response body, so the catalogue client's five-minute [callTimeout] would
          * guillotine every live channel at that mark — here there is no overall call timeout, only
          * a read timeout that catches a genuinely dead connection. Cross-protocol redirects are
-         * followed explicitly because IPTV stream URLs routinely bounce http→https onto a CDN, and
-         * a client that stops at the redirect surfaces as "lost connection to server".
+         * deliberately disabled: every provider and CDN hop must remain HTTPS and pass the shared
+         * network-destination policy.
          */
         val streamingHttpClient: OkHttpClient by lazy {
             httpClient.newBuilder()
                 .callTimeout(0, TimeUnit.MILLISECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
                 .followRedirects(true)
-                .followSslRedirects(true)
+                .followSslRedirects(false)
                 .retryOnConnectionFailure(true)
                 .build()
         }

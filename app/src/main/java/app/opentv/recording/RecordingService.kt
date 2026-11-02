@@ -48,7 +48,7 @@ class RecordingService : Service() {
 
     private val scope = CoroutineScope(
         SupervisorJob() + Dispatchers.IO + CoroutineExceptionHandler { _, error ->
-            Log.e(TAG, "Uncaught recording service task failure", error)
+            Log.e(TAG, "Uncaught recording service task failure (${error.javaClass.simpleName})")
         },
     )
     private val captures = ConcurrentHashMap<Long, Capture>()
@@ -110,7 +110,7 @@ class RecordingService : Service() {
             }
             Triple(graph, repo, recording)
         } catch (t: Throwable) {
-            val error = t.message ?: t.javaClass.simpleName
+            val error = t.javaClass.simpleName
             if (t is kotlinx.coroutines.CancellationException) {
                 withContext(NonCancellable) {
                     runCatching {
@@ -126,7 +126,7 @@ class RecordingService : Service() {
                 }
                 throw t
             }
-            Log.w(TAG, "Recording $id failed during setup", t)
+            Log.w(TAG, "Recording $id failed during setup (${t.javaClass.simpleName})")
             withContext(NonCancellable) {
                 runCatching {
                     setupRepo?.markFinished(
@@ -243,8 +243,8 @@ class RecordingService : Service() {
                         throw t
                     } catch (t: java.io.IOException) {
                         if (t is RecordingOutputException) throw t
-                        lastNetworkError = t.message
-                        Log.i(TAG, "Recording $id connection dropped (${t.message}); reconnecting")
+                        lastNetworkError = getString(R.string.rec_error_nothing)
+                        Log.i(TAG, "Recording $id connection dropped; reconnecting")
                         0L
                     }
 
@@ -268,8 +268,8 @@ class RecordingService : Service() {
             if (t is kotlinx.coroutines.CancellationException) {
                 Log.i(TAG, "Recording $id stopped by user")
             } else {
-                error = t.message ?: t.javaClass.simpleName
-                Log.w(TAG, "Recording $id failed", t)
+                error = t.javaClass.simpleName
+                Log.w(TAG, "Recording $id failed (${t.javaClass.simpleName})")
             }
         } finally {
             // The file is now at its final size — anyone watching it should see the true end.
@@ -312,7 +312,7 @@ class RecordingService : Service() {
                 }
             } catch (t: Throwable) {
                 if (t is kotlinx.coroutines.CancellationException) throw t
-                Log.w(TAG, "Recording $id MP4 conversion failed", t)
+                Log.w(TAG, "Recording $id MP4 conversion failed (${t.javaClass.simpleName})")
             } finally {
                 remuxes.remove(id)
                 maybeStop()
@@ -341,7 +341,7 @@ class RecordingService : Service() {
             } catch (cancelled: kotlinx.coroutines.CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                Log.i(TAG, "Recording $id could not open the YouTube live (${error.message}); retrying")
+                Log.i(TAG, "Recording $id could not open the YouTube live; retrying")
                 if (++deadReconnects >= MAX_DEAD_RECONNECTS) break
                 kotlinx.coroutines.delay(RECONNECT_BACKOFF_MILLIS)
                 continue
@@ -362,7 +362,7 @@ class RecordingService : Service() {
                 throw cancelled
             } catch (error: Exception) {
                 if (error is RecordingOutputException) throw error
-                Log.i(TAG, "Recording $id Streamlink reader ended (${error.message}); reconnecting")
+                Log.i(TAG, "Recording $id Streamlink reader ended; reconnecting")
             } finally {
                 captures[id]?.streamlinkReader = null
                 runCatching { reader.close() }

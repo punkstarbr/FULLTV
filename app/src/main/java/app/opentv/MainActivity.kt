@@ -162,7 +162,8 @@ class MainActivity : ComponentActivity() {
 
     /** Explicit request from the player's PiP button — no eligibility guard, the user asked. */
     fun enterPipNow() {
-        if (!supportsPip()) return
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        if (!packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)) return
         runCatching {
             enterPictureInPictureMode(
                 PictureInPictureParams.Builder()

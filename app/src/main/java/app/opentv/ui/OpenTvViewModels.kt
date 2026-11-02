@@ -35,11 +35,9 @@ import app.opentv.data.repo.distinctByQuality
 import app.opentv.R
 import app.opentv.pairing.ManagerServer
 import app.opentv.sync.NasSync
-import app.opentv.sync.SyncBundle
 import app.opentv.sync.SyncClient
-import app.opentv.sync.SyncPosition
+import app.opentv.sync.SyncEngine
 import app.opentv.sync.SyncServer
-import kotlinx.serialization.json.Json
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import android.util.Log
@@ -179,7 +177,7 @@ class SourcesViewModel(app: Application) : AndroidViewModel(app) {
                 )
                 // Book any new series-link airings the fresh guide just revealed.
                 runCatching { graph.recordingEngine.rescanSeriesRules() }
-            }.onFailure { Log.w("OpenTV", "Background VOD/guide load failed", it) }
+            }.onFailure { Log.w("OpenTV", "Background VOD/guide load failed (${it.javaClass.simpleName})") }
         }
     }
 
@@ -1162,7 +1160,9 @@ class ProfilesViewModel(app: Application) : AndroidViewModel(app) {
 class SyncViewModel(app: Application) : AndroidViewModel(app) {
     private val graph = ServiceLocator.get(app)
     private val server = SyncServer(viewModelScope)
-    private val client = SyncClient(graph.httpClient)
+    private val syncEngine = SyncEngine(graph)
+    // LAN sync uses its own no-redirect, no-logging TLS client with an explicit SPKI pin.
+    private val client = SyncClient()
 
     val serverState: StateFlow<SyncServer.State> = server.state
 
@@ -1188,6 +1188,7 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
         data object Idle : NasState
         data object Syncing : NasState
         data class Done(val message: String) : NasState
+        data class NeedsPairing(val message: String) : NasState
         data class Failed(val message: String) : NasState
     }
 
@@ -1203,7 +1204,8 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
             val ctx = getApplication<Application>()
             _nasState.value = when (val result = nas.sync()) {
                 is NasSync.Result.Success ->
-                    if (result.peers == 0) NasState.Done(ctx.getString(R.string.sync_nas_uploaded))
+                    if (result.needsPairing) NasState.NeedsPairing(ctx.getString(R.string.sync_nas_needs_pairing))
+                    else if (result.peers == 0) NasState.Done(ctx.getString(R.string.sync_nas_uploaded))
                     else NasState.Done(ctx.getString(R.string.sync_nas_done, result.merged, result.peers))
                 is NasSync.Result.NotConfigured ->
                     NasState.Failed(ctx.getString(R.string.sync_nas_needs_setup))
@@ -1214,70 +1216,30 @@ class SyncViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun startSharing() {
-        viewModelScope.launch { server.start(buildBundleJson()) }
+        viewModelScope.launch {
+            val bundle = syncEngine.gather(includeSyncKey = true, positionsOnly = true)
+            server.start(syncEngine.encode(bundle, includeSyncKey = true))
+        }
     }
 
     fun stopSharing() = server.stop()
 
-    fun receive(address: String, code: String) {
+    fun receive(address: String, code: String, syncPin: String) {
         viewModelScope.launch {
             _receiveState.value = ReceiveState.Connecting
-            client.pull(address, code)
-                .onSuccess { _receiveState.value = ReceiveState.Done(merge(it)) }
-                .onFailure { _receiveState.value = ReceiveState.Failed(it.message ?: "Sync failed.") }
+            try {
+                val result = client.pull(address, code, syncPin)
+                val bundle = result.getOrElse { throw it }
+                _receiveState.value = ReceiveState.Done(syncEngine.apply(bundle).positions)
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                _receiveState.value = ReceiveState.Failed(error.message ?: "Sync failed.")
+            }
         }
     }
 
     fun resetReceive() { _receiveState.value = ReceiveState.Idle }
-
-    private suspend fun buildBundleJson(): String {
-        val names = graph.profiles.all().associate { it.id to it.name }
-        val items = graph.playbackPositions.all().mapNotNull { pos ->
-            val profileName = names[pos.profileId] ?: return@mapNotNull null
-            val parts = pos.mediaKey.split(":", limit = 2)
-            if (parts.size != 2) return@mapNotNull null
-            val id = parts[1].toLongOrNull() ?: return@mapNotNull null
-            val streamUrl = when (parts[0]) {
-                "movie" -> graph.catalogRepository.movie(id)?.streamUrl
-                "ep" -> graph.catalogRepository.episode(id)?.streamUrl
-                else -> null
-            } ?: return@mapNotNull null
-            SyncPosition(profileName, streamUrl, parts[0], pos.positionMillis, pos.durationMillis, pos.updatedAtMillis)
-        }
-        return Json.encodeToString(SyncBundle.serializer(), SyncBundle(positions = items))
-    }
-
-    private suspend fun merge(bundle: SyncBundle): Int {
-        var merged = 0
-        for (item in bundle.positions) {
-            val profileId = profileIdFor(item.profile) ?: continue
-            val localId = when (item.kind) {
-                "movie" -> graph.catalogRepository.movieByStreamUrl(item.streamUrl)?.id
-                "ep" -> graph.catalogRepository.episodeByStreamUrl(item.streamUrl)?.id
-                else -> null
-            } ?: continue
-            val mediaKey = "${item.kind}:$localId"
-            val existing = graph.playbackPositions.get(profileId, mediaKey)
-            if (existing == null || item.updatedAtMillis > existing.updatedAtMillis) {
-                graph.playbackPositions.upsert(
-                    PlaybackPosition(
-                        profileId = profileId,
-                        mediaKey = mediaKey,
-                        positionMillis = item.positionMillis,
-                        durationMillis = item.durationMillis,
-                        updatedAtMillis = item.updatedAtMillis,
-                    ),
-                )
-                merged++
-            }
-        }
-        return merged
-    }
-
-    private suspend fun profileIdFor(name: String): Long? {
-        graph.profiles.byName(name)?.let { return it.id }
-        return runCatching { graph.profiles.insert(Profile(name = name, createdAtMillis = 0)) }.getOrNull()
-    }
 
     override fun onCleared() {
         server.stop()

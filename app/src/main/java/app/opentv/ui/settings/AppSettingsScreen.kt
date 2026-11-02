@@ -64,7 +64,7 @@ fun AppSettingsScreen(onBack: () -> Unit) {
     val previewVideo by settings.guidePreviewVideo.collectAsState()
     val previewSound by settings.guidePreviewSound.collectAsState()
     val captions by settings.subtitlesEnabled.collectAsState()
-    val autoPortugueseCaptions by settings.autoPortugueseSubtitles.collectAsState()
+    val translateProvidedSubtitles by settings.autoPortugueseSubtitles.collectAsState()
     val persistentClock by settings.persistentClock.collectAsState()
     val resumeLast by settings.resumeLastChannel.collectAsState()
     val language by settings.languageTag.collectAsState()
@@ -286,7 +286,7 @@ fun AppSettingsScreen(onBack: () -> Unit) {
             ToggleRow(
                 title = stringResource(R.string.settings_ai_subtitles_title),
                 subtitle = stringResource(R.string.settings_ai_subtitles_subtitle),
-                checked = autoPortugueseCaptions,
+                checked = translateProvidedSubtitles,
                 onToggle = settings::setAutoPortugueseSubtitles,
             )
             ToggleRow(

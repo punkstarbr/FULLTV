@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">Adresa poslužitelja</string>
     <string name="onboarding_playlist_url">URL playliste</string>
     <string name="onboarding_portal_url">URL portala</string>
-    <string name="onboarding_server_help">Na primjer http://example.com:8080 — zalijepite cijeli redak od svog pružatelja usluge ako je lakše, dodatni dijelovi bit će uklonjeni.</string>
+    <string name="onboarding_server_help">Na primjer https://example.com:8080 — zalijepite cijeli redak od svog pružatelja usluge ako je lakše, dodatni dijelovi bit će uklonjeni.</string>
     <string name="onboarding_playlist_help">Puna http poveznica do vaše .m3u ili .m3u8 datoteke.</string>
-    <string name="onboarding_portal_help">Adresa portala od vašeg pružatelja usluge, npr. http://host:port/c/ — dodatni dijelovi bit će uklonjeni.</string>
+    <string name="onboarding_portal_help">Adresa portala od vašeg pružatelja usluge, npr. https://host:port/c/ — dodatni dijelovi bit će uklonjeni.</string>
     <string name="onboarding_mac_address">MAC adresa</string>
     <string name="onboarding_mac_help">MAC adresa koju je vaš pružatelj usluge vezao uz vašu liniju, npr. 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">Sakrij napredno</string>

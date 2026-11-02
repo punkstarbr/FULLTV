@@ -8,17 +8,17 @@ package app.opentv.pairing
 import android.util.Log
 import app.opentv.data.model.Source
 import app.opentv.data.model.SourceKind
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import app.opentv.security.LanTlsServer
 import java.net.InetAddress
 import java.net.NetworkInterface
-import java.net.ServerSocket
 import java.net.Socket
 import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -55,15 +55,17 @@ import kotlinx.coroutines.launch
 class PairingServer(private val scope: CoroutineScope) {
 
     data class Session(
-        /** What the QR code encodes, e.g. `http://192.168.0.14:41234/?t=…` */
+        /** What the QR code encodes, e.g. `https://192.168.0.14:41234/?t=…` */
         val url: String,
         /** Shown on the TV, typed on the phone. */
         val confirmCode: String,
         val host: String,
         val port: Int,
+        /** SHA-256 of the DER certificate, for out-of-band browser verification. */
+        val certificateSha256: String,
     ) {
-        /** The address to read out if the QR will not scan. */
-        val shortUrl: String get() = "$host:$port"
+        /** Full fallback URL: host:port alone does not include the one-time pairing token. */
+        val shortUrl: String get() = url
     }
 
     sealed interface State {
@@ -77,73 +79,110 @@ class PairingServer(private val scope: CoroutineScope) {
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
 
-    private var serverSocket: ServerSocket? = null
+    private var serverSocket: LanTlsServer.Listener? = null
     private var token: String = ""
     private var confirmCode: String = ""
-    private var wrongCodeAttempts = 0
+    private val wrongCodeAttempts = java.util.concurrent.atomic.AtomicInteger(0)
+    private val requestSlots = java.util.concurrent.Semaphore(4)
     @Volatile private var running = false
+    @Volatile private var starting = false
+    @Volatile private var generation = 0
+    private var startJob: Job? = null
 
+    @Synchronized
     fun start() {
-        if (running) return
-        val host = lanAddress()
-        if (host == null) {
-            _state.value = State.Failed(
-                "This device doesn't appear to be on a network, so it can't talk to your phone.",
-            )
-            return
-        }
-
-        val random = SecureRandom()
-        token = ByteArray(24).also(random::nextBytes).joinToString("") { "%02x".format(it) }
-        confirmCode = "%06d".format(random.nextInt(1_000_000))
-        wrongCodeAttempts = 0
-
-        val socket = try {
-            // Port 0 asks the OS for a free one. A fixed port would be predictable and would
-            // clash with whatever else the user runs at home.
-            ServerSocket(0)
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not open a socket", e)
-            _state.value = State.Failed("Could not start the pairing server on this device.")
-            return
-        }
-
-        serverSocket = socket
-        running = true
-
-        val session = Session(
-            url = "http://$host:${socket.localPort}/?t=$token",
-            confirmCode = confirmCode,
-            host = host,
-            port = socket.localPort,
-        )
-        _state.value = State.Listening(session)
-
-        // A plain thread rather than a coroutine: ServerSocket.accept() blocks
-        // uninterruptibly, and the only reliable way to stop it is to close the socket.
-        thread(name = "opentv-pairing", isDaemon = true) {
-            while (running) {
-                val client = try {
-                    socket.accept()
-                } catch (_: Exception) {
-                    break // socket closed, which is how we stop
+        if (running || starting) return
+        starting = true
+        val runGeneration = ++generation
+        startJob = scope.launch(Dispatchers.IO) {
+            var listener: LanTlsServer.Listener? = null
+            try {
+                val host = lanAddress() ?: run {
+                    _state.value = State.Failed(
+                        "This device doesn't appear to be on a network, so it can't talk to your phone.",
+                    )
+                    return@launch
                 }
-                runCatching { handle(client) }
-                    .onFailure { Log.w(TAG, "Pairing request failed", it) }
-                runCatching { client.close() }
-            }
-        }
+                val random = SecureRandom()
+                val nextToken = ByteArray(24).also(random::nextBytes).joinToString("") { "%02x".format(it) }
+                val nextCode = "%06d".format(random.nextInt(1_000_000))
+                val opened = LanTlsServer.open(host)
+                listener = opened
+                if (runGeneration != generation) return@launch
 
-        scope.launch(Dispatchers.Default) {
-            kotlinx.coroutines.delay(TimeUnit.MINUTES.toMillis(SESSION_TIMEOUT_MINUTES))
-            if (running && _state.value is State.Listening) {
-                stop()
-                _state.value = State.Failed("Pairing timed out. Start again when you're ready.")
+                token = nextToken
+                confirmCode = nextCode
+                wrongCodeAttempts.set(0)
+                serverSocket = opened
+                running = true
+                val activeListener = opened
+                val session = Session(
+                    url = "https://${activeListener.host}:${activeListener.port}/?t=$token",
+                    confirmCode = confirmCode,
+                    host = activeListener.host,
+                    port = activeListener.port,
+                    certificateSha256 = LanTlsServer.formatCertificateFingerprint(activeListener.certificateSha256),
+                )
+                _state.value = State.Listening(session)
+
+                // TLS handshake happens before the HTTP handler sees or reads any credentials.
+                thread(name = "opentv-pairing-tls", isDaemon = true) {
+                    while (running && runGeneration == generation) {
+                        val client = try {
+                            activeListener.acceptClient(SOCKET_TIMEOUT_MILLIS)
+                        } catch (error: Exception) {
+                            if (!running || runGeneration != generation) break
+                            Log.w(TAG, "Rejected pairing TLS connection (${error.javaClass.simpleName})")
+                            continue
+                        }
+                        if (!PairingHttp.isPrivateAddress(client.inetAddress?.hostAddress) || !requestSlots.tryAcquire()) {
+                            runCatching { client.close() }
+                            continue
+                        }
+                        thread(name = "opentv-pairing-request", isDaemon = true) {
+                            try {
+                                activeListener.completeHandshake(client)
+                                if (running && runGeneration == generation) {
+                                    handle(client, "${activeListener.host}:${activeListener.port}")
+                                }
+                            } catch (error: Exception) {
+                                Log.w(TAG, "Pairing request failed (${error.javaClass.simpleName})")
+                            } finally {
+                                runCatching { client.close() }
+                                requestSlots.release()
+                            }
+                        }
+                    }
+                }
+                listener = null // ownership transferred to stop()/the accept loop
+
+                scope.launch(Dispatchers.Default) {
+                    kotlinx.coroutines.delay(TimeUnit.MINUTES.toMillis(SESSION_TIMEOUT_MINUTES))
+                    if (running && runGeneration == generation && _state.value is State.Listening) {
+                        stop()
+                        _state.value = State.Failed("Pairing timed out. Start again when you're ready.")
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not start TLS pairing (${error.javaClass.simpleName})")
+                if (runGeneration == generation) {
+                    _state.value = State.Failed("Could not start secure pairing on this device.")
+                }
+            } finally {
+                runCatching { listener?.close() }
+                if (runGeneration == generation) starting = false
             }
         }
     }
 
+    @Synchronized
     fun stop() {
+        generation++
+        starting = false
+        startJob?.cancel()
+        startJob = null
         running = false
         runCatching { serverSocket?.close() }
         serverSocket = null
@@ -154,52 +193,53 @@ class PairingServer(private val scope: CoroutineScope) {
 
     // ---- Request handling ------------------------------------------------------------------
 
-    private fun handle(client: Socket) {
-        client.soTimeout = SOCKET_TIMEOUT_MILLIS
-
+    private fun handle(client: Socket, expectedAuthority: String) {
         if (!PairingHttp.isPrivateAddress(client.inetAddress?.hostAddress)) {
             client.getOutputStream().write(
                 PairingHttp.httpResponse("403 Forbidden", "text/plain", "Local network only."),
             )
             return
         }
-
-        val reader = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
-        val requestLine = reader.readLine() ?: return
-        val (method, path, query) = PairingHttp.parseRequestLine(requestLine) ?: return
-
-        val headers = HashMap<String, String>()
-        while (true) {
-            val line = reader.readLine() ?: break
-            if (line.isEmpty()) break
-            PairingHttp.parseHeader(line)?.let { (name, value) -> headers[name] = value }
-        }
-
-        val contentLength = (headers["content-length"]?.toIntOrNull() ?: 0)
-            .coerceAtMost(MAX_BODY_BYTES)
-        val body = if (contentLength > 0) {
-            val buffer = CharArray(contentLength)
-            val read = reader.read(buffer, 0, contentLength)
-            if (read > 0) String(buffer, 0, read) else ""
-        } else {
-            ""
-        }
-
         val output = client.getOutputStream()
+        val request = try {
+            PairingHttp.readRequest(client.getInputStream(), MAX_BODY_BYTES)
+        } catch (error: PairingHttp.RequestException) {
+            output.write(PairingHttp.httpResponse(error.status, "text/plain", "Invalid or oversized request."))
+            return
+        } ?: return
+        if (!request.headers["host"].equals(expectedAuthority, ignoreCase = true)) {
+            output.write(PairingHttp.httpResponse("421 Misdirected Request", "text/plain", "Wrong local host."))
+            return
+        }
+        if (request.method == "POST" && !PairingHttp.isExpectedOrigin(request.headers["origin"], expectedAuthority)) {
+            output.write(PairingHttp.httpResponse("403 Forbidden", "text/plain", "Cross-origin submission refused."))
+            return
+        }
+        if (request.method == "POST" && request.headers["content-type"]
+                ?.substringBefore(';')?.trim()?.equals("application/x-www-form-urlencoded", ignoreCase = true) != true
+        ) {
+            output.write(PairingHttp.httpResponse("415 Unsupported Media Type", "text/plain", "Form data required."))
+            return
+        }
+        val form = PairingHttp.parseFormEncodedStrict(request.body)
+        if (form == null) {
+            output.write(PairingHttp.httpResponse("400 Bad Request", "text/plain", "Invalid form data."))
+            return
+        }
 
         // Every route checks the token. Without it the page does not exist.
-        val supplied = query["t"] ?: PairingHttp.parseFormEncoded(body)["t"] ?: ""
+        val supplied = request.query["t"] ?: form["t"] ?: ""
         if (token.isEmpty() || !PairingHttp.secretsMatch(supplied, token)) {
             output.write(PairingHttp.httpResponse("404 Not Found", "text/plain", "Not found."))
             return
         }
 
         when {
-            method == "GET" -> output.write(
+            request.method == "GET" && request.path == "/" -> output.write(
                 PairingHttp.httpResponse("200 OK", "text/html", PairingPage.form(token, null)),
             )
 
-            method == "POST" && path.startsWith("/submit") -> handleSubmit(output, body)
+            request.method == "POST" && request.path == "/submit" -> handleSubmit(output, form)
 
             else -> output.write(
                 PairingHttp.httpResponse("405 Method Not Allowed", "text/plain", "No."),
@@ -207,13 +247,11 @@ class PairingServer(private val scope: CoroutineScope) {
         }
     }
 
-    private fun handleSubmit(output: java.io.OutputStream, body: String) {
-        val form = PairingHttp.parseFormEncoded(body)
-
-        val code = form["code"].orEmpty().filter { it.isDigit() }
-        if (!PairingHttp.secretsMatch(code, confirmCode)) {
-            wrongCodeAttempts++
-            if (wrongCodeAttempts >= MAX_CODE_ATTEMPTS) {
+    private fun handleSubmit(output: java.io.OutputStream, form: Map<String, String>) {
+        val code = form["code"].orEmpty()
+        if (!code.matches(Regex("\\d{6}")) || !PairingHttp.secretsMatch(code, confirmCode)) {
+            val attempts = wrongCodeAttempts.incrementAndGet()
+            if (attempts >= MAX_CODE_ATTEMPTS) {
                 output.write(
                     PairingHttp.httpResponse(
                         "403 Forbidden",
@@ -232,10 +270,10 @@ class PairingServer(private val scope: CoroutineScope) {
                 PairingHttp.httpResponse(
                     "200 OK",
                     "text/html",
-                    PairingPage.form(
-                        token,
-                        "That code doesn't match the one on the TV. " +
-                            "${MAX_CODE_ATTEMPTS - wrongCodeAttempts} attempts left.",
+                        PairingPage.form(
+                            token,
+                            "That code doesn't match the one on the TV. " +
+                            "${MAX_CODE_ATTEMPTS - attempts} attempts left.",
                     ),
                 ),
             )

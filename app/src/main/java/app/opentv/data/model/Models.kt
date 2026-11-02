@@ -56,7 +56,7 @@ data class Source(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val kind: SourceKind,
-    /** Base URL including scheme and port, e.g. `http://example.com:8080`. No trailing slash. */
+    /** Base HTTPS URL including port, e.g. `https://example.com:8443`. No trailing slash. */
     val url: String,
     val username: String? = null,
     val password: String? = null,

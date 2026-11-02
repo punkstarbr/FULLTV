@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.11.23 (pré-lançamento de teste)
+
+- **Subtitles:** remove PCM audio capture and Whisper speech transcription. Portuguese translation
+  now processes only readable text cues emitted by the selected subtitle track supplied by the
+  channel. If the channel has no readable text captions, FullTV does not invent any; original
+  subtitles remain visible if translation is unavailable. The unused Whisper native dependency is
+  removed, and any old private Whisper model/WAV files are cleaned up in the background.
+- **YouTube playlists:** expand a YouTube `/results` URL embedded as an M3U channel into up to five
+  separate live channels, each retaining its own watch/video ID so the existing YouTube Streamlink
+  playback and recording paths can target it individually. Preserve the search page's filter/order.
+- **LAN transport:** phone pairing, Web Manager and device sync use TLS without an HTTP fallback;
+  the TV shows a certificate fingerprint, and device sync requires a matching public-key pin.
+- **Secrets and sync:** move SMB/TMDB/add-on secrets into AES-GCM storage backed by Android
+  Keystore, strengthen parental PIN verification with keyed HMAC and lockout, and keep raw provider
+  URLs and group keys out of NAS sync bundles using keyed references and migration from v3.
+- **Network and parsers:** require validated HTTPS, block untrusted private destinations and unsafe
+  redirects, bound network/parser input, reject XML DTD/external entities, and harden LAN request
+  framing and CSRF protections.
+- **Runtime guards:** skip alarm notifications when the user denies `POST_NOTIFICATIONS`, and gate
+  picture-in-picture calls on Android 8.0/API 26+.
+- **Storage and updates:** bind SMB paths to the configured encrypted SMB3 destination, prevent
+  recording overwrite, validate APK digest/package/version/signature before installation, and require
+  explicit release signing. Pin Gradle/Python dependencies, update the lint-only Apache HttpClient to
+  4.5.14, and verify wrapper and wheel checksums.
+- **Validation limits:** debug/release APK assembly and `lintVitalRelease` passed. Of 138 complete-suite
+  tests, 132 passed; six XMLTV/Robolectric cases cannot load the Conscrypt native library on the Linux
+  ARM64 sandbox before assertions. lxml 5.3.0 remains in the Android wheel because Chaquopy does not
+  currently publish the fixed 6.1.0 wheel for this Python/ABI set; affected parser entry points are
+  hardened locally. Room encryption, production signing-key migration and real-device TLS/usability
+  tests remain outstanding. Full lint still reports untranslated strings and Media3 opt-in usages;
+  this release used the explicit debug-signing opt-in and is a test build, not a production build.
+
+> Pré-lançamento público para teste manual. A assinatura debug compartilhada permite atualizar a
+> instalação v0.11.22, mas não é uma chave de produção. Consulte os limites de validação e os riscos
+> ainda pendentes antes de usar esta build com credenciais reais.
+
 ## 0.11.22
 
 - **HTTPS-only sources:** bare hosts now default to HTTPS; explicit HTTP/other schemes are blocked

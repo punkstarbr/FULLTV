@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">Adresa servera</string>
     <string name="onboarding_playlist_url">URL adresa playlistu</string>
     <string name="onboarding_portal_url">URL adresa portálu</string>
-    <string name="onboarding_server_help">Napríklad http://example.com:8080 — ak je to jednoduchšie, vložte celý riadok od svojho poskytovateľa, nadbytočné časti sa odstránia.</string>
+    <string name="onboarding_server_help">Napríklad https://example.com:8080 — ak je to jednoduchšie, vložte celý riadok od svojho poskytovateľa, nadbytočné časti sa odstránia.</string>
     <string name="onboarding_playlist_help">Úplný http odkaz na váš súbor .m3u alebo .m3u8.</string>
-    <string name="onboarding_portal_help">Adresa portálu od vášho poskytovateľa, napr. http://host:port/c/ — nadbytočné časti sa odstránia.</string>
+    <string name="onboarding_portal_help">Adresa portálu od vášho poskytovateľa, napr. https://host:port/c/ — nadbytočné časti sa odstránia.</string>
     <string name="onboarding_mac_address">MAC adresa</string>
     <string name="onboarding_mac_help">MAC adresa, ktorú váš poskytovateľ priradil k vašej linke, napr. 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">Skryť rozšírené</string>

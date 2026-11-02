@@ -17,10 +17,12 @@ import app.opentv.data.model.EpgChannelAlias
 import app.opentv.data.model.EpgFeed
 import app.opentv.data.model.Programme
 import app.opentv.data.model.Source
+import app.opentv.data.parser.BoundedInputStream
 import app.opentv.data.parser.ChannelNameNormalizer
 import app.opentv.data.parser.XmltvParser
 import app.opentv.data.remote.XtreamApi
 import app.opentv.data.remote.HttpsUrlPolicy
+import app.opentv.data.remote.NetworkDestinationPolicy
 import java.io.BufferedInputStream
 import java.io.InputStream
 import java.util.concurrent.TimeUnit
@@ -133,7 +135,7 @@ class EpgRepository(
         val skip = skipUrl?.trim()
         val discoveredUrls = urls.map { it.trim() }
             .filter { it.isNotEmpty() && it != skip }
-            .filter { it.startsWith("http://", true) || it.startsWith("https://", true) }
+            .filter { it.startsWith("https://", true) }
             .toSet()
         val owned = feedDao.discoveredForPlaylist(source.id)
         owned.filter { it.url !in discoveredUrls }.forEach { removeFeed(it) }
@@ -253,7 +255,7 @@ class EpgRepository(
                         // The stamp is NOT advanced on failure, so the next sync retries
                         // rather than waiting out the interval on a feed that never landed.
                         feedDao.markSynced(feed.id, feed.lastSyncMillis, result.reason)
-                        Log.w(TAG, "Feed '${feed.name}' failed: ${result.reason}")
+                        Log.w(TAG, "EPG feed ${feed.id} failed")
                     }
                 }
             }
@@ -343,7 +345,7 @@ class EpgRepository(
         } catch (e: Exception) {
             return FeedResult.Failed(
                 if (e is app.opentv.data.remote.HttpsRequiredException) HTTPS_REQUIRED_RESULT
-                else e.message ?: "Download failed.",
+                else "Guide download or parsing failed; the previous guide was kept.",
             )
         } finally {
             if (!committed) {
@@ -376,11 +378,16 @@ class EpgRepository(
                     url = HttpsUrlPolicy.withDefaultHttps(stored.url),
                     epgUrl = stored.epgUrl?.let(HttpsUrlPolicy::withDefaultHttps),
                 )
+                NetworkDestinationPolicy.registerTrustedOrigin(source.url)
+                source.epgUrl?.let(NetworkDestinationPolicy::registerTrustedOrigin)
                 HttpsUrlPolicy.requireHttps(source.epgUrl?.takeIf { it.isNotBlank() } ?: source.url)
                 api.openEpgStream(source)
             }
             feed.url != null -> {
                 val secureUrl = HttpsUrlPolicy.withDefaultHttps(feed.url)
+                if (!feed.builtIn && feed.providerSourceId == null && feed.playlistSourceId == null) {
+                    NetworkDestinationPolicy.registerTrustedOrigin(secureUrl)
+                }
                 try {
                     HttpsUrlPolicy.requireHttps(secureUrl)
                 } catch (_: app.opentv.data.remote.HttpsRequiredException) {
@@ -391,28 +398,36 @@ class EpgRepository(
                     response.close()
                     throw IllegalStateException("Guide download failed (HTTP ${response.code}).")
                 }
-                response.body?.byteStream()
-                    ?: throw IllegalStateException("The server returned an empty guide.")
+                val body = response.body ?: throw IllegalStateException("The server returned an empty guide.")
+                if (body.contentLength() > MAX_COMPRESSED_BYTES) {
+                    response.close()
+                    throw IllegalStateException("Guide download exceeds the safety limit.")
+                }
+                body.byteStream()
             }
             else -> throw IllegalStateException("Feed has no URL and no provider.")
         }
 
-        val buffered = BufferedInputStream(raw, 8 * 1024)
+        val buffered = BufferedInputStream(
+            BoundedInputStream(raw, MAX_COMPRESSED_BYTES, "Compressed XMLTV guide"),
+            8 * 1024,
+        )
         // Sniff the magic bytes: several free guides ship .gz, a few ship .xz, and providers
         // sometimes gzip without saying so. Covering all three keeps every declared URL usable.
         buffered.mark(6)
         val header = ByteArray(6)
         val read = buffered.read(header)
         buffered.reset()
-        return when {
+        val expanded = when {
             read >= 2 && header[0] == 0x1f.toByte() && header[1] == 0x8b.toByte() ->
                 GZIPInputStream(buffered)
             read >= 6 && header[0] == 0xfd.toByte() && header[1] == 0x37.toByte() &&
                 header[2] == 0x7a.toByte() && header[3] == 0x58.toByte() &&
                 header[4] == 0x5a.toByte() && header[5] == 0x00.toByte() ->
-                XZInputStream(buffered)
+                XZInputStream(buffered, MAX_XZ_MEMORY_KIB)
             else -> buffered
         }
+        return BoundedInputStream(expanded, MAX_XML_BYTES, "Expanded XMLTV guide")
     }
 
     // ---- Matching --------------------------------------------------------------------------
@@ -492,6 +507,10 @@ class EpgRepository(
 
         /** Writes per transaction. Large enough to be fast, small enough not to hold WAL open. */
         const val BATCH_SIZE = 500
+
+        private const val MAX_COMPRESSED_BYTES = 256L * 1024 * 1024
+        private const val MAX_XML_BYTES = 256L * 1024 * 1024
+        private const val MAX_XZ_MEMORY_KIB = 64 * 1024
 
         /** Keep finished programmes for a day so "what was on" still works. */
         val RETENTION_PAST_MILLIS: Long = TimeUnit.DAYS.toMillis(1)

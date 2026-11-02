@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">Адрес на сървъра</string>
     <string name="onboarding_playlist_url">URL адрес на плейлист</string>
     <string name="onboarding_portal_url">URL адрес на портала</string>
-    <string name="onboarding_server_help">Например http://example.com:8080 — поставете целия ред от доставчика си, ако така е по-лесно, излишните части се премахват.</string>
+    <string name="onboarding_server_help">Например https://example.com:8080 — поставете целия ред от доставчика си, ако така е по-лесно, излишните части се премахват.</string>
     <string name="onboarding_playlist_help">Пълната http връзка към вашия .m3u или .m3u8 файл.</string>
-    <string name="onboarding_portal_help">Адресът на портала от вашия доставчик, напр. http://host:port/c/ — излишните части се премахват.</string>
+    <string name="onboarding_portal_help">Адресът на портала от вашия доставчик, напр. https://host:port/c/ — излишните части се премахват.</string>
     <string name="onboarding_mac_address">MAC адрес</string>
     <string name="onboarding_mac_help">MAC адресът, който доставчикът ви е свързал с линията ви, напр. 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">Скриване на разширените</string>

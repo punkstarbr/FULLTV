@@ -9,6 +9,68 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val releaseKeystorePath = providers.environmentVariable("KEYSTORE_PATH").orNull
+val releaseKeystorePassword = providers.environmentVariable("KEYSTORE_PASSWORD").orNull
+val releaseKeyAlias = providers.environmentVariable("KEY_ALIAS").orNull
+val releaseKeyPassword = providers.environmentVariable("KEY_PASSWORD").orNull
+val hasReleaseSigning = releaseKeystorePath?.let { it.isNotBlank() && file(it).isFile } == true &&
+    !releaseKeystorePassword.isNullOrBlank() &&
+    !releaseKeyAlias.isNullOrBlank() &&
+    !releaseKeyPassword.isNullOrBlank()
+val allowDebugSignedRelease =
+    providers.environmentVariable("FULLTV_ALLOW_DEBUG_SIGNED_RELEASE").orNull == "true"
+
+dependencyLocking {
+    lockAllConfigurations()
+}
+
+// OSV advisories found old versions in the shipped Android graph and AGP's
+// project-local test-platform configurations. Keep both APK and build classpaths patched.
+configurations.configureEach {
+    resolutionStrategy.eachDependency {
+        when {
+            requested.group == "io.netty" && requested.version?.startsWith("4.1.") == true -> {
+                useVersion("4.1.137.Final")
+                because("Resolve the published Netty 4.1 security advisories")
+            }
+            requested.group == "com.google.protobuf" &&
+                requested.version?.startsWith("3.") == true -> {
+                useVersion("3.25.5")
+                because("Resolve GHSA-735f-pc8j-v9w8")
+            }
+            requested.group == "org.apache.httpcomponents" && requested.name == "httpclient" -> {
+                useVersion("4.5.14")
+                because("Resolve GHSA-7r82-7xv7-xcpj; Apache fixed it in 4.5.13")
+            }
+            requested.group == "com.google.guava" && requested.name == "guava" -> {
+                val flavor = if (requested.version?.endsWith("-jre") == true) "jre" else "android"
+                useVersion("33.7.2-$flavor")
+                because("Resolve GHSA-xxph-c9ww-hj94")
+            }
+        }
+    }
+}
+
+val verifyChaquopyWheelHashes = tasks.register(
+    "verifyChaquopyWheelHashes",
+    org.gradle.api.tasks.Exec::class.java,
+) {
+    group = "verification"
+    description = "Verifies pinned Python wheel SHA-256 hashes for every Android ABI."
+    commandLine(
+        "python3.11",
+        rootProject.file("tools/verify_chaquopy_wheel_hashes.py").absolutePath,
+        "python3.11",
+        project.file("requirements-android.txt").absolutePath,
+    )
+}
+
+tasks.configureEach {
+    if (name == "installDebugPythonRequirements" || name == "installReleasePythonRequirements") {
+        dependsOn(verifyChaquopyWheelHashes)
+    }
+}
+
 android {
     namespace = "app.opentv"
     compileSdk = 35
@@ -21,8 +83,8 @@ android {
             // Chaquopy 3.11 builds support these four ABIs, including 32-bit TV boxes.
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
         }
-        versionCode = 34
-        versionName = "0.11.22"
+        versionCode = 35
+        versionName = "0.11.23"
         // FullTV publishes versioned GitHub Releases; older releases remain available there.
         buildConfigField("String", "UPDATE_REPO_SLUG", "\"punkstarbr/FULLTV\"")
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -30,14 +92,11 @@ android {
 
     signingConfigs {
         create("upload") {
-            // Populated from environment variables in CI. Absent locally, which is why the
-            // release build type falls back to the debug key below.
-            val storePath = providers.environmentVariable("KEYSTORE_PATH").orNull
-            if (storePath != null) {
-                storeFile = file(storePath)
-                storePassword = providers.environmentVariable("KEYSTORE_PASSWORD").orNull
-                keyAlias = providers.environmentVariable("KEY_ALIAS").orNull
-                keyPassword = providers.environmentVariable("KEY_PASSWORD").orNull
+            if (hasReleaseSigning) {
+                storeFile = file(requireNotNull(releaseKeystorePath))
+                storePassword = releaseKeystorePassword
+                keyAlias = releaseKeyAlias
+                keyPassword = releaseKeyPassword
             }
         }
     }
@@ -51,23 +110,13 @@ android {
                 "proguard-rules.pro",
             )
 
-            /*
-             * Falls back to the debug key when no keystore is configured.
-             *
-             * An *unsigned* APK cannot be installed on Android at all — it is rejected before
-             * the user sees anything, with an error that explains nothing. For an early
-             * project that means every tester is blocked on the maintainer setting up signing
-             * infrastructure first.
-             *
-             * The trade-off is real and is written up in docs/RELEASING.md: moving to a
-             * proper keystore later changes the signature, and Android will refuse to upgrade
-             * over a debug-signed install. Set up real signing before announcing publicly.
-             */
             signingConfig =
-                if (providers.environmentVariable("KEYSTORE_PATH").orNull != null) {
+                if (hasReleaseSigning) {
                     signingConfigs.getByName("upload")
-                } else {
+                } else if (allowDebugSignedRelease) {
                     signingConfigs.getByName("debug")
+                } else {
+                    null
                 }
         }
         debug {
@@ -90,6 +139,7 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            pickFirsts += "META-INF/LICENSE.md"
         }
     }
 
@@ -101,13 +151,27 @@ android {
     }
 }
 
+val verifyReleaseSigning = tasks.register<org.gradle.api.tasks.Exec>("verifyReleaseSigning") {
+    group = "verification"
+    description = "Validates that release signing is explicitly configured."
+    commandLine("python3.11", rootProject.file("tools/verify_release_signing.py").absolutePath)
+}
+
+tasks.configureEach {
+    if (name == "packageRelease" || name == "bundleRelease" || name == "signReleaseBundle") {
+        dependsOn(verifyReleaseSigning)
+    }
+}
+
 chaquopy {
     defaultConfig {
         version = "3.11"
         buildPython("python3.11")
         pip {
-            install("streamlink==8.6.3")
-            install("yt-dlp==2026.10.26")
+            // The strict, per-ABI SHA-256 preflight above runs before these installs. Chaquopy
+            // reissues native wheel installs per ABI and drops root hashes in that second pass.
+            options("--no-require-hashes", "--only-binary=:all:")
+            install("-r", "requirements-android.txt")
         }
     }
 }
@@ -150,7 +214,6 @@ dependencies {
     implementation(libs.media3.session)
     implementation(libs.media3.datasource.okhttp)
     implementation(libs.media3.transformer)
-    implementation(libs.whisper.android)
     implementation(libs.mlkit.translation)
     implementation(libs.mlkit.language.id)
 
@@ -170,10 +233,15 @@ dependencies {
     implementation(libs.androidx.documentfile)
     implementation(libs.coil.compose)
     implementation(libs.zxing.core)
+    implementation(libs.guava.android)
 
     // SMB/CIFS client for recording to a NAS (Synology etc.) and playing those recordings
     // back in-app over the network. Pure-Java SMB2/3, no native bits.
     implementation("com.hierynomus:smbj:0.12.2")
+    // X.509 local TLS certificates; keep Bouncy Castle aligned with the patched release because
+    // SMBJ also brings an older transitive bcprov version.
+    implementation(libs.bouncycastle.bcpkix)
+    implementation(libs.bouncycastle.bcprov)
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)

@@ -7,48 +7,45 @@ package app.opentv.update
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInfo
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import androidx.core.content.FileProvider
+import java.io.File
+import java.io.FileOutputStream
+import java.security.MessageDigest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import java.io.File
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 
 /**
- * Downloads an update APK and hands it to the system installer.
- *
- * The download lands in the app's own cache (no storage permission, cleaned up by the OS
- * under pressure) and is handed to `ACTION_INSTALL_PACKAGE` through a [FileProvider] uri —
- * a raw `file://` uri throws `FileUriExposedException` on modern Android. The system then
- * shows its own install screen; if the user has not yet allowed OpenTV to install unknown
- * apps, Android walks them through that first. We never install silently.
+ * Downloads an update APK and hands it to the system installer only after validating the asset
+ * digest, package id, monotonic version and signing certificate against the installed app.
+ * Android still presents the final install confirmation; FullTV never installs silently.
  */
 class ApkInstaller(private val http: OkHttpClient) {
 
     class InstallPermissionRequiredException : Exception()
 
-    /** Progress as a 0f..1f fraction, or -1f when the total size is unknown. */
+    /** Progress as a 0f..1f fraction. */
     fun interface Progress {
         fun onProgress(fraction: Float)
     }
 
-    /**
-     * Downloads [url] and launches the installer. Returns true once the installer intent has
-     * been fired; throws on a download failure so the caller can show a retry.
-     */
     suspend fun downloadAndInstall(
         context: Context,
         url: String,
         expectedBytes: Long,
+        expectedSha256: String,
+        expectedVersionName: String,
         progress: Progress,
     ): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             !context.packageManager.canRequestPackageInstalls()
         ) {
-            // Fire OS uses the same Android setting. It must be enabled once for the sideloaded
-            // FullTV app; Android deliberately never permits silent APK installation.
             context.startActivity(
                 Intent(
                     android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
@@ -57,7 +54,8 @@ class ApkInstaller(private val http: OkHttpClient) {
             )
             throw InstallPermissionRequiredException()
         }
-        val apk = download(context, url, expectedBytes, progress)
+        val apk = download(context, url, expectedBytes, expectedSha256, progress)
+        validatePackage(context, apk, expectedVersionName)
         launchInstaller(context, apk)
         return true
     }
@@ -66,38 +64,123 @@ class ApkInstaller(private val http: OkHttpClient) {
         context: Context,
         url: String,
         expectedBytes: Long,
+        expectedSha256: String,
         progress: Progress,
     ): File = withContext(Dispatchers.IO) {
-        val dir = File(context.cacheDir, "updates").apply { mkdirs() }
-        // A fixed name means each download overwrites the last rather than piling up copies.
-        val out = File(dir, "opentv-update.apk")
+        require(expectedBytes in 1L..MAX_APK_BYTES) { "Update APK has an invalid size." }
+        val expectedDigest = expectedSha256.lowercase()
+        require(expectedDigest.matches(SHA256_HEX)) { "Update APK digest is missing or invalid." }
+        val parsedUrl = url.toHttpUrlOrNull() ?: error("Update download URL is invalid.")
+        require(parsedUrl.isHttps && parsedUrl.host == "github.com" &&
+            parsedUrl.encodedPath.contains("/releases/download/") &&
+            parsedUrl.query == null && parsedUrl.fragment == null
+        ) { "Update must be downloaded from the project's HTTPS GitHub release." }
 
-        val request = Request.Builder().url(url).header("User-Agent", "OpenTV").build()
-        http.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) error("Download failed: HTTP ${response.code}")
-            val bodyStream = response.body?.byteStream() ?: error("Empty download")
-            val total = if (expectedBytes > 0) expectedBytes else (response.body?.contentLength() ?: -1L)
-
-            out.outputStream().use { sink ->
-                val buffer = ByteArray(64 * 1024)
-                var read: Int
-                var written = 0L
-                while (bodyStream.read(buffer).also { read = it } != -1) {
-                    sink.write(buffer, 0, read)
-                    written += read
-                    progress.onProgress(if (total > 0) (written.toFloat() / total) else -1f)
+        val dir = File(context.cacheDir, "updates").apply { check(isDirectory || mkdirs()) }
+        val part = File(dir, "fulltv-update.apk.part")
+        val out = File(dir, "fulltv-update.apk")
+        part.delete()
+        out.delete()
+        try {
+            val request = Request.Builder().url(parsedUrl).header("User-Agent", "FullTV").build()
+            http.newCall(request).execute().use { response ->
+                if (!response.isSuccessful) error("Update download failed: HTTP ${response.code}.")
+                if (!response.request.url.isHttps) error("Update download attempted an insecure redirect.")
+                val body = response.body ?: error("Update download was empty.")
+                if (body.contentLength() >= 0 && body.contentLength() != expectedBytes) {
+                    error("Update APK size does not match the release metadata.")
                 }
+                val digest = MessageDigest.getInstance("SHA-256")
+                var written = 0L
+                body.byteStream().use { input ->
+                    FileOutputStream(part).use { sink ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val count = input.read(buffer)
+                            if (count < 0) break
+                            written += count
+                            if (written > expectedBytes || written > MAX_APK_BYTES) {
+                                error("Update APK exceeds the declared size.")
+                            }
+                            digest.update(buffer, 0, count)
+                            sink.write(buffer, 0, count)
+                            progress.onProgress(written.toFloat() / expectedBytes)
+                        }
+                        sink.fd.sync()
+                    }
+                }
+                if (written != expectedBytes) error("Update APK download was incomplete.")
+                if (digest.digest().toHex() != expectedDigest) error("Update APK SHA-256 verification failed.")
             }
+            if (!part.renameTo(out)) error("Could not finalize the verified update APK.")
+            out
+        } catch (error: Exception) {
+            part.delete()
+            out.delete()
+            throw error
         }
-        out
+    }
+
+    private fun validatePackage(context: Context, apk: File, expectedVersionName: String) {
+        val packageManager = context.packageManager
+        val installed = packageInfo(packageManager, context.packageName)
+        val candidate = archivePackageInfo(packageManager, apk.absolutePath)
+            ?: error("Downloaded file is not a valid Android package.")
+        require(candidate.packageName == context.packageName) {
+            "The update belongs to a different Android application."
+        }
+        require(candidate.versionName == expectedVersionName) {
+            "Update package version does not match the published release."
+        }
+        require(versionCode(candidate) > versionCode(installed)) {
+            "Update package is not newer than the installed application."
+        }
+        val currentSigners = signerDigests(installed)
+        val candidateSigners = signerDigests(candidate)
+        require(currentSigners.isNotEmpty() && candidateSigners == currentSigners) {
+            "Update signing certificate does not match this FullTV installation."
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun packageInfo(packageManager: PackageManager, packageName: String): PackageInfo {
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            PackageManager.GET_SIGNATURES
+        }
+        return packageManager.getPackageInfo(packageName, flags)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun archivePackageInfo(packageManager: PackageManager, path: String): PackageInfo? {
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            PackageManager.GET_SIGNATURES
+        }
+        return packageManager.getPackageArchiveInfo(path, flags)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun signerDigests(packageInfo: PackageInfo): Set<String> {
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.signingInfo?.apkContentsSigners
+        } else {
+            packageInfo.signatures
+        } ?: return emptySet()
+        return signatures.map { MessageDigest.getInstance("SHA-256").digest(it.toByteArray()).toHex() }.toSet()
+    }
+
+    private fun versionCode(info: PackageInfo): Long = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+        info.longVersionCode
+    } else {
+        @Suppress("DEPRECATION")
+        info.versionCode.toLong()
     }
 
     private fun launchInstaller(context: Context, apk: File) {
-        val uri: Uri = FileProvider.getUriForFile(
-            context,
-            "${context.packageName}.fileprovider",
-            apk,
-        )
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", apk)
         val intent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -106,5 +189,12 @@ class ApkInstaller(private val http: OkHttpClient) {
             putExtra(Intent.EXTRA_RETURN_RESULT, true)
         }
         context.startActivity(intent)
+    }
+
+    private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it.toInt() and 0xff) }
+
+    private companion object {
+        const val MAX_APK_BYTES = 512L * 1024 * 1024
+        val SHA256_HEX = Regex("[0-9a-f]{64}")
     }
 }

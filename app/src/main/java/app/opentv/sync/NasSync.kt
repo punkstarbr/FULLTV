@@ -31,7 +31,7 @@ class NasSync(private val graph: ServiceLocator.Graph) {
 
     sealed interface Result {
         /** [merged] items pulled in from [peers] other devices' files (this device's own excluded). */
-        data class Success(val merged: Int, val peers: Int) : Result
+        data class Success(val merged: Int, val peers: Int, val needsPairing: Boolean) : Result
 
         /** No SMB/NAS is configured yet — the user needs to set one up under Recording settings. */
         data object NotConfigured : Result
@@ -55,22 +55,48 @@ class NasSync(private val graph: ServiceLocator.Graph) {
 
             // 1. Write this device's bundle. openForWrite creates the sync folder if missing.
             val bundleJson = engine.encode(engine.gather())
+            require(bundleJson.toByteArray(Charsets.UTF_8).size <= MAX_SYNC_BUNDLE_BYTES) {
+                "Sync bundle exceeds the safety limit."
+            }
             SmbClient.writeText(config, locatorFor(config, ownFile), bundleJson)
 
             // 2. Read and merge every OTHER device's bundle.
             val peerFiles = SmbClient.list(config, syncFolderPath(config))
-                .filter { it.endsWith(".json", ignoreCase = true) && it != ownFile }
+                .filter { SAFE_SYNC_FILE.matches(it) && it != ownFile }
+                .take(MAX_PEER_FILES)
 
             var merged = SyncEngine.MergeResult()
             var peers = 0
+            var needsPairing = false
+            val localGroupId = engine.currentGroupId()
             for (name in peerFiles) {
-                val text = runCatching { SmbClient.readText(config, locatorFor(config, name)) }
+                val text = runCatching {
+                    SmbClient.readText(config, locatorFor(config, name), MAX_SYNC_BUNDLE_BYTES)
+                }
                     .getOrNull() ?: continue
-                val bundle = runCatching { engine.decode(text) }.getOrNull() ?: continue
+                val decoded = runCatching { engine.decode(text) }.getOrNull()
+                val legacy = decoded == null
+                val bundle = decoded ?: runCatching { engine.migrateLegacyV3(text, config) }.getOrNull()
+                    ?: continue
+                // NAS is only a rendezvous. A secret may be introduced on this device only by a
+                // PIN-and-SPKI-pinned LAN transfer or an encrypted user backup, never by NAS JSON.
+                if (!legacy && bundle.syncGroupKeyBase64.isNotEmpty()) {
+                    needsPairing = true
+                    continue
+                }
+                if (!legacy && bundle.groupId != localGroupId) {
+                    needsPairing = true
+                    continue
+                }
                 merged += engine.apply(bundle)
+                if (legacy) {
+                    // Replace the old raw-URL file only after a successful merge. The new JSON is
+                    // HMAC-only and intentionally contains no NAS host, provider URL or User-Agent.
+                    SmbClient.writeText(config, locatorFor(config, name), engine.encode(bundle))
+                }
                 peers++
             }
-            Result.Success(merged.total, peers)
+            Result.Success(merged.total, peers, needsPairing)
         }.getOrElse { Result.Failed(it.message) }
     }
 
@@ -81,9 +107,14 @@ class NasSync(private val graph: ServiceLocator.Graph) {
     }
 
     private fun locatorFor(config: SmbConfig, fileName: String): String =
-        "smb://${config.host}/${config.share}/${syncFolderPath(config)}/$fileName"
+        "smb://${config.host}/${config.share}/${syncFolderPath(config)}/${fileName.also {
+            require(SAFE_SYNC_FILE.matches(it)) { "Invalid sync bundle file name." }
+        }}"
 
     private companion object {
         const val SYNC_DIR = "OpenTV"
+        const val MAX_SYNC_BUNDLE_BYTES = 4 * 1024 * 1024
+        const val MAX_PEER_FILES = 128
+        val SAFE_SYNC_FILE = Regex("[A-Za-z0-9_-]{1,64}\\.json", RegexOption.IGNORE_CASE)
     }
 }

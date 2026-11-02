@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">Adresă server</string>
     <string name="onboarding_playlist_url">URL playlist</string>
     <string name="onboarding_portal_url">URL portal</string>
-    <string name="onboarding_server_help">De exemplu http://example.com:8080 — lipește întreaga linie de la furnizorul tău dacă e mai ușor, părțile în plus vor fi eliminate.</string>
+    <string name="onboarding_server_help">De exemplu https://example.com:8080 — lipește întreaga linie de la furnizorul tău dacă e mai ușor, părțile în plus vor fi eliminate.</string>
     <string name="onboarding_playlist_help">Linkul http complet către fișierul tău .m3u sau .m3u8.</string>
-    <string name="onboarding_portal_help">Adresa portalului de la furnizorul tău, de ex. http://host:port/c/ — părțile în plus vor fi eliminate.</string>
+    <string name="onboarding_portal_help">Adresa portalului de la furnizorul tău, de ex. https://host:port/c/ — părțile în plus vor fi eliminate.</string>
     <string name="onboarding_mac_address">Adresă MAC</string>
     <string name="onboarding_mac_help">Adresa MAC pe care furnizorul tău a asociat-o liniei tale, de ex. 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">Ascunde avansat</string>

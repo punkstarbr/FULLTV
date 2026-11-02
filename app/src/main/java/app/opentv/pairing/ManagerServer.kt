@@ -15,19 +15,19 @@ import app.opentv.data.repo.CatalogRepository
 import app.opentv.data.repo.SourceRepository
 import app.opentv.recording.SmbClient
 import app.opentv.recording.SmbConfig
-import java.io.BufferedReader
-import java.io.InputStreamReader
+import app.opentv.security.LanTlsServer
 import java.io.OutputStream
 import java.net.InetAddress
 import java.net.NetworkInterface
-import java.net.ServerSocket
 import java.net.Socket
 import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
 import kotlin.concurrent.thread
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -69,10 +69,12 @@ class ManagerServer(
 ) {
 
     data class Session(
-        /** What the QR code encodes, e.g. `http://192.168.0.14:41234/?t=…` */
+        /** What the QR code encodes, e.g. `https://192.168.0.14:41234/?t=…` */
         val url: String,
         val host: String,
         val port: Int,
+        /** SHA-256 of the DER certificate, for out-of-band browser verification. */
+        val certificateSha256: String,
     ) {
         /** The address to type if the QR will not scan. */
         val shortUrl: String get() = "$host:$port"
@@ -87,85 +89,117 @@ class ManagerServer(
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
 
-    private var serverSocket: ServerSocket? = null
+    private var serverSocket: LanTlsServer.Listener? = null
     private var token: String = ""
     @Volatile private var running = false
+    @Volatile private var starting = false
+    @Volatile private var generation = 0
     @Volatile private var lastActivityMillis = 0L
+    private var startJob: Job? = null
+    private val requestSlots = java.util.concurrent.Semaphore(4)
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
+    @Synchronized
     fun start() {
-        if (running) return
-        val host = lanAddress()
-        if (host == null) {
-            _state.value = State.Failed(
-                "This device doesn't appear to be on a network, so a phone or laptop can't reach it.",
-            )
-            return
-        }
-
-        val random = SecureRandom()
-        // Use the same 192-bit token strength as phone pairing. The manager can modify channels,
-        // provider credentials and recording targets, so a short token would make an online LAN
-        // guess materially more damaging. QR remains the normal transport; the typed fallback is
-        // intentionally longer because the security boundary matters more than convenience.
-        token = ByteArray(24).also(random::nextBytes).joinToString("") { "%02x".format(it) }
-
-        val socket = try {
-            // Port 0 asks the OS for a free one. A fixed port would be predictable and would
-            // clash with whatever else the user runs at home.
-            ServerSocket(0)
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not open a socket", e)
-            _state.value = State.Failed("Could not start the channel manager on this device.")
-            return
-        }
-
-        serverSocket = socket
-        running = true
-        lastActivityMillis = System.currentTimeMillis()
-
-        _state.value = State.Listening(
-            Session(
-                url = "http://$host:${socket.localPort}/?t=$token",
-                host = host,
-                port = socket.localPort,
-            ),
-        )
-
-        // A plain thread rather than a coroutine: ServerSocket.accept() blocks uninterruptibly,
-        // and the only reliable way to stop it is to close the socket.
-        thread(name = "opentv-manager", isDaemon = true) {
-            while (running) {
-                val client = try {
-                    socket.accept()
-                } catch (_: Exception) {
-                    break // socket closed, which is how we stop
-                }
-                runCatching { handle(client) }
-                    .onFailure { Log.w(TAG, "Manager request failed", it) }
-                runCatching { client.close() }
-            }
-        }
-
-        // Idle watchdog: keep serving while the screen is open, but do not leave a socket on the
-        // user's network for hours if they wander off. Closes after a long unused stretch.
-        scope.launch(Dispatchers.Default) {
-            while (running) {
-                delay(TimeUnit.MINUTES.toMillis(1))
-                val idleFor = System.currentTimeMillis() - lastActivityMillis
-                if (running && idleFor > TimeUnit.MINUTES.toMillis(IDLE_TIMEOUT_MINUTES)) {
-                    stop()
+        if (running || starting) return
+        starting = true
+        val runGeneration = ++generation
+        startJob = scope.launch(Dispatchers.IO) {
+            var listener: LanTlsServer.Listener? = null
+            try {
+                val host = lanAddress() ?: run {
                     _state.value = State.Failed(
-                        "The channel manager closed after a while unused. Reopen it when you need it.",
+                        "This device doesn't appear to be on a network, so a phone or laptop can't reach it.",
                     )
-                    break
+                    return@launch
                 }
+
+                val random = SecureRandom()
+                val nextToken = ByteArray(24).also(random::nextBytes).joinToString("") { "%02x".format(it) }
+                val opened = LanTlsServer.open(host)
+                listener = opened
+                if (runGeneration != generation) return@launch
+
+                token = nextToken
+                serverSocket = opened
+                running = true
+                lastActivityMillis = System.currentTimeMillis()
+                val activeListener = opened
+                _state.value = State.Listening(
+                    Session(
+                        url = "https://${activeListener.host}:${activeListener.port}/?t=$token",
+                        host = activeListener.host,
+                        port = activeListener.port,
+                        certificateSha256 = LanTlsServer.formatCertificateFingerprint(activeListener.certificateSha256),
+                    ),
+                )
+
+                // Complete TLS before the HTTP handler reads the manager token or any submitted data.
+                thread(name = "opentv-manager-tls", isDaemon = true) {
+                    while (running && runGeneration == generation) {
+                        val client = try {
+                            activeListener.acceptClient(SOCKET_TIMEOUT_MILLIS)
+                        } catch (error: Exception) {
+                            if (!running || runGeneration != generation) break
+                            Log.w(TAG, "Rejected manager TLS connection (${error.javaClass.simpleName})")
+                            continue
+                        }
+                        if (!PairingHttp.isPrivateAddress(client.inetAddress?.hostAddress) || !requestSlots.tryAcquire()) {
+                            runCatching { client.close() }
+                            continue
+                        }
+                        thread(name = "opentv-manager-request", isDaemon = true) {
+                            try {
+                                activeListener.completeHandshake(client)
+                                if (running && runGeneration == generation) {
+                                    handle(client, "${activeListener.host}:${activeListener.port}")
+                                }
+                            } catch (error: Exception) {
+                                Log.w(TAG, "Manager request failed (${error.javaClass.simpleName})")
+                            } finally {
+                                runCatching { client.close() }
+                                requestSlots.release()
+                            }
+                        }
+                    }
+                }
+                listener = null // ownership transferred to stop()/the accept loop
+
+                // Idle watchdog: keep serving while the screen is open, but close an abandoned listener.
+                scope.launch(Dispatchers.Default) {
+                    while (running && runGeneration == generation) {
+                        delay(TimeUnit.MINUTES.toMillis(1))
+                        val idleFor = System.currentTimeMillis() - lastActivityMillis
+                        if (running && runGeneration == generation && idleFor > TimeUnit.MINUTES.toMillis(IDLE_TIMEOUT_MINUTES)) {
+                            stop()
+                            _state.value = State.Failed(
+                                "The channel manager closed after a while unused. Reopen it when you need it.",
+                            )
+                            break
+                        }
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                Log.w(TAG, "Could not start TLS manager (${error.javaClass.simpleName})")
+                if (runGeneration == generation) {
+                    _state.value = State.Failed("Could not start the secure channel manager on this device.")
+                }
+            } finally {
+                runCatching { listener?.close() }
+                if (runGeneration == generation) starting = false
             }
         }
     }
 
+    @Synchronized
     fun stop() {
+        generation++
+        starting = false
+        startJob?.cancel()
+        startJob = null
         running = false
         runCatching { serverSocket?.close() }
         serverSocket = null
@@ -175,31 +209,31 @@ class ManagerServer(
 
     // ---- Request handling ----------------------------------------------------------------------
 
-    private fun handle(client: Socket) {
-        client.soTimeout = SOCKET_TIMEOUT_MILLIS
-
+    private fun handle(client: Socket, expectedAuthority: String) {
         if (!PairingHttp.isPrivateAddress(client.inetAddress?.hostAddress)) {
             client.getOutputStream().write(
                 PairingHttp.httpResponse("403 Forbidden", "text/plain", "Local network only."),
             )
             return
         }
-
-        val reader = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
-        val requestLine = reader.readLine() ?: return
-        val (method, path, query) = PairingHttp.parseRequestLine(requestLine) ?: return
-
-        val headers = HashMap<String, String>()
-        while (true) {
-            val line = reader.readLine() ?: break
-            if (line.isEmpty()) break
-            PairingHttp.parseHeader(line)?.let { (name, value) -> headers[name] = value }
+        val output = client.getOutputStream()
+        val request = try {
+            PairingHttp.readRequest(client.getInputStream(), MAX_BODY_BYTES)
+        } catch (error: PairingHttp.RequestException) {
+            output.write(PairingHttp.httpResponse(error.status, "text/plain", "Invalid or oversized request."))
+            return
+        } ?: return
+        if (!request.headers["host"].equals(expectedAuthority, ignoreCase = true)) {
+            output.write(PairingHttp.httpResponse("421 Misdirected Request", "text/plain", "Wrong local host."))
+            return
+        }
+        if (request.method == "POST" && !PairingHttp.isExpectedOrigin(request.headers["origin"], expectedAuthority)) {
+            output.write(PairingHttp.httpResponse("403 Forbidden", "text/plain", "Cross-origin mutation refused."))
+            return
         }
 
-        val output = client.getOutputStream()
-
         // Every route checks the token. Without it, none of this exists.
-        val supplied = query["t"] ?: ""
+        val supplied = request.query["t"] ?: ""
         if (token.isEmpty() || !PairingHttp.secretsMatch(supplied, token)) {
             output.write(PairingHttp.httpResponse("404 Not Found", "text/plain", "Not found."))
             return
@@ -207,45 +241,41 @@ class ManagerServer(
 
         // A valid request counts as activity; the idle watchdog measures from here.
         lastActivityMillis = System.currentTimeMillis()
-
-        val body = if (method == "POST") readBody(reader, headers) else ""
+        if (request.method == "POST" && request.headers["content-type"]
+                ?.substringBefore(';')?.trim()?.equals("application/json", ignoreCase = true) != true
+        ) {
+            output.write(PairingHttp.httpResponse("415 Unsupported Media Type", "text/plain", "JSON required."))
+            return
+        }
+        val body = request.body
 
         when {
-            method == "GET" && path == "/" ->
+            request.method == "GET" && request.path == "/" ->
                 output.write(PairingHttp.httpResponse("200 OK", "text/html", ManagerPage.page(token)))
 
-            method == "GET" && path == "/meta" ->
+            request.method == "GET" && request.path == "/meta" ->
                 output.write(PairingHttp.httpResponse("200 OK", "application/json", metaJson()))
 
-            method == "GET" && path == "/channels" ->
-                output.write(PairingHttp.httpResponse("200 OK", "application/json", channelsJson(query)))
+            request.method == "GET" && request.path == "/channels" ->
+                output.write(PairingHttp.httpResponse("200 OK", "application/json", channelsJson(request.query)))
 
-            method == "POST" && path == "/channel" -> handleChannelPatch(output, body)
+            request.method == "POST" && request.path == "/channel" -> handleChannelPatch(output, body)
 
-            method == "POST" && path == "/reorder" -> handleReorder(output, body)
+            request.method == "POST" && request.path == "/reorder" -> handleReorder(output, body)
 
-            method == "GET" && path == "/recording" ->
+            request.method == "GET" && request.path == "/recording" ->
                 output.write(PairingHttp.httpResponse("200 OK", "application/json", recordingJson()))
 
-            method == "POST" && path == "/recording" -> handleRecording(output, body)
+            request.method == "POST" && request.path == "/recording" -> handleRecording(output, body)
 
-            method == "POST" && path == "/recording/test" -> handleRecordingTest(output, body)
+            request.method == "POST" && request.path == "/recording/test" -> handleRecordingTest(output, body)
 
-            method == "POST" && path == "/source" -> handleAddSource(output, body)
+            request.method == "POST" && request.path == "/source" -> handleAddSource(output, body)
 
-            method == "POST" && path == "/source/test" -> handleTestSource(output, body)
+            request.method == "POST" && request.path == "/source/test" -> handleTestSource(output, body)
 
             else -> output.write(PairingHttp.httpResponse("404 Not Found", "text/plain", "Not found."))
         }
-    }
-
-    private fun readBody(reader: BufferedReader, headers: Map<String, String>): String {
-        val contentLength = (headers["content-length"]?.toIntOrNull() ?: 0)
-            .coerceAtMost(MAX_BODY_BYTES)
-        if (contentLength <= 0) return ""
-        val buffer = CharArray(contentLength)
-        val read = reader.read(buffer, 0, contentLength)
-        return if (read > 0) String(buffer, 0, read) else ""
     }
 
     // ---- Routes --------------------------------------------------------------------------------
@@ -337,12 +367,22 @@ class ManagerServer(
      *  filled without re-typing an existing password. */
     private fun handleRecording(output: OutputStream, body: String) {
         val req = runCatching { json.decodeFromString(RecordingReq.serializer(), body) }.getOrNull()
-        if (req == null) {
-            output.write(PairingHttp.httpResponse("400 Bad Request", "text/plain", "Bad request."))
+        if (req == null || req.host.isBlank() || req.share.isBlank()) {
+            output.write(PairingHttp.httpResponse("400 Bad Request", "text/plain", "A server address and share are required."))
             return
         }
-        val password = req.password?.takeIf { it.isNotEmpty() } ?: settings.smbPassword.value
-        settings.setSmbConfig(req.host.trim(), req.share.trim(), req.folder.trim(), req.user.trim(), password)
+        val host = req.host.trim()
+        val share = req.share.trim()
+        val user = req.user.trim()
+        val sameAuthenticationTarget = host.equals(settings.smbHost.value, ignoreCase = true) &&
+            share.equals(settings.smbShare.value, ignoreCase = true) && user == settings.smbUser.value
+        val submittedPassword = req.password?.takeIf { it.isNotEmpty() }
+        if (!sameAuthenticationTarget && submittedPassword == null && settings.smbPassword.value.isNotEmpty()) {
+            output.write(PairingHttp.httpResponse("400 Bad Request", "text/plain", "Enter the password when changing the NAS target."))
+            return
+        }
+        val password = submittedPassword ?: if (sameAuthenticationTarget) settings.smbPassword.value else ""
+        settings.setSmbConfig(host, share, req.folder.trim(), user, password)
         settings.setRecordingTarget(AppSettings.RecordingTarget.SMB)
         writeOk(output)
     }
@@ -353,13 +393,30 @@ class ManagerServer(
      *  the main thread), which is where a blocking network probe belongs. */
     private fun handleRecordingTest(output: OutputStream, body: String) {
         val req = runCatching { json.decodeFromString(RecordingReq.serializer(), body) }.getOrNull()
-            ?: RecordingReq()
+        if (req == null) {
+            output.write(PairingHttp.httpResponse("400 Bad Request", "text/plain", "Bad request."))
+            return
+        }
+        val host = req.host.trim().ifBlank { settings.smbHost.value }
+        val share = req.share.trim().ifBlank { settings.smbShare.value }
+        val user = req.user.trim().ifBlank { settings.smbUser.value }
+        if (host.isBlank() || share.isBlank()) {
+            output.write(PairingHttp.httpResponse("400 Bad Request", "text/plain", "A server address and share are required."))
+            return
+        }
+        val sameAuthenticationTarget = host.equals(settings.smbHost.value, ignoreCase = true) &&
+            share.equals(settings.smbShare.value, ignoreCase = true) && user == settings.smbUser.value
+        val submittedPassword = req.password?.takeIf { it.isNotEmpty() }
+        if (!sameAuthenticationTarget && submittedPassword == null && settings.smbPassword.value.isNotEmpty()) {
+            output.write(PairingHttp.httpResponse("400 Bad Request", "text/plain", "Enter the password before testing a different NAS target."))
+            return
+        }
         val cfg = SmbConfig(
-            host = req.host.trim().ifBlank { settings.smbHost.value },
-            share = req.share.trim().ifBlank { settings.smbShare.value },
+            host = host,
+            share = share,
             folder = req.folder.trim().ifBlank { settings.smbFolder.value },
-            username = req.user.trim().ifBlank { settings.smbUser.value },
-            password = req.password?.takeIf { it.isNotEmpty() } ?: settings.smbPassword.value,
+            username = user,
+            password = submittedPassword ?: if (sameAuthenticationTarget) settings.smbPassword.value else "",
         )
         val result = runCatching { SmbClient.test(cfg) }
         val dto = if (result.isSuccess) {

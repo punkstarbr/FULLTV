@@ -9,49 +9,56 @@ import app.opentv.data.parser.M3uParser
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
-/**
- * These tests are built from the shapes real providers actually emit, including the broken
- * ones. Every "malformed" case here is something that should cost the user one channel, never
- * the whole playlist.
- */
 class M3uParserTest {
-
     @Test
-    fun `parses a well formed playlist`() {
+    fun `parses a well formed HTTPS playlist and retains source metadata`() {
         val playlist = """
-            #EXTM3U url-tvg="http://example.com/xmltv.php?username=u&password=p"
-            #EXTINF:-1 tvg-id="bbc1.uk" tvg-name="BBC One" tvg-logo="http://img/bbc1.png" group-title="UK",BBC One HD
-            http://example.com:8080/live/u/p/1.m3u8
-            #EXTINF:-1 tvg-id="itv1.uk" tvg-logo="http://img/itv.png" group-title="UK",ITV 1
-            http://example.com:8080/live/u/p/2.m3u8
+            #EXTM3U url-tvg="https://example.com/xmltv.php?username=u&password=p"
+            #EXTINF:-1 tvg-id="bbc1.uk" tvg-name="BBC One" tvg-logo="https://img/bbc1.png" group-title="UK",BBC One HD
+            https://example.com:8080/live/u/p/1.m3u8
+            #EXTINF:-1 tvg-id="itv1.uk" tvg-logo="https://img/itv.png" group-title="UK",ITV 1
+            https://example.com:8080/live/u/p/2.m3u8
         """.trimIndent()
-
         val result = M3uParser.parse(playlist, sourceId = 7)
-
         assertThat(result.channels).hasSize(2)
-        assertThat(result.declaredEpgUrl)
-            .isEqualTo("http://example.com/xmltv.php?username=u&password=p")
-
+        assertThat(result.declaredEpgUrl).isEqualTo("https://example.com/xmltv.php?username=u&password=p")
         val first = result.channels.first()
         assertThat(first.name).isEqualTo("BBC One HD")
         assertThat(first.epgChannelId).isEqualTo("bbc1.uk")
         assertThat(first.categoryId).isEqualTo("UK")
-        assertThat(first.logoUrl).isEqualTo("http://img/bbc1.png")
+        assertThat(first.logoUrl).isEqualTo("https://img/bbc1.png")
         assertThat(first.sourceId).isEqualTo(7)
-        assertThat(first.streamUrl).isEqualTo("http://example.com:8080/live/u/p/1.m3u8")
+        assertThat(first.streamUrl).isEqualTo("https://example.com:8080/live/u/p/1.m3u8")
+    }
+
+    @Test
+    fun `rejects HTTP local file and userinfo stream URLs`() {
+        val playlist = """
+            #EXTM3U
+            #EXTINF:-1,HTTP stream
+            http://example.com/live.m3u8
+            #EXTINF:-1,Local file
+            file:///data/data/app.fulltv/private.db
+            #EXTINF:-1,Authority credentials
+            https://user:password@example.com/live.m3u8
+            #EXTINF:-1,Safe stream
+            https://example.com/good.m3u8
+        """.trimIndent()
+        val result = M3uParser.parse(playlist, sourceId = 1)
+        assertThat(result.channels).hasSize(1)
+        assertThat(result.channels.single().streamUrl).isEqualTo("https://example.com/good.m3u8")
+        assertThat(result.skippedEntries).isEqualTo(3)
     }
 
     @Test
     fun `a URL with no EXTINF is skipped without losing the rest`() {
         val playlist = """
             #EXTM3U
-            http://example.com/orphan.m3u8
+            https://example.com/orphan.m3u8
             #EXTINF:-1 tvg-id="good",Good Channel
-            http://example.com/good.m3u8
+            https://example.com/good.m3u8
         """.trimIndent()
-
         val result = M3uParser.parse(playlist, sourceId = 1)
-
         assertThat(result.skippedEntries).isEqualTo(1)
         assertThat(result.channels).hasSize(1)
         assertThat(result.channels.single().name).isEqualTo("Good Channel")
@@ -62,27 +69,21 @@ class M3uParserTest {
         val playlist = """
             #EXTM3U
             #EXTINF:-1 tvg-id="x" tvg-name="Fallback Name",
-            http://example.com/x.m3u8
+            https://example.com/x.m3u8
         """.trimIndent()
-
-        val channel = M3uParser.parse(playlist, sourceId = 1).channels.single()
-
-        assertThat(channel.name).isEqualTo("Fallback Name")
+        assertThat(M3uParser.parse(playlist, sourceId = 1).channels.single().name).isEqualTo("Fallback Name")
     }
 
     @Test
     fun `same tvg-id retains distinct stream variants in playlist order`() {
-        // A guide id is shared across SD/HD variants; stream identity must include the URL.
         val playlist = """
             #EXTM3U
             #EXTINF:-1 tvg-id="dup",Channel SD
-            http://example.com/sd.m3u8
+            https://example.com/sd.m3u8
             #EXTINF:-1 tvg-id="dup",Channel HD
-            http://example.com/hd.m3u8
+            https://example.com/hd.m3u8
         """.trimIndent()
-
         val result = M3uParser.parse(playlist, sourceId = 1)
-
         assertThat(result.channels).hasSize(2)
         assertThat(result.channels.map { it.name }).containsExactly("Channel SD", "Channel HD").inOrder()
         assertThat(result.channels.map { it.epgChannelId }).containsExactly("dup", "dup").inOrder()
@@ -99,82 +100,67 @@ class M3uParserTest {
             #EXTINF:-1 tvg-id="dup",Channel duplicate
             https://example.com/live.m3u8
         """.trimIndent()
-
         val result = M3uParser.parse(playlist, sourceId = 1)
-
         assertThat(result.channels).hasSize(1)
         assertThat(result.channels.single().name).isEqualTo("Channel")
     }
 
     @Test
-    fun `channels without a tvg-id still get a stable id derived from the url`() {
+    fun `channels without tvg id receive a stable URL based id`() {
         val playlist = """
             #EXTM3U
             #EXTINF:-1,No Id Channel
-            http://example.com/noid.m3u8
+            https://example.com/noid.m3u8
         """.trimIndent()
-
         val first = M3uParser.parse(playlist, sourceId = 1).channels.single()
         val second = M3uParser.parse(playlist, sourceId = 1).channels.single()
-
         assertThat(first.streamId).startsWith("url:")
-        // Stability matters: an unstable id means favourites are lost on every refresh.
         assertThat(first.streamId).isEqualTo(second.streamId)
         assertThat(first.epgChannelId).isNull()
     }
 
     @Test
-    fun `unknown directives between EXTINF and the url are ignored`() {
+    fun `unknown directives between EXTINF and URL are ignored`() {
         val playlist = """
             #EXTM3U
             #EXTINF:-1 tvg-id="a",Channel A
             #EXTVLCOPT:http-user-agent=SomePlayer/1.0
             #EXTHTTP:{"User-Agent":"SomePlayer/1.0"}
-            http://example.com/a.m3u8
+            https://example.com/a.m3u8
         """.trimIndent()
-
         val channels = M3uParser.parse(playlist, sourceId = 1).channels
-
         assertThat(channels).hasSize(1)
-        assertThat(channels.single().streamUrl).isEqualTo("http://example.com/a.m3u8")
+        assertThat(channels.single().streamUrl).isEqualTo("https://example.com/a.m3u8")
     }
 
     @Test
-    fun `channel numbers come from tvg-chno when present`() {
+    fun `channel numbers come from tvg-chno`() {
         val playlist = """
             #EXTM3U
             #EXTINF:-1 tvg-id="a" tvg-chno="101",Channel A
-            http://example.com/a.m3u8
+            https://example.com/a.m3u8
         """.trimIndent()
-
         assertThat(M3uParser.parse(playlist, sourceId = 1).channels.single().number).isEqualTo(101)
     }
 
     @Test
-    fun `an empty playlist yields no channels rather than throwing`() {
+    fun `an empty playlist yields no channels`() {
         val result = M3uParser.parse("#EXTM3U\n", sourceId = 1)
-
         assertThat(result.channels).isEmpty()
         assertThat(result.skippedEntries).isEqualTo(0)
     }
 
     @Test
-    fun `collects every guide URL declared on the header`() {
-        // Real lists repeat url-tvg once per country and sometimes pack two URLs into one
-        // attribute. Both shapes must survive, or the app auto-adds only the last guide.
+    fun `collects every bounded guide URL declared on the header`() {
         val playlist = """
-            #EXTM3U url-tvg="https://a.example/x.xml" url-tvg="https://b.example/y.xml.gz" url-tvg="https://c.example/z.xml https://d.example/w.xml.gz"
+            #EXTM3U url-tvg="https://a.example/x.xml" url-tvg="https://b.example/y.xml.gz" url-tvg="https://c.example/z.xml https://d.example/w.xml.gz http://insecure.example/x.xml"
             #EXTINF:-1,Channel A
-            http://example.com/a.m3u8
+            https://example.com/a.m3u8
         """.trimIndent()
-
         val result = M3uParser.parse(playlist, sourceId = 1)
-
         assertThat(result.declaredEpgUrls).containsExactly(
-            "https://a.example/x.xml",
-            "https://b.example/y.xml.gz",
-            "https://c.example/z.xml",
-            "https://d.example/w.xml.gz",
+            "https://a.example/x.xml", "https://b.example/y.xml.gz",
+            "https://c.example/z.xml", "https://d.example/w.xml.gz",
         ).inOrder()
         assertThat(result.declaredEpgUrl).isEqualTo("https://a.example/x.xml")
     }
@@ -184,9 +170,8 @@ class M3uParserTest {
         val playlist = """
             #EXTM3U x-tvg-url="https://a.example/x.xml" url-tvg="https://a.example/x.xml"
             #EXTINF:-1,Channel A
-            http://example.com/a.m3u8
+            https://example.com/a.m3u8
         """.trimIndent()
-
         assertThat(M3uParser.parse(playlist, sourceId = 1).declaredEpgUrls)
             .containsExactly("https://a.example/x.xml")
     }
@@ -201,14 +186,10 @@ class M3uParserTest {
             #EXTINF:-1 tvg-id="two",Channel Two
             https://example.com/two.m3u8
         """.trimIndent()
-
         val result = M3uParser.parse(playlist, sourceId = 1)
-
         assertThat(result.channels).hasSize(2)
         assertThat(result.declaredEpgUrls).containsExactly(
-            "https://a.example/guide.xml",
-            "https://b.example/guide.xml",
-            "https://c.example/guide.xml",
+            "https://a.example/guide.xml", "https://b.example/guide.xml", "https://c.example/guide.xml",
         ).inOrder()
     }
 
@@ -223,11 +204,15 @@ class M3uParserTest {
             #EXTINF:-1 tvg-chno="11",Bravo
             https://example.com/bravo.m3u8
         """.trimIndent()
-
         val channels = M3uParser.parse(playlist, sourceId = 1).channels
-
         assertThat(channels.map { it.displayName }).containsExactly("Zulu", "Alpha", "Bravo").inOrder()
         assertThat(channels.map { it.sortIndex }).containsExactly(0, 1, 2).inOrder()
         assertThat(channels.map { it.number }).containsExactly(200, 10, 11).inOrder()
+    }
+
+    @Test
+    fun `unbounded individual lines fail before excessive allocation`() {
+        val playlist = "#EXTM3U\n#EXTINF:-1,${"x".repeat(20_000)}\nhttps://example.com/live.m3u8"
+        assertThat(runCatching { M3uParser.parse(playlist, sourceId = 1) }.isFailure).isTrue()
     }
 }

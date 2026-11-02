@@ -93,7 +93,7 @@ object RecordingStorage {
      */
     fun openSink(context: Context, settings: AppSettings, locator: String): Sink = when {
         SmbClient.isSmb(locator) -> {
-            val handle = SmbClient.openForWrite(smbConfig(settings), locator)
+            val handle = SmbClient.openForWrite(smbConfig(settings), locator, overwrite = false)
             Sink(handle.output) { handle.close() }
         }
         isUsbPlaceholder(locator) ->
@@ -108,6 +108,7 @@ object RecordingStorage {
         else -> {
             val file = File(locator)
             file.parentFile?.mkdirs()
+            if (!file.createNewFile()) throw IOException("A recording with this file name already exists.")
             val out = try {
                 FileOutputStream(file)
             } catch (error: Exception) {
@@ -189,7 +190,7 @@ object RecordingStorage {
         if (SmbClient.isSmb(locator) || isContent(locator) || isUsbPlaceholder(locator)) -1L
         else File(locator).length()
 
-    /** A filesystem-safe recording filename: `Channel - 2026-08-02 1830.ts` (or `.mp4`). */
+    /** Filesystem-safe and collision-resistant recording filename. */
     fun fileNameFor(
         channelName: String,
         title: String,
@@ -199,6 +200,7 @@ object RecordingStorage {
         val stamp = android.text.format.DateFormat.format("yyyy-MM-dd HHmm", startMillis)
         val base = (if (title.isBlank() || title == channelName) channelName else "$channelName - $title")
         val safe = base.replace(Regex("[^A-Za-z0-9 _.-]"), "_").take(80).trim()
-        return "$safe - $stamp.$extension"
+        val suffix = java.util.UUID.randomUUID().toString().take(8)
+        return "$safe - $stamp ($suffix).$extension"
     }
 }

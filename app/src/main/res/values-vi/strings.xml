@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">Địa chỉ máy chủ</string>
     <string name="onboarding_playlist_url">URL danh sách phát</string>
     <string name="onboarding_portal_url">URL cổng</string>
-    <string name="onboarding_server_help">Ví dụ http://example.com:8080 — dán cả dòng từ nhà cung cấp của bạn nếu dễ hơn, phần thừa sẽ được cắt bỏ.</string>
+    <string name="onboarding_server_help">Ví dụ https://example.com:8080 — dán cả dòng từ nhà cung cấp của bạn nếu dễ hơn, phần thừa sẽ được cắt bỏ.</string>
     <string name="onboarding_playlist_help">Liên kết http đầy đủ đến tệp .m3u hoặc .m3u8 của bạn.</string>
-    <string name="onboarding_portal_help">Địa chỉ cổng từ nhà cung cấp của bạn, ví dụ http://host:port/c/ — phần thừa sẽ được cắt bỏ.</string>
+    <string name="onboarding_portal_help">Địa chỉ cổng từ nhà cung cấp của bạn, ví dụ https://host:port/c/ — phần thừa sẽ được cắt bỏ.</string>
     <string name="onboarding_mac_address">Địa chỉ MAC</string>
     <string name="onboarding_mac_help">Địa chỉ MAC mà nhà cung cấp của bạn gắn với đường dây của bạn, ví dụ 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">Ẩn nâng cao</string>

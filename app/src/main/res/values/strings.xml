@@ -75,6 +75,9 @@
     <string name="guide_watch_recording">▶  Watch recording in progress</string>
     <string name="guide_recording_active">●  This channel is already recording</string>
     <string name="guide_open_external">Open in external player</string>
+    <string name="guide_external_warning_title">Share this stream with another app?</string>
+    <string name="guide_external_warning_body">The full stream URL may contain your IPTV username and password. The player app you choose can see it. Continue only if you trust that app.</string>
+    <string name="guide_external_open_confirm">Continue</string>
     <string name="guide_play_channel_with">Play channel with</string>
     <string name="guide_no_external_player">No external player installed</string>
     <string name="guide_record_now_playing">●  Record what\'s on now</string>
@@ -169,13 +172,10 @@
     <string name="player_none_available">None available</string>
     <string name="player_youtube_unavailable">Couldn’t find a playable live stream for this YouTube channel. Check that it is live and try again.</string>
     <string name="player_subtitles_off">Off</string>
-    <string name="player_ai_subtitles_downloading">Downloading speech model%1$s</string>
-    <string name="player_ai_subtitles_loading">Loading local speech model…</string>
-    <string name="player_ai_subtitles_waiting">Portuguese AI captions are on. Waiting for audio…</string>
-    <string name="player_ai_subtitles_processing">Transcribing speech locally…</string>
+    <string name="player_ai_subtitles_waiting">Waiting for text subtitles from this channel. Select a track if one is available.</string>
+    <string name="player_ai_subtitles_processing">Translating the channel subtitles…</string>
     <string name="player_ai_subtitles_translating">Downloading the translation model…</string>
-    <string name="player_ai_subtitles_error">Automatic captions could not start. Check your connection and available storage.</string>
-    <string name="player_ai_subtitles_unsupported">Automatic captions require an arm64 device with at least 512 MB app memory.</string>
+    <string name="player_ai_subtitles_error">Translation unavailable. The channel’s original subtitles remain visible.</string>
 
     <!-- ============================ Settings hub ============================ -->
     <string name="settings_providers_title">Providers</string>
@@ -255,8 +255,8 @@
     <string name="settings_section_playback">Playback</string>
     <string name="settings_subtitles_title">Show subtitles when available</string>
     <string name="settings_subtitles_subtitle">The default for new channels. While watching, the Subtitles button on the player lets you pick a specific track or turn them off.</string>
-    <string name="settings_ai_subtitles_title">Generate Portuguese subtitles with AI</string>
-    <string name="settings_ai_subtitles_subtitle">Uses the multilingual Whisper tiny Q5 model on this device, then translates locally. After you enable it and open a channel, first use downloads about 31 MiB for speech; translation models download only when needed. The speech model is loaded into memory only while the player is open with this option on. Uses extra CPU and memory; requires arm64 and at least 512 MB app memory.</string>
+    <string name="settings_ai_subtitles_title">Translate channel subtitles to Portuguese</string>
+    <string name="settings_ai_subtitles_subtitle">Translates readable text subtitles supplied by the channel on this device. Select a subtitle track in the player. Channels without a text subtitle track stay without subtitles; FullTV does not transcribe audio. A translation model downloads only when needed.</string>
     <string name="settings_resume_title">Resume last channel on startup</string>
     <string name="settings_resume_subtitle">Open the app straight into the channel you were last watching, instead of the guide. Press Back to reach the guide.</string>
     <string name="settings_sleep_timer">Sleep timer</string>
@@ -395,13 +395,12 @@
     <string name="settings_storage_title">Storage usage</string>
     <string name="settings_storage_subtitle">Inspect app data and recordings, and safely compact the guide database.</string>
     <string name="storage_title">Storage usage</string>
-    <string name="storage_subtitle">App package, data, guide database, model and recording sizes.</string>
+    <string name="storage_subtitle">App package, data, guide database, image cache and recording sizes.</string>
     <string name="storage_apk_files">APK and split APK files</string>
     <string name="storage_native_libraries">Installed native libraries</string>
     <string name="storage_app_data">App data and cache</string>
     <string name="storage_database">Guide and catalogue database</string>
     <string name="storage_internal_recordings">Internal recordings (%1$d files)</string>
-    <string name="storage_whisper_model">Downloaded Whisper model</string>
     <string name="storage_image_cache">Poster and logo cache</string>
     <string name="storage_free_space">Available device space</string>
     <string name="storage_epg_note">The guide keeps one past day and up to the configured future recording window. Optimization removes entries outside that period.</string>
@@ -415,25 +414,23 @@
     <string name="storage_optimize_success">Guide database optimized.</string>
     <string name="storage_not_enough_space">There is not enough free space to compact the database safely. Free space and try again.</string>
     <string name="storage_optimize_failed">The database could not be compacted. No recordings were changed.</string>
-    <string name="storage_remove_whisper_model">Remove downloaded Whisper model</string>
-    <string name="storage_remove_model_confirm_title">Remove the Whisper model?</string>
-    <string name="storage_remove_model_confirm_body">The model can be downloaded again if AI Portuguese captions are used. This does not delete recordings or channel data.</string>
-    <string name="storage_model_removed">Whisper model removed. It will download again only when needed.</string>
-    <string name="storage_model_not_found">No downloaded Whisper model was found.</string>
 
     <!-- ============================ Sync watch history ============================ -->
-    <string name="sync_desc">Copy your continue-watching between two FullTV devices over your own wifi — nothing leaves the house, and no account is involved.</string>
+    <string name="sync_desc">Copy your continue-watching history between two FullTV devices over your own Wi-Fi using pinned HTTPS — nothing leaves the house, and no account is involved.</string>
     <string name="sync_share_from_here">Share from here</string>
     <string name="sync_receive">Receive</string>
     <string name="sync_ready_to_share">Ready to share</string>
-    <string name="sync_on_other_device">On the other device: Settings → Sync → Receive, and enter:</string>
+    <string name="sync_on_other_device">On the other FullTV: Settings → Sync → Receive, and enter:</string>
     <string name="sync_address">Address</string>
     <string name="sync_code">Code</string>
-    <string name="sync_type_in_one_go">Or type it in one go:  %1$s#%2$s</string>
+    <string name="sync_tls_pin">TLS verification code (96-bit key pin)</string>
+    <string name="sync_tls_pin_help">Compare this 24-character code on both TVs. The receiving FullTV checks it before sending the six-digit access code or requesting any data.</string>
+    <string name="sync_type_in_one_go">Enter all three without spaces:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Stop sharing</string>
     <string name="sync_will_share">This device will share its watch history for a few minutes, behind a code.</string>
     <string name="sync_start_sharing">Start sharing</string>
-    <string name="sync_type_what_shows">Type what the other device shows</string>
+    <string name="sync_type_what_shows">Type address#code#TLS code shown on the other device</string>
+    <string name="sync_input_placeholder">https://192.168.1.10:12345#123456#A1B2C3D4E5F60718293A4B5C</string>
     <string name="sync_connect">Connect</string>
     <string name="sync_connecting">Connecting…</string>
     <string name="sync_synced_items">Synced %1$d item(s).</string>
@@ -445,12 +442,13 @@
     <string name="sync_nas_syncing">Syncing…</string>
     <string name="sync_nas_done">Synced %1$d item(s) from %2$d device(s).</string>
     <string name="sync_nas_uploaded">Saved this device to the NAS. No other devices have synced here yet.</string>
+    <string name="sync_nas_needs_pairing">Some devices use a different sync group. Pair each device once through HTTPS sync using its address, six-digit code and TLS pin; then retry NAS sync.</string>
     <string name="sync_nas_failed">Couldn\'t reach your NAS. Check it\'s on and the details in Recording settings are right.</string>
     <string name="sync_nas_auto">Auto-sync when the app opens</string>
     <string name="sync_backup_title">Device backup</string>
     <string name="sync_backup_desc">Export a password-encrypted file to move sources, credentials, settings, favourites and watch history to another device. Keep the passphrase separate. Video recordings and cached catalogues are not copied; restored sources are refreshed over the internet. USB folder permissions must be chosen again on the new device.</string>
     <string name="sync_backup_scope_note">Configuration and playback metadata only: recorded video files are not included. Local/USB recordings must be copied separately; NAS recordings remain on the NAS. Choose the USB folder again after restoring.</string>
-    <string name="sync_backup_passphrase">Backup passphrase (8+ characters)</string>
+    <string name="sync_backup_passphrase">Backup passphrase (12+ to export; 8+ for older backups)</string>
     <string name="sync_backup_export">Export backup</string>
     <string name="sync_backup_import">Import backup</string>
     <string name="sync_backup_exporting">Encrypting and saving backup…</string>
@@ -521,16 +519,18 @@
     <string name="pairing_got_it">Got it — connecting to your provider…</string>
     <string name="pairing_qr_desc">QR code linking to the setup page on this device</string>
     <string name="pairing_setup_title">Set up from your phone</string>
-    <string name="pairing_setup_desc">Point your phone\'s camera at the code. It opens a page served by this television — nothing you type leaves your home network.</string>
+    <string name="pairing_setup_desc">Point your phone\'s camera at the code to open this TV\'s local HTTPS page. The connection is encrypted; your browser may warn because the certificate is local.</string>
     <string name="pairing_enter_code">Then enter this code on your phone</string>
     <string name="pairing_camera_fail">Camera won\'t scan it? Open this in any browser on your phone:</string>
+    <string name="lan_tls_browser_warning">Before proceeding past a browser certificate warning, compare the SHA-256 fingerprint shown below with the certificate details in the browser. If they differ, stop.</string>
+    <string name="lan_tls_certificate_fingerprint">TLS certificate SHA-256 (DER):</string>
     <string name="pairing_type_on_tv">Type it on the TV instead</string>
 
     <!-- ============================ Manage on phone / laptop (web) ============================ -->
     <string name="webmanager_title">Manage on your phone or laptop</string>
     <string name="webmanager_desc">Open this on a phone or laptop on the same wifi to browse, hide, favourite, rename and reorder your channels — with a real keyboard and mouse. Changes apply to this TV straight away.</string>
     <string name="webmanager_qr_desc">QR code linking to the channel manager on this device</string>
-    <string name="webmanager_open_browser">If you cannot scan the QR code, type the complete address below in a browser on the same Wi-Fi. Use HTTP, not HTTPS, include the token, and keep this screen open. Join the token lines without spaces.</string>
+    <string name="webmanager_open_browser">If you cannot scan the QR code, type the complete HTTPS address below in a browser on the same Wi-Fi. Include the token and keep this screen open. Join the token lines without spaces.</string>
     <string name="webmanager_token_label">Access token (join the lines without spaces):</string>
     <string name="webmanager_local_only">This page is served by this television, over your own network — it never leaves your home.</string>
     <string name="webmanager_stopped">Manager closed</string>

@@ -57,10 +57,10 @@ class SyncWorker(
             }
             when (result) {
                 is CatalogRepository.SyncResult.Success ->
-                    Log.i(TAG, "Catalogue for ${source.name}: ${result.channelCount} channels")
+                    Log.i(TAG, "Catalogue for source ${source.id}: ${result.channelCount} channels")
                 is CatalogRepository.SyncResult.Failed -> {
                     anyFailed = true
-                    Log.w(TAG, "Catalogue for ${source.name} failed: ${result.reason}")
+                    Log.w(TAG, "Catalogue sync failed for source ${source.id}")
                 }
             }
             if (result is CatalogRepository.SyncResult.Success &&

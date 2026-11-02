@@ -44,6 +44,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import app.opentv.R
 import app.opentv.pairing.ManagerServer
 import app.opentv.pairing.QrCodes
+import app.opentv.ui.ProtectSensitiveScreen
 import app.opentv.ui.WebManagerViewModel
 
 /**
@@ -60,6 +61,7 @@ fun WebManagerScreen(
     onBack: () -> Unit,
     viewModel: WebManagerViewModel = viewModel(),
 ) {
+    ProtectSensitiveScreen()
     val state by viewModel.state.collectAsState()
 
     DisposableEffect(Unit) {
@@ -165,6 +167,22 @@ private fun Listening(session: ManagerServer.Session, onBack: () -> Unit) {
             Text(
                 token.chunked(12).joinToString("\n"),
                 style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+            )
+
+            Spacer(Modifier.height(20.dp))
+            Text(
+                stringResource(R.string.lan_tls_browser_warning),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                stringResource(R.string.lan_tls_certificate_fingerprint),
+                style = MaterialTheme.typography.labelLarge,
+            )
+            Text(
+                session.certificateSha256.chunked(24).joinToString("\n"),
+                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
             )
 
             Spacer(Modifier.height(20.dp))

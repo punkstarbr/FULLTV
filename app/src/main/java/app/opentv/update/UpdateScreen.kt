@@ -156,6 +156,8 @@ class UpdateViewModel(app: Application) : AndroidViewModel(app) {
                     context = getApplication(),
                     url = update.apkUrl,
                     expectedBytes = update.apkSizeBytes,
+                    expectedSha256 = update.apkSha256,
+                    expectedVersionName = update.versionName,
                 ) { fraction -> _state.value = UpdateUiState.Downloading(update, fraction) }
             }.onSuccess {
                 // The system installer is now front-and-centre; step our dialog aside.

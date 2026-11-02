@@ -10,11 +10,10 @@ import kotlinx.serialization.Serializable
 /**
  * The state two OpenTV devices exchange when they sync.
  *
- * Nothing here is keyed by a local database id — those differ from one install to the next. An
- * item is identified by something stable for the same provider: a channel/movie by its **stream
- * URL**, a series by its **provider series id**, a profile by its **name**, a category by its
- * **group key**, a NAS recording by its **smb:// locator**. So a bundle from one device makes
- * sense on another.
+ * Nothing here is keyed by a local database id — those differ from one install to the next. Stream
+ * URLs are represented by keyed HMAC identifiers; raw URLs, provider passwords and NAS hosts are
+ * never written to a rendezvous bundle. The group key is present only in a pinned TLS exchange or
+ * inside the user's encrypted backup, never in NAS JSON.
  *
  * Two merge policies travel together, matching how people actually use this:
  *  - **Watch positions** are two-way, newest-wins per item (you watch on any device, resume on
@@ -23,12 +22,16 @@ import kotlinx.serialization.Serializable
  *    NAS recordings from a peer are merged in without ever removing anything local. You tidy up on
  *    one device and the others adopt it, but a favourite set only on one box is never lost.
  *
- * Every field defaults to empty and the reader ignores unknown keys, so a positions-only device
- * and a full device interoperate without a flag day.
+ * Version 4 intentionally does not consume version 3 bundles, which stored raw URLs. It is safer to
+ * skip an old file than to keep importing credentials from it.
  */
 @Serializable
 data class SyncBundle(
-    val version: Int = 3,
+    val version: Int = 4,
+    /** Public, non-secret check that NAS peers share the same HMAC key. */
+    val groupId: String = "",
+    /** Secret group key; filled only for pinned TLS sync and encrypted FullTV backups. */
+    val syncGroupKeyBase64: String = "",
     val generatedAtMillis: Long = 0,
     /** Profile names the peer knows about. Others add any they are missing (add-only). */
     val profiles: List<String> = emptyList(),
@@ -52,8 +55,9 @@ data class SyncBundle(
 @Serializable
 data class SyncPosition(
     val profile: String,
-    val streamUrl: String,
-    /** "movie" or "ep" — which table to resolve [streamUrl] against on the receiving device. */
+    /** Keyed HMAC of a stream URL; not reversible without the private sync-group key. */
+    val mediaKey: String = "",
+    /** "movie" or "ep" — which table to resolve [mediaKey] against on the receiving device. */
     val kind: String,
     val positionMillis: Long,
     val durationMillis: Long,
@@ -68,13 +72,10 @@ data class SyncPosition(
 @Serializable
 data class SyncRecording(
     val channelName: String,
-    val logoUrl: String? = null,
     val title: String,
     val description: String? = null,
-    /** The `smb://host/share/…/file.ts` locator on the shared NAS. */
-    val filePath: String,
-    val streamUrl: String,
-    val userAgent: String,
+    /** Path relative to the configured recordings folder; never carries a NAS host or share. */
+    val relativePath: String = "",
     val scheduledStartMillis: Long = 0,
     val scheduledEndMillis: Long = 0,
     val startedAtMillis: Long = 0,

@@ -7,6 +7,7 @@ package app.opentv.ui.player
 
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.View
 import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -109,11 +110,11 @@ import app.opentv.core.requestIgnoreBatteryOptimizations
 import app.opentv.data.model.Channel
 import app.opentv.data.model.Programme
 import app.opentv.data.model.shownName
-import app.opentv.player.AutoPortugueseSubtitleEngine
-import app.opentv.player.AutoPortugueseSubtitleState
-import app.opentv.player.AutoSubtitlePhase
 import app.opentv.player.PlaybackQueue
 import app.opentv.player.PlayerController
+import app.opentv.player.ProvidedSubtitleTranslationEngine
+import app.opentv.player.ProvidedSubtitleTranslationPhase
+import app.opentv.player.ProvidedSubtitleTranslationState
 import app.opentv.player.YouTubeChannelUrl
 import app.opentv.ui.RecordingBackgroundDialog
 import app.opentv.ui.RecordingBackgroundPrompt
@@ -167,26 +168,28 @@ fun PlayerScreen(
     }
     val scope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
     val subtitlesDefault by settings.subtitlesEnabled.collectAsState()
-    val aiSubtitleEngine = remember {
-        if (settings.autoPortugueseSubtitles.value) AutoPortugueseSubtitleEngine(context) else null
+    val translateProvidedSubtitles by settings.autoPortugueseSubtitles.collectAsState()
+    val subtitleTranslationEngine = remember(translateProvidedSubtitles) {
+        if (translateProvidedSubtitles) ProvidedSubtitleTranslationEngine() else null
     }
-    val aiSubtitleStateFlow = remember(aiSubtitleEngine) {
-        aiSubtitleEngine?.state ?: MutableStateFlow(AutoPortugueseSubtitleState())
+    val subtitleTranslationStateFlow = remember(subtitleTranslationEngine) {
+        subtitleTranslationEngine?.state ?: MutableStateFlow(ProvidedSubtitleTranslationState())
     }
-    val aiSubtitleState by aiSubtitleStateFlow.collectAsState()
-    val aiCaptionsEnabled = aiSubtitleEngine != null
-    LaunchedEffect(aiSubtitleEngine) { aiSubtitleEngine?.start() }
+    val subtitleTranslationState by subtitleTranslationStateFlow.collectAsState()
     val controller = remember {
         PlayerController(
             context, scope, graph.streamingHttpClient,
             subtitlesEnabled = settings.subtitlesEnabled.value,
             // Opt-in shallow DVR so the transport's pause/rewind actually holds on a live stream.
             dvr = settings.livePauseEnabled.value,
-            audioBufferSink = aiSubtitleEngine?.audioBufferSink,
         )
     }
     val state by controller.state.collectAsState()
     val tracks by controller.tracks.collectAsState()
+    val sourceSubtitleCueTexts by controller.subtitleCueTexts.collectAsState()
+    LaunchedEffect(subtitleTranslationEngine, sourceSubtitleCueTexts) {
+        subtitleTranslationEngine?.submitCues(sourceSubtitleCueTexts)
+    }
     // What's recording right now, so the Record button can show as armed for this channel.
     val activeRecordings by graph.recordingRepository.observeActive().collectAsState(initial = emptyList())
 
@@ -201,11 +204,11 @@ fun PlayerScreen(
         onDispose {
             window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             view.keepScreenOn = false
-            controller.release()
-            aiSubtitleEngine?.close()
-            scope.cancel()
         }
     }
+    DisposableEffect(controller) { onDispose { controller.release() } }
+    DisposableEffect(subtitleTranslationEngine) { onDispose { subtitleTranslationEngine?.close() } }
+    DisposableEffect(scope) { onDispose { scope.cancel() } }
 
     var variants by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var currentId by remember { mutableStateOf<Long?>(null) }
@@ -382,7 +385,7 @@ fun PlayerScreen(
         val active = activeRecordings.firstOrNull { it.channelId == currentId }
         if (active != null) {
             runCatching { graph.recordingEngine.stop(active.id) }
-                .onFailure { Log.e("OpenTV", "Could not stop recording", it) }
+                .onFailure { Log.e("OpenTV", "Could not stop recording (${it.javaClass.simpleName})") }
         } else {
             val channel = variants.firstOrNull { it.id == currentId } ?: return
             scope.launch {
@@ -395,7 +398,7 @@ fun PlayerScreen(
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (error: Exception) {
-                    Log.e("OpenTV", "Could not start recording", error)
+                    Log.e("OpenTV", "Could not start recording (${error.javaClass.simpleName})")
                     Toast.makeText(
                         context,
                         context.getString(R.string.rec_error_nothing),
@@ -564,13 +567,21 @@ fun PlayerScreen(
                     useController = false
                     subtitleView?.setUserDefaultStyle()
                     subtitleView?.setUserDefaultTextSize()
+                    subtitleView?.visibility = if (
+                        translateProvidedSubtitles && subtitleTranslationState.caption.isNotBlank() && !inPip
+                    ) View.INVISIBLE else View.VISIBLE
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
                     )
                 }
             },
-            update = { it.resizeMode = resizeMode },
+            update = {
+                it.resizeMode = resizeMode
+                it.subtitleView?.visibility = if (
+                    translateProvidedSubtitles && subtitleTranslationState.caption.isNotBlank() && !inPip
+                ) View.INVISIBLE else View.VISIBLE
+            },
         )
 
         val topInfoChannel = currentChannel
@@ -591,21 +602,19 @@ fun PlayerScreen(
             )
         }
 
-        if (aiCaptionsEnabled && !inPip) {
-            val subtitleStatus = when (aiSubtitleState.phase) {
-                AutoSubtitlePhase.DOWNLOADING_SPEECH_MODEL -> {
-                    val progress = aiSubtitleState.progressPercent?.let { " $it%" }.orEmpty()
-                    stringResource(R.string.player_ai_subtitles_downloading, progress)
-                }
-                AutoSubtitlePhase.LOADING_SPEECH_MODEL -> stringResource(R.string.player_ai_subtitles_loading)
-                AutoSubtitlePhase.WAITING_FOR_AUDIO -> stringResource(R.string.player_ai_subtitles_waiting)
-                AutoSubtitlePhase.TRANSCRIBING -> stringResource(R.string.player_ai_subtitles_processing)
-                AutoSubtitlePhase.DOWNLOADING_TRANSLATION_MODEL -> stringResource(R.string.player_ai_subtitles_translating)
-                AutoSubtitlePhase.UNSUPPORTED_DEVICE -> stringResource(R.string.player_ai_subtitles_unsupported)
-                AutoSubtitlePhase.ERROR -> stringResource(R.string.player_ai_subtitles_error)
-                AutoSubtitlePhase.OFF, AutoSubtitlePhase.READY -> ""
+        if (subtitleTranslationEngine != null && !inPip) {
+            val subtitleStatus = when (subtitleTranslationState.phase) {
+                ProvidedSubtitleTranslationPhase.WAITING_FOR_SOURCE_SUBTITLES ->
+                    stringResource(R.string.player_ai_subtitles_waiting)
+                ProvidedSubtitleTranslationPhase.TRANSLATING ->
+                    stringResource(R.string.player_ai_subtitles_processing)
+                ProvidedSubtitleTranslationPhase.DOWNLOADING_TRANSLATION_MODEL ->
+                    stringResource(R.string.player_ai_subtitles_translating)
+                ProvidedSubtitleTranslationPhase.ERROR ->
+                    stringResource(R.string.player_ai_subtitles_error)
+                ProvidedSubtitleTranslationPhase.READY -> ""
             }
-            val displayedCaption = aiSubtitleState.caption.ifBlank { subtitleStatus }
+            val displayedCaption = subtitleTranslationState.caption.ifBlank { subtitleStatus }
             if (displayedCaption.isNotBlank()) {
                 Box(
                     Modifier
@@ -630,7 +639,7 @@ fun PlayerScreen(
                     Text(
                         displayedCaption,
                         color = Color.White,
-                        style = if (aiSubtitleState.caption.isNotBlank()) {
+                        style = if (subtitleTranslationState.caption.isNotBlank()) {
                             MaterialTheme.typography.headlineSmall
                         } else {
                             MaterialTheme.typography.labelLarge

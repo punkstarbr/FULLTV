@@ -12,6 +12,7 @@ import app.opentv.data.model.Movie
 import app.opentv.data.model.Series
 import app.opentv.data.model.Source
 import app.opentv.data.model.StreamKind
+import app.opentv.data.parser.BoundedInputStream
 import java.io.InputStream
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,6 +27,7 @@ import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 
 /**
  * Client for the Xtream Codes "player API".
@@ -45,6 +47,10 @@ class XtreamApi(
     private val http: OkHttpClient,
     private val json: Json = Json { ignoreUnknownKeys = true; isLenient = true },
 ) {
+
+    private val noCrossOriginRedirects by lazy {
+        http.newBuilder().followRedirects(false).followSslRedirects(false).build()
+    }
 
     class XtreamException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
@@ -274,13 +280,17 @@ class XtreamApi(
     /** Opens the XMLTV guide as a stream. The caller must close it. */
     suspend fun openEpgStream(source: Source): InputStream = withContext(Dispatchers.IO) {
         val url = source.epgUrl?.toHttpUrlOrNull() ?: xmltvUrl(source)
-        val response = http.newCall(request(source, url)).execute()
+        val response = executeSameOrigin(source, url)
         if (!response.isSuccessful) {
             response.close()
             throw XtreamException("Guide download failed (HTTP ${response.code}).")
         }
-        response.body?.byteStream()
-            ?: throw XtreamException("The server returned an empty guide.")
+        val body = response.body ?: throw XtreamException("The server returned an empty guide.")
+        if (body.contentLength() > MAX_JSON_BYTES) {
+            response.close()
+            throw XtreamException("Guide download exceeds the safety limit.")
+        }
+        BoundedInputStream(body.byteStream(), MAX_JSON_BYTES, "Xtream XMLTV response")
     }
 
     // ---- URL construction ----------------------------------------------------------------
@@ -314,9 +324,12 @@ class XtreamApi(
             .addQueryParameter("password", source.password.orEmpty())
             .build()
 
-    private fun baseUrl(source: Source): HttpUrl =
-        source.url.toHttpUrlOrNull()
-            ?: throw XtreamException("\"${source.url}\" is not a valid server address.")
+    private fun baseUrl(source: Source): HttpUrl {
+        val normalized = HttpsUrlPolicy.withDefaultHttps(source.url)
+        HttpsUrlPolicy.requireHttps(normalized)
+        return normalized.toHttpUrlOrNull()
+            ?: throw XtreamException("The provider URL is invalid.")
+    }
 
     // ---- Plumbing ------------------------------------------------------------------------
 
@@ -332,30 +345,55 @@ class XtreamApi(
         if (action != null) builder.addQueryParameter("action", action)
         extra(builder)
 
-        http.newCall(request(source, builder.build())).execute().use { response ->
-            if (!response.isSuccessful) {
-                throw XtreamException(describeHttpFailure(response.code))
+        executeSameOrigin(source, builder.build()).use { response ->
+            if (!response.isSuccessful) throw XtreamException(describeHttpFailure(response.code))
+            val body = response.body ?: throw XtreamException("The server returned an empty response.")
+            if (body.contentLength() > MAX_JSON_BYTES) {
+                throw XtreamException("The provider response exceeds the safety limit.")
             }
-            val text = response.body?.string().orEmpty()
+            val text = BoundedInputStream(body.byteStream(), MAX_JSON_BYTES, "Xtream JSON response")
+                .use { String(it.readBytes(), Charsets.UTF_8) }
             if (text.isBlank()) throw XtreamException("The server returned an empty response.")
             return try {
                 json.parseToJsonElement(text)
             } catch (e: Exception) {
-                // Panels behind a captive portal or Cloudflare return HTML here. Saying
-                // "not valid JSON" is useless to a user; say what it probably means.
                 throw XtreamException(
-                    "The server replied with something that is not a valid catalogue. " +
-                        "Check the address and port are correct.",
+                    "The server replied with something that is not a valid catalogue. Check the address and port.",
                     e,
                 )
             }
         }
     }
 
+    /** Follows only bounded same-origin HTTPS redirects; credentials never move to another host. */
+    private fun executeSameOrigin(source: Source, initialUrl: HttpUrl): Response {
+        if (!initialUrl.isHttps) throw HttpsRequiredException()
+        var target = initialUrl
+        repeat(MAX_REDIRECTS + 1) { hop ->
+            val response = noCrossOriginRedirects.newCall(request(source, target)).execute()
+            if (!response.isRedirect) return response
+            if (hop >= MAX_REDIRECTS) {
+                response.close()
+                throw XtreamException("The provider redirected too many times.")
+            }
+            val location = response.header("Location")
+            val redirected = location?.let(target::resolve)
+            if (redirected == null || !redirected.isHttps || redirected.host != initialUrl.host ||
+                redirected.port != initialUrl.port
+            ) {
+                response.close()
+                throw XtreamException("The provider redirected outside its HTTPS origin; request blocked.")
+            }
+            response.close()
+            target = redirected
+        }
+        throw XtreamException("The provider redirected too many times.")
+    }
+
     private fun request(source: Source, url: HttpUrl): Request =
         Request.Builder()
             .url(url)
-            .header("User-Agent", source.userAgent)
+            .header("User-Agent", source.userAgent.take(MAX_USER_AGENT_CHARS))
             .build()
 
     private fun describeHttpFailure(code: Int): String = when (code) {
@@ -406,6 +444,12 @@ class XtreamApi(
         val rating: Double?,
         val year: Int?,
     )
+
+    private companion object {
+        const val MAX_JSON_BYTES = 64L * 1024 * 1024
+        const val MAX_REDIRECTS = 3
+        const val MAX_USER_AGENT_CHARS = 1_024
+    }
 }
 
 // ---- Defensive JSON accessors ------------------------------------------------------------

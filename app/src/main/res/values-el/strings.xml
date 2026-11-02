@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">Διεύθυνση διακομιστή</string>
     <string name="onboarding_playlist_url">URL λίστας αναπαραγωγής</string>
     <string name="onboarding_portal_url">URL πύλης</string>
-    <string name="onboarding_server_help">Για παράδειγμα http://example.com:8080 — επικολλήστε ολόκληρη τη γραμμή από τον πάροχό σας αν είναι πιο εύκολο, τα επιπλέον στοιχεία θα αφαιρεθούν.</string>
+    <string name="onboarding_server_help">Για παράδειγμα https://example.com:8080 — επικολλήστε ολόκληρη τη γραμμή από τον πάροχό σας αν είναι πιο εύκολο, τα επιπλέον στοιχεία θα αφαιρεθούν.</string>
     <string name="onboarding_playlist_help">Ο πλήρης σύνδεσμος http προς το αρχείο .m3u ή .m3u8 σας.</string>
-    <string name="onboarding_portal_help">Η διεύθυνση πύλης από τον πάροχό σας, π.χ. http://host:port/c/ — τα επιπλέον στοιχεία θα αφαιρεθούν.</string>
+    <string name="onboarding_portal_help">Η διεύθυνση πύλης από τον πάροχό σας, π.χ. https://host:port/c/ — τα επιπλέον στοιχεία θα αφαιρεθούν.</string>
     <string name="onboarding_mac_address">Διεύθυνση MAC</string>
     <string name="onboarding_mac_help">Η διεύθυνση MAC που ο πάροχός σας συνέδεσε με τη γραμμή σας, π.χ. 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">Απόκρυψη σύνθετων</string>

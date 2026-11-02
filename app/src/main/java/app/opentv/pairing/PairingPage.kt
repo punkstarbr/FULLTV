@@ -41,7 +41,7 @@ object PairingPage {
 
           <label for="url" id="url-label">Server address</label>
           <input id="url" name="url" type="url" inputmode="url" required
-                 placeholder="http://example.com:8080"
+                 placeholder="https://example.com:8080"
                  autocapitalize="off" autocorrect="off" spellcheck="false">
           <p class="hint" id="url-hint">
             Paste the whole line from your provider if that's easier — extra bits get trimmed.
@@ -75,6 +75,8 @@ object PairingPage {
         <p class="privacy">
           This page is served by your television, over your own network. What you type goes
           straight to it and nowhere else — there is no FullTV account and no FullTV server.
+          Before entering provider credentials, compare the TLS certificate fingerprint in your
+          browser with the SHA-256 fingerprint shown on the TV.
         </p>
 
         <script>
@@ -84,7 +86,7 @@ object PairingPage {
             document.getElementById('url-label').textContent =
               isM3u ? 'Playlist URL' : 'Server address';
             document.getElementById('url-hint').textContent = isM3u
-              ? 'The full http link to your .m3u or .m3u8 file.'
+              ? 'The full https link to your .m3u or .m3u8 file.'
               : "Paste the whole line from your provider if that's easier.";
             document.getElementById('username').required = !isM3u;
             document.getElementById('password').required = !isM3u;

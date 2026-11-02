@@ -14,6 +14,7 @@ import com.hierynomus.smbj.connection.Connection
 import com.hierynomus.smbj.session.Session
 import com.hierynomus.smbj.share.DiskShare
 import java.io.Closeable
+import java.io.IOException
 import java.io.OutputStream
 import java.util.EnumSet
 
@@ -80,7 +81,7 @@ class SmbReadHandle(
 }
 
 /**
- * Thin SMB2/3 client over SMBJ. One connection per operation (recording holds it for the
+ * Thin SMB3 client over SMBJ. One connection per operation (recording holds it for the
  * capture; playback holds it for the play). Deliberately not pooled — an IPTV box records one or
  * two things at a time, and a fresh connection is simpler and robust against a NAS that drops idle
  * sessions.
@@ -93,12 +94,22 @@ object SmbClient {
     // capture loop can retry.
     private val smbjConfig by lazy {
         com.hierynomus.smbj.SmbConfig.builder()
+            // SMB1/SMB2 and unsigned/plain SMB3 sessions can expose credentials or data on the LAN.
+            // Fail closed instead of silently downgrading to a legacy NAS configuration.
+            .withDialects(
+                com.hierynomus.mssmb2.SMB2Dialect.SMB_3_1_1,
+                com.hierynomus.mssmb2.SMB2Dialect.SMB_3_0_2,
+                com.hierynomus.mssmb2.SMB2Dialect.SMB_3_0,
+            )
+            .withSigningRequired(true)
+            .withEncryptData(true)
             .withSoTimeout(35, java.util.concurrent.TimeUnit.SECONDS)
             .withTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
             .build()
     }
 
     private fun connect(config: SmbConfig): Quad {
+        validateConfig(config)
         val client = SMBClient(smbjConfig)
         val connection = client.connect(config.host)
         val auth = AuthenticationContext(config.username, config.password.toCharArray(), null)
@@ -117,7 +128,7 @@ object SmbClient {
     /** SMB paths use backslashes; the folder may be nested and is created if missing. */
     private fun ensureFolder(share: DiskShare, folder: String) {
         if (folder.isBlank()) return
-        val parts = folder.split('/', '\\').filter { it.isNotBlank() }
+        val parts = safeSegments(folder)
         var acc = ""
         for (part in parts) {
             acc = if (acc.isEmpty()) part else "$acc\\$part"
@@ -127,16 +138,19 @@ object SmbClient {
 
     /** Build the `smb://host/share/folder/filename` locator a recording will be stored at. */
     fun locator(config: SmbConfig, filename: String): String {
-        val f = config.folder.split('/', '\\').filter { it.isNotBlank() }.joinToString("/")
-        val path = if (f.isEmpty()) filename else "$f/$filename"
-        return "smb://${config.host}/${config.share}/$path"
+        validateConfig(config)
+        val safeName = safeSegments(filename).singleOrNull()
+            ?: throw IllegalArgumentException("A single safe file name is required.")
+        val folder = safeSegments(config.folder)
+        val path = (folder + safeName).joinToString("/")
+        return "smb://${config.host.trim()}/${config.share.trim()}/$path"
     }
 
     /** Open the file named by [locator] for writing. Caller writes to [SmbWriteHandle.output]. */
-    fun openForWrite(config: SmbConfig, locator: String): SmbWriteHandle {
-        val parsed = parse(locator)
-        val cfg = config.copy(host = parsed.host, share = parsed.share)
-        val q = connect(cfg)
+    fun openForWrite(config: SmbConfig, locator: String, overwrite: Boolean = true): SmbWriteHandle {
+        val parsed = validateLocator(config, locator)
+        val q = connect(config)
+        var created = false
         try {
             val folder = parsed.path.substringBeforeLast('/', "")
             ensureFolder(q.share, folder)
@@ -145,15 +159,16 @@ object SmbClient {
                 EnumSet.of(AccessMask.GENERIC_WRITE),
                 null,
                 SMB2ShareAccess.ALL,
-                SMB2CreateDisposition.FILE_OVERWRITE_IF,
+                if (overwrite) SMB2CreateDisposition.FILE_OVERWRITE_IF else SMB2CreateDisposition.FILE_CREATE,
                 null,
             )
+            created = true
             return SmbWriteHandle(
                 q.client, q.connection, q.session, q.share, file,
                 file.outputStream, locator,
             )
         } catch (t: Throwable) {
-            runCatching { q.share.rm(parsed.path.replace('/', '\\')) }
+            if (created) runCatching { q.share.rm(parsed.path.replace('/', '\\')) }
             runCatching { q.share.close() }
             runCatching { q.session.close() }
             runCatching { q.connection.close() }
@@ -164,9 +179,8 @@ object SmbClient {
 
     /** Open an existing `smb://host/share/path` locator for random-access reading (playback). */
     fun openForRead(config: SmbConfig, locator: String): SmbReadHandle {
-        val parsed = parse(locator)
-        val cfg = config.copy(host = parsed.host, share = parsed.share)
-        val q = connect(cfg)
+        val parsed = validateLocator(config, locator)
+        val q = connect(config)
         try {
             val file = q.share.openFile(
                 parsed.path.replace('/', '\\'),
@@ -207,9 +221,8 @@ object SmbClient {
 
     /** Delete a recording from the NAS. */
     fun delete(config: SmbConfig, locator: String) {
-        val parsed = parse(locator)
-        val cfg = config.copy(host = parsed.host, share = parsed.share)
-        val q = connect(cfg)
+        val parsed = validateLocator(config, locator)
+        val q = connect(config)
         try {
             runCatching { q.share.rm(parsed.path.replace('/', '\\')) }
         } finally {
@@ -227,11 +240,19 @@ object SmbClient {
      * filter by the extension they expect.
      */
     fun list(config: SmbConfig, folder: String): List<String> {
+        validateConfig(config)
+        val parts = safeSegments(folder)
+        val configuredRoot = safeSegments(config.folder)
+        require(parts.startsWithSegments(configuredRoot)) { "SMB listing is outside the configured folder." }
         val q = connect(config)
         try {
-            val rel = folder.split('/', '\\').filter { it.isNotBlank() }.joinToString("\\")
+            val rel = parts.joinToString("\\")
             if (rel.isNotEmpty() && !q.share.folderExists(rel)) return emptyList()
-            return q.share.list(rel).map { it.fileName }
+            return q.share.list(rel).asSequence()
+                .map { it.fileName }
+                .filter { name -> runCatching { safeSegments(name).size == 1 }.getOrDefault(false) }
+                .take(MAX_DIRECTORY_ENTRIES)
+                .toList()
         } finally {
             runCatching { q.share.close() }
             runCatching { q.session.close() }
@@ -242,9 +263,11 @@ object SmbClient {
 
     /** Overwrite the file at [locator] with [text] (UTF-8). Creates the parent folder if missing. */
     fun writeText(config: SmbConfig, locator: String, text: String) {
-        val handle = openForWrite(config, locator)
+        val bytes = text.toByteArray(Charsets.UTF_8)
+        require(bytes.size <= MAX_TEXT_BYTES) { "Text file exceeds the configured SMB safety limit." }
+        val handle = openForWrite(config, locator, overwrite = true)
         try {
-            handle.output.write(text.toByteArray(Charsets.UTF_8))
+            handle.output.write(bytes)
             handle.output.flush()
         } finally {
             handle.close()
@@ -252,9 +275,12 @@ object SmbClient {
     }
 
     /** Read the whole file at [locator] as a UTF-8 string. */
-    fun readText(config: SmbConfig, locator: String): String {
+    fun readText(config: SmbConfig, locator: String, maxBytes: Int = MAX_TEXT_BYTES): String {
+        require(maxBytes in 1..MAX_TEXT_BYTES)
         val handle = openForRead(config, locator)
         try {
+            if (handle.length > maxBytes.toLong()) throw IOException("Remote text file exceeds the safety limit.")
+            if (handle.length > Int.MAX_VALUE) throw IOException("Remote text file is too large.")
             val size = handle.length.toInt()
             if (size <= 0) return ""
             val buffer = ByteArray(size)
@@ -264,6 +290,7 @@ object SmbClient {
                 if (read <= 0) break
                 offset += read
             }
+            if (offset != size) throw IOException("Remote text file ended before its declared size.")
             return String(buffer, 0, offset, Charsets.UTF_8)
         } finally {
             handle.close()
@@ -287,13 +314,83 @@ object SmbClient {
 
     /** smb://host/share/a/b/c.ts → (host, share, "a/b/c.ts"). */
     fun parse(locator: String): Parsed {
-        val body = locator.removePrefix("smb://")
-        val segments = body.split('/').filter { it.isNotEmpty() }
-        val host = segments.getOrElse(0) { "" }
-        val share = segments.getOrElse(1) { "" }
-        val path = segments.drop(2).joinToString("/")
-        return Parsed(host, share, path)
+        require(locator.startsWith("smb://", ignoreCase = true)) { "Only SMB locators are accepted." }
+        val body = locator.substringAfter("://")
+        require(body.none { it == '?' || it == '#' || it == '\\' || it.code < 0x20 || it.code == 0x7f }) {
+            "SMB locator contains forbidden characters."
+        }
+        val firstSlash = body.indexOf('/')
+        require(firstSlash > 0) { "SMB locator is missing a share and file path." }
+        val host = body.substring(0, firstSlash)
+        require(host.matches(HOST_PATTERN)) { "SMB locator has an invalid host." }
+        val segments = safeSegments(body.substring(firstSlash + 1))
+        require(segments.size >= 2) { "SMB locator must include a share and a file path." }
+        return Parsed(host, segments.first(), segments.drop(1).joinToString("/"))
     }
 
-    fun isSmb(locator: String): Boolean = locator.startsWith("smb://")
+    fun validateLocator(config: SmbConfig, locator: String): Parsed {
+        validateConfig(config)
+        val parsed = parse(locator)
+        require(parsed.host.equals(config.host.trim(), ignoreCase = true)) {
+            "SMB locator does not belong to the configured NAS host."
+        }
+        require(parsed.share.equals(config.share.trim(), ignoreCase = true)) {
+            "SMB locator does not belong to the configured share."
+        }
+        val configuredRoot = safeSegments(config.folder)
+        val pathSegments = safeSegments(parsed.path)
+        require(pathSegments.size > configuredRoot.size && pathSegments.startsWithSegments(configuredRoot)) {
+            "SMB locator is outside the configured recording folder."
+        }
+        return parsed
+    }
+
+    fun isValidLocator(config: SmbConfig, locator: String): Boolean =
+        runCatching { validateLocator(config, locator) }.isSuccess
+
+    /** Relative recording path below the configured folder, safe to transfer in a sync bundle. */
+    fun relativePath(config: SmbConfig, locator: String): String {
+        val parsed = validateLocator(config, locator)
+        val root = safeSegments(config.folder)
+        return safeSegments(parsed.path).drop(root.size).joinToString("/")
+    }
+
+    /** Rebuild a locator from a path that is relative to the configured recording folder. */
+    fun locatorForRelativePath(config: SmbConfig, relativePath: String): String {
+        validateConfig(config)
+        val relative = safeSegments(relativePath)
+        require(relative.isNotEmpty()) { "A relative SMB file path is required." }
+        val path = (safeSegments(config.folder) + relative).joinToString("/")
+        return "smb://${config.host.trim()}/${config.share.trim()}/$path"
+    }
+
+    fun isSmb(locator: String): Boolean = locator.startsWith("smb://", ignoreCase = true)
+
+    private fun validateConfig(config: SmbConfig) {
+        require(config.host.trim().matches(HOST_PATTERN)) { "Enter a valid SMB host name or IPv4 address." }
+        require(safeSegments(config.share).size == 1) { "Enter one valid SMB share name." }
+        safeSegments(config.folder)
+    }
+
+    private fun safeSegments(raw: String): List<String> {
+        val normalized = raw.replace('\\', '/')
+        require(!normalized.startsWith('/')) { "Absolute SMB paths are not accepted." }
+        if (normalized.isEmpty()) return emptyList()
+        val segments = normalized.split('/')
+        require(segments.all { segment ->
+            segment.isNotEmpty() && segment != "." && segment != ".." && segment.length <= 255 &&
+                segment.none { char ->
+                    char in SMB_INVALID_PATH_CHARS || char.code < 0x20 || char.code == 0x7f
+                }
+        }) { "SMB path contains an unsafe segment." }
+        return segments
+    }
+
+    private fun List<String>.startsWithSegments(prefix: List<String>): Boolean =
+        size >= prefix.size && prefix.indices.all { get(it).equals(prefix[it], ignoreCase = true) }
+
+    private const val MAX_TEXT_BYTES = 8 * 1024 * 1024
+    private const val MAX_DIRECTORY_ENTRIES = 512
+    private val HOST_PATTERN = Regex("[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?")
+    private val SMB_INVALID_PATH_CHARS = setOf('/', '\\', ':', '?', '#', '*', '"', '<', '>', '|', '%')
 }

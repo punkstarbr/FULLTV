@@ -230,6 +230,9 @@ interface ChannelDao {
     @Query("SELECT * FROM channels")
     suspend fun allForMatching(): List<Channel>
 
+    @Query("SELECT streamUrl FROM channels")
+    suspend fun allStreamUrls(): List<String>
+
     @Upsert
     suspend fun upsertAll(channels: List<Channel>)
 
@@ -524,6 +527,9 @@ interface MovieDao {
     @Query("SELECT * FROM movies WHERE streamUrl = :url LIMIT 1")
     suspend fun byStreamUrl(url: String): Movie?
 
+    @Query("SELECT streamUrl FROM movies")
+    suspend fun allStreamUrls(): List<String>
+
     @Query("UPDATE movies SET favourite = :favourite WHERE id = :id")
     suspend fun setFavourite(id: Long, favourite: Boolean)
 
@@ -621,6 +627,9 @@ interface EpisodeDao {
 
     @Query("SELECT * FROM episodes WHERE streamUrl = :url LIMIT 1")
     suspend fun byStreamUrl(url: String): Episode?
+
+    @Query("SELECT streamUrl FROM episodes")
+    suspend fun allStreamUrls(): List<String>
 
     @Upsert
     suspend fun upsertAll(episodes: List<Episode>)

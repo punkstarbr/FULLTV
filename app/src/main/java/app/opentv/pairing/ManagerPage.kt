@@ -129,7 +129,7 @@ object ManagerPage {
                 <label class="field"><span>Name (optional)</span>
                   <input id="provName" placeholder="My provider" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
                 <label class="field"><span id="provUrlLabel">Server address</span>
-                  <input id="provUrl" placeholder="http://example.com:8080" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
+                  <input id="provUrl" placeholder="https://example.com:8080" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
                 <label class="field" id="provUserField"><span>Username</span>
                   <input id="provUser" autocapitalize="off" autocorrect="off" spellcheck="false"></label>
                 <label class="field" id="provPassField"><span>Password</span>
@@ -179,6 +179,8 @@ object ManagerPage {
             <p class="privacy">
               This page is served by your television, over your own network — there is no FullTV
               account and no FullTV server. Nothing you change here leaves your home.
+              Before entering provider credentials, compare the TLS certificate fingerprint in
+              your browser with the SHA-256 fingerprint shown on the TV.
             </p>
           </div>
 
@@ -472,8 +474,8 @@ object ManagerPage {
             el('provPassField').hidden = (k !== 'xtream');
             el('provMacField').hidden = (k !== 'stalker');
             el('provUrlLabel').textContent = (k === 'm3u') ? 'Playlist URL' : (k === 'stalker' ? 'Portal URL' : 'Server address');
-            el('provUrl').placeholder = (k === 'm3u') ? 'http://example.com/playlist.m3u'
-              : (k === 'stalker' ? 'http://portal.example.com:80/c' : 'http://example.com:8080');
+            el('provUrl').placeholder = (k === 'm3u') ? 'https://example.com/playlist.m3u'
+              : (k === 'stalker' ? 'https://portal.example.com:8443/c' : 'https://example.com:8443');
           }
           el('provKind').addEventListener('change', syncProvFields);
           syncProvFields();

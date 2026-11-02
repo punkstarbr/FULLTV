@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">서버 주소</string>
     <string name="onboarding_playlist_url">재생 목록 URL</string>
     <string name="onboarding_portal_url">포털 URL</string>
-    <string name="onboarding_server_help">예: http://example.com:8080 - 편한 경우 공급자가 제공한 전체 내용을 그대로 붙여넣어도 됩니다. 불필요한 부분은 자동으로 제거됩니다.</string>
+    <string name="onboarding_server_help">예: https://example.com:8080 - 편한 경우 공급자가 제공한 전체 내용을 그대로 붙여넣어도 됩니다. 불필요한 부분은 자동으로 제거됩니다.</string>
     <string name="onboarding_playlist_help">.m3u 또는 .m3u8 파일의 전체 http 링크입니다.</string>
-    <string name="onboarding_portal_help">공급자가 제공한 포털 주소입니다. 예: http://host:port/c/ - 불필요한 부분은 자동으로 제거됩니다.</string>
+    <string name="onboarding_portal_help">공급자가 제공한 포털 주소입니다. 예: https://host:port/c/ - 불필요한 부분은 자동으로 제거됩니다.</string>
     <string name="onboarding_mac_address">MAC 주소</string>
     <string name="onboarding_mac_help">공급자가 회선에 연결한 MAC 주소입니다. 예: 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">고급 설정 숨기기</string>

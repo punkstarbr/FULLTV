@@ -52,6 +52,7 @@ import app.opentv.backup.BackupTransfer
 import app.opentv.R
 import app.opentv.core.ServiceLocator
 import app.opentv.sync.SyncServer
+import app.opentv.ui.ProtectSensitiveScreen
 import app.opentv.ui.SyncViewModel
 import kotlinx.coroutines.launch
 
@@ -65,6 +66,7 @@ fun SyncScreen(
     viewModel: SyncViewModel = viewModel(),
 ) {
     var mode by remember { mutableStateOf(Mode.SHARE) }
+    ProtectSensitiveScreen()
 
     Column(
         Modifier
@@ -193,7 +195,7 @@ private fun BackupPane() {
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Button(
-                    enabled = !busy && passphrase.length >= 8,
+                    enabled = !busy && passphrase.length >= 12,
                     onClick = { exportLauncher.launch("fulltv-backup.fulltv") },
                 ) { Text(stringResource(R.string.sync_backup_export)) }
                 OutlinedButton(
@@ -229,8 +231,24 @@ private fun SharePane(viewModel: SyncViewModel) {
                     Spacer(Modifier.height(8.dp))
                     Field(stringResource(R.string.sync_code), s.session.code)
                     Spacer(Modifier.height(8.dp))
+                    Field(
+                        stringResource(R.string.sync_tls_pin),
+                        s.session.syncPin.uppercase().chunked(4).joinToString(" "),
+                    )
+                    Spacer(Modifier.height(8.dp))
                     Text(
-                        stringResource(R.string.sync_type_in_one_go, s.session.address, s.session.code),
+                        stringResource(R.string.sync_tls_pin_help),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        stringResource(
+                            R.string.sync_type_in_one_go,
+                            s.session.address,
+                            s.session.code,
+                            s.session.syncPin,
+                        ),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -263,24 +281,23 @@ private fun ReceivePane(viewModel: SyncViewModel) {
                 Text(stringResource(R.string.sync_type_what_shows), style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    entry.ifEmpty { "address:port#code" },
-                    style = MaterialTheme.typography.headlineSmall,
+                    entry.ifEmpty { stringResource(R.string.sync_input_placeholder) },
+                    style = MaterialTheme.typography.titleMedium,
                     color = if (entry.isEmpty()) MaterialTheme.colorScheme.onSurfaceVariant
                     else MaterialTheme.colorScheme.primary,
                 )
                 Spacer(Modifier.height(16.dp))
                 NumPad(
-                    onKey = { if (entry.length < 40) entry += it },
+                    onKey = { if (entry.length < 128) entry += it },
                     onBackspace = { entry = entry.dropLast(1) },
                 )
                 Spacer(Modifier.height(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Button(
-                        enabled = entry.contains('#') && state !is SyncViewModel.ReceiveState.Connecting,
+                        enabled = entry.count { it == '#' } == 2 && state !is SyncViewModel.ReceiveState.Connecting,
                         onClick = {
-                            val address = entry.substringBefore('#')
-                            val code = entry.substringAfter('#')
-                            viewModel.receive(address, code)
+                            val parts = entry.split('#', limit = 3)
+                            if (parts.size == 3) viewModel.receive(parts[0], parts[1], parts[2])
                         },
                     ) { Text(stringResource(R.string.sync_connect)) }
 
@@ -345,6 +362,8 @@ private fun NasPane(viewModel: SyncViewModel) {
                             Text(stringResource(R.string.sync_nas_syncing))
                         is SyncViewModel.NasState.Done ->
                             Text(s.message, color = MaterialTheme.colorScheme.primary)
+                        is SyncViewModel.NasState.NeedsPairing ->
+                            Text(s.message, color = MaterialTheme.colorScheme.error)
                         is SyncViewModel.NasState.Failed ->
                             Text(s.message, color = MaterialTheme.colorScheme.error)
                         else -> Unit
@@ -396,7 +415,7 @@ private fun ModeChip(label: String, selected: Boolean, onClick: () -> Unit) {
 
 @Composable
 private fun NumPad(onKey: (String) -> Unit, onBackspace: () -> Unit) {
-    val rows = listOf("123", "456", "789", ".0:", "#⌫")
+    val rows = listOf("123", "456", "789", ".0:", "ABC", "DEF", "#⌫")
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         rows.forEach { line ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

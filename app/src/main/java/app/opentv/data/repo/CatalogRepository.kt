@@ -25,11 +25,14 @@ import app.opentv.data.model.SourceKind
 import app.opentv.data.model.StreamKind
 import app.opentv.data.parser.ChannelNameNormalizer
 import app.opentv.data.parser.M3uParser
+import app.opentv.data.parser.YouTubeLiveSearchUrl
 import app.opentv.data.parser.VodTitleCleaner
 import app.opentv.data.remote.StalkerApi
 import app.opentv.data.remote.TmdbClient
 import app.opentv.data.remote.XtreamApi
 import app.opentv.data.remote.HttpsUrlPolicy
+import app.opentv.data.remote.NetworkDestinationPolicy
+import app.opentv.player.YouTubeM3uExpander
 import app.opentv.player.YouTubeLiveSearchResolver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -37,6 +40,9 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+
+private const val MAX_SAFE_REMOTE_HOSTS = 128
+private const val MAX_YOUTUBE_SEARCH_ENTRIES_PER_M3U = 5
 
 /**
  * Keeps one channel per distinct quality signature, preserving order (so "best first" is
@@ -204,6 +210,12 @@ class CatalogRepository(
     suspend fun movieByStreamUrl(url: String): Movie? = movieDao.byStreamUrl(url)
 
     suspend fun episodeByStreamUrl(url: String): Episode? = episodeDao.byStreamUrl(url)
+
+    suspend fun allChannelStreamUrls(): List<String> = channelDao.allStreamUrls()
+
+    suspend fun allMovieStreamUrls(): List<String> = movieDao.allStreamUrls()
+
+    suspend fun allEpisodeStreamUrls(): List<String> = episodeDao.allStreamUrls()
 
     suspend fun series(id: Long): app.opentv.data.model.Series? = seriesDao.byId(id)
 
@@ -608,7 +620,7 @@ class CatalogRepository(
         if (source.kind != SourceKind.XTREAM) return
         runCatching { api.episodes(source, seriesId) }
             .onSuccess { if (it.isNotEmpty()) episodeDao.upsertAll(it) }
-            .onFailure { Log.w(TAG, "Episode fetch failed for series $seriesId", it) }
+            .onFailure { Log.w(TAG, "Episode fetch failed (${it.javaClass.simpleName})") }
     }
 
     /**
@@ -626,7 +638,7 @@ class CatalogRepository(
             else SyncResult.Success(0, 0, 0)
         if (live is SyncResult.Success && source.kind == SourceKind.XTREAM) {
             runCatching { syncXtreamVod(source, nowUtcMillis) }
-                .onFailure { Log.w(TAG, "VOD sync failed for source ${source.id}", it) }
+                .onFailure { Log.w(TAG, "VOD sync failed for source ${source.id} (${it.javaClass.simpleName})") }
         }
         live
     }
@@ -642,6 +654,8 @@ class CatalogRepository(
         ) {
             return@withContext SyncResult.Failed(HttpsUrlPolicy.REQUIRED_RESULT, null)
         }
+        NetworkDestinationPolicy.registerTrustedOrigin(secureSource.url)
+        secureSource.epgUrl?.let(NetworkDestinationPolicy::registerTrustedOrigin)
         try {
             when (secureSource.kind) {
                 SourceKind.XTREAM -> syncXtreamLive(secureSource, nowUtcMillis)
@@ -652,7 +666,7 @@ class CatalogRepository(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            Log.w(TAG, "Catalogue sync failed for source ${source.id}", e)
+            Log.w(TAG, "Catalogue sync failed for source ${source.id} (${e.javaClass.simpleName})")
             SyncResult.Failed(e.message ?: "The catalogue could not be downloaded.", e)
         }
     }
@@ -662,8 +676,9 @@ class CatalogRepository(
     suspend fun syncVod(source: Source, nowUtcMillis: Long) = withContext(Dispatchers.IO) {
         val secureSource = source.copy(url = HttpsUrlPolicy.withDefaultHttps(source.url))
         if (!HttpsUrlPolicy.isHttps(secureSource.url)) return@withContext
+        NetworkDestinationPolicy.registerTrustedOrigin(secureSource.url)
         runCatching { if (secureSource.kind == SourceKind.XTREAM) syncXtreamVod(secureSource, nowUtcMillis) }
-            .onFailure { Log.w(TAG, "VOD sync failed for source ${source.id}", it) }
+            .onFailure { Log.w(TAG, "VOD sync failed for source ${source.id} (${it.javaClass.simpleName})") }
     }
 
     private suspend fun syncXtreamLive(source: Source, nowUtcMillis: Long): SyncResult {
@@ -750,12 +765,13 @@ class CatalogRepository(
     }
 
     private suspend fun syncM3u(source: Source, nowUtcMillis: Long): SyncResult {
+        NetworkDestinationPolicy.registerTrustedOrigin(source.url)
         val request = Request.Builder()
             .url(source.url)
             .header("User-Agent", source.userAgent)
             .build()
 
-        val parsed = http.newCall(request).execute().use { response ->
+        val downloaded = http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
                 return SyncResult.Failed("Playlist download failed (HTTP ${response.code}).", null)
             }
@@ -763,6 +779,85 @@ class CatalogRepository(
                 ?: return SyncResult.Failed("The playlist was empty.", null)
             M3uParser.parse(stream, source.id)
         }
+
+        val trustedOrigin = NetworkDestinationPolicy.originOf(source.url)
+        val candidateUrls = buildList {
+            downloaded.channels.forEach { channel ->
+                add(channel.streamUrl)
+                channel.logoUrl?.let(::add)
+            }
+            downloaded.declaredEpgUrls.forEach(::add)
+            downloaded.declaredEpgUrl?.let(::add)
+        }.mapNotNull(NetworkDestinationPolicy::originOf).distinct()
+        val allowedOrigins = buildSet {
+            trustedOrigin?.let(::add)
+            candidateUrls.asSequence()
+                .filterNot { it == trustedOrigin }
+                .take(MAX_SAFE_REMOTE_HOSTS)
+                .filter { url -> NetworkDestinationPolicy.isAllowedHttps(url, trustedOriginUrl = source.url) }
+                .forEach(::add)
+        }
+        val safeChannels = downloaded.channels.mapNotNull { channel ->
+            val streamOrigin = NetworkDestinationPolicy.originOf(channel.streamUrl) ?: return@mapNotNull null
+            if (streamOrigin !in allowedOrigins) return@mapNotNull null
+            val logo = channel.logoUrl?.takeIf { logoUrl ->
+                NetworkDestinationPolicy.originOf(logoUrl) in allowedOrigins
+            }
+            channel.copy(logoUrl = logo)
+        }
+
+        // Some M3U providers publish a YouTube /results page as a channel URL. That page is not a
+        // media stream: expand it into real, stable watch URLs before saving the catalogue, so each
+        // live can use the same Streamlink playback and recording path as a manually added search.
+        val expandedChannels = ArrayList<Channel>(safeChannels.size)
+        val seenStreamIds = HashSet<String>()
+        var youtubeSearchEntries = 0
+        for (channel in safeChannels) {
+            val searchUrl = YouTubeLiveSearchUrl.normalize(channel.streamUrl)
+            if (searchUrl == null) {
+                if (seenStreamIds.add(channel.streamId)) {
+                    expandedChannels += channel.copy(sortIndex = expandedChannels.size)
+                }
+                continue
+            }
+
+            youtubeSearchEntries++
+            if (youtubeSearchEntries > MAX_YOUTUBE_SEARCH_ENTRIES_PER_M3U) {
+                return SyncResult.Failed(
+                    "The playlist contains more YouTube searches than FullTV can refresh safely.",
+                    null,
+                )
+            }
+            val videos = youtubeLiveSearch.search(searchUrl, maxResults = 5)
+            if (videos.isEmpty()) {
+                return SyncResult.Failed(
+                    "The YouTube search returned no active lives. Previous playlist channels were kept.",
+                    null,
+                )
+            }
+            val generatedChannels = YouTubeM3uExpander.expand(
+                playlistEntry = channel,
+                videos = videos,
+                firstSortIndex = expandedChannels.size,
+                isSafeThumbnail = { url ->
+                    NetworkDestinationPolicy.isAllowedHttps(url, trustedOriginUrl = source.url)
+                },
+            )
+            for (generated in generatedChannels) {
+                if (seenStreamIds.add(generated.streamId)) {
+                    expandedChannels += generated.copy(sortIndex = expandedChannels.size)
+                }
+            }
+        }
+        val safeGuideUrls = downloaded.declaredEpgUrls.filter { url ->
+            NetworkDestinationPolicy.originOf(url) in allowedOrigins
+        }
+        val parsed = downloaded.copy(
+            channels = expandedChannels,
+            declaredEpgUrl = safeGuideUrls.firstOrNull(),
+            declaredEpgUrls = safeGuideUrls,
+            skippedEntries = downloaded.skippedEntries + (downloaded.channels.size - safeChannels.size) + youtubeSearchEntries,
+        )
 
         if (parsed.channels.isEmpty()) {
             return SyncResult.Failed(
@@ -885,13 +980,13 @@ class CatalogRepository(
                 }
             }
             channel.copy(
-                displayName = n.baseName,
-                groupKey = n.groupKey,
+                displayName = if (channel.streamId.startsWith("yt-live:")) channel.displayName else n.baseName,
+                groupKey = if (channel.streamId.startsWith("yt-live:")) channel.groupKey else n.groupKey,
                 qualityRank = rank,
                 qualityLabel = label,
                 // Providers ship decorative separator rows ('#### UK GENERAL ####') as
                 // channels. They are headings, not channels — hide them on import.
-                hidden = channel.hidden || isSeparatorRow(channel.name),
+                hidden = channel.hidden || (!channel.streamId.startsWith("yt-live:") && isSeparatorRow(channel.name)),
             )
         }
 

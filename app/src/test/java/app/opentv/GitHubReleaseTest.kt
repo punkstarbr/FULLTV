@@ -7,21 +7,34 @@ import org.junit.Test
 
 class GitHubReleaseTest {
     private val release = GitHubRelease(
+        tagName = "v0.11.22",
         assets = listOf(
-            GitHubAsset(name = "fulltv-v0.11.11.apk"),
-            GitHubAsset(name = "fulltv-v0.11.11-debug.apk"),
+            GitHubAsset(name = "FullTV-0.11.22-universal.apk"),
+            GitHubAsset(name = "FullTV-0.11.22-debug.apk"),
+            GitHubAsset(name = "unexpected-app.apk"),
         ),
     )
 
     @Test
     fun prefersDebugAssetForDebugInstall() {
         assertThat(release.apkAsset(preferDebug = true)?.name)
-            .isEqualTo("fulltv-v0.11.11-debug.apk")
+            .isEqualTo("FullTV-0.11.22-debug.apk")
     }
 
     @Test
     fun prefersReleaseAssetForReleaseInstall() {
         assertThat(release.apkAsset(preferDebug = false)?.name)
-            .isEqualTo("fulltv-v0.11.11.apk")
+            .isEqualTo("FullTV-0.11.22-universal.apk")
+    }
+
+    @Test
+    fun refusesAnArbitraryApkOrMalformedVersion() {
+        val onlyUntrusted = GitHubRelease(
+            tagName = "v0.11.22",
+            assets = listOf(GitHubAsset(name = "unexpected-app.apk")),
+        )
+
+        assertThat(onlyUntrusted.apkAsset()).isNull()
+        assertThat(release.apkAsset(releaseTag = "latest")).isNull()
     }
 }

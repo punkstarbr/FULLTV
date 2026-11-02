@@ -33,11 +33,13 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -165,6 +167,33 @@ fun HomeScreen(
     var recordTarget by remember { mutableStateOf<Pair<ChannelsViewModel.Row, Programme>?>(null) }
     // The channel whose OK menu (Watch / Record / Schedule) is open.
     var channelMenu by remember { mutableStateOf<ChannelsViewModel.Row?>(null) }
+    var externalChannelToConfirm by remember { mutableStateOf<Channel?>(null) }
+
+    fun openExternalChannel(channel: Channel) {
+        recordScope.launch {
+            val uri = android.net.Uri.parse(channel.streamUrl)
+            if (uri.scheme?.lowercase(Locale.ROOT) !in setOf("http", "https")) {
+                Toast.makeText(context, context.getString(R.string.guide_no_external_player), Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            val ua = graph.sourceRepository.byId(channel.sourceId)?.userAgent ?: "OpenTV/0.1 (Android)"
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, "video/*")
+                putExtra("title", channel.shownName)
+                // External players can see both this URL and the User-Agent header.
+                putExtra("headers", arrayOf("User-Agent", ua))
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching {
+                context.startActivity(
+                    Intent.createChooser(intent, context.getString(R.string.guide_play_channel_with))
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                )
+            }.onFailure {
+                Toast.makeText(context, context.getString(R.string.guide_no_external_player), Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
 
     // First time the user records or schedules while OpenTV isn't exempt from battery optimisation,
     // offer the exemption so the capture survives standby. Once per session; never blocks recording.
@@ -819,24 +848,7 @@ fun HomeScreen(
                     }
                     RecordActionRow(stringResource(R.string.guide_open_external)) {
                         channelMenu = null
-                        recordScope.launch {
-                            val ua = graph.sourceRepository.byId(channel.sourceId)?.userAgent ?: "OpenTV/0.1 (Android)"
-                            val intent = Intent(Intent.ACTION_VIEW).apply {
-                                setDataAndType(android.net.Uri.parse(channel.streamUrl), "video/*")
-                                putExtra("title", channel.shownName)
-                                // MX Player / VLC read the User-Agent from this header extra.
-                                putExtra("headers", arrayOf("User-Agent", ua))
-                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                            }
-                            runCatching {
-                                context.startActivity(
-                                    Intent.createChooser(intent, context.getString(R.string.guide_play_channel_with))
-                                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-                                )
-                            }.onFailure {
-                                Toast.makeText(context, context.getString(R.string.guide_no_external_player), Toast.LENGTH_SHORT).show()
-                            }
-                        }
+                        externalChannelToConfirm = channel
                     }
                     if (recordingThis != null) {
                         RecordActionRow(stringResource(R.string.rec_stop_recording), primary = true) {
@@ -883,6 +895,25 @@ fun HomeScreen(
                 }
             }
         }
+    }
+
+    externalChannelToConfirm?.let { channel ->
+        AlertDialog(
+            onDismissRequest = { externalChannelToConfirm = null },
+            title = { Text(stringResource(R.string.guide_external_warning_title)) },
+            text = { Text(stringResource(R.string.guide_external_warning_body)) },
+            confirmButton = {
+                TextButton(onClick = {
+                    externalChannelToConfirm = null
+                    openExternalChannel(channel)
+                }) { Text(stringResource(R.string.guide_external_open_confirm)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { externalChannelToConfirm = null }) {
+                    Text(stringResource(R.string.common_cancel))
+                }
+            },
+        )
     }
 
     if (showBackgroundPrompt) {

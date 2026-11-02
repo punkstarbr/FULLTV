@@ -132,4 +132,22 @@ class XmltvChannelParseTest {
 
         assertThat(result.aliases).containsExactly("bare.uk" to null, "empty.uk" to null)
     }
+
+    @Test
+    fun `rejects document types and external entities`() = runTest {
+        val xml = """
+            <!DOCTYPE tv [<!ENTITY local SYSTEM "file:///etc/passwd">]>
+            <tv><channel id="x"><display-name>&local;</display-name></channel></tv>
+        """.trimIndent()
+
+        assertThat(runCatching { parse(xml) }.isFailure).isTrue()
+    }
+
+    @Test
+    fun `rejects a single XMLTV field larger than its safety quota`() = runTest {
+        val title = "x".repeat(3_000)
+        val xml = "<tv><programme channel=\"x\" start=\"20261102000000\"><title>$title</title></programme></tv>"
+
+        assertThat(runCatching { parse(xml) }.isFailure).isTrue()
+    }
 }

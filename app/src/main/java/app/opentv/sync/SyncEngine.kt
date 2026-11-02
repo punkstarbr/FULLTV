@@ -10,25 +10,20 @@ import app.opentv.data.model.PlaybackPosition
 import app.opentv.data.model.Profile
 import app.opentv.data.model.Recording
 import app.opentv.data.model.RecordingStatus
+import app.opentv.recording.RecordingStorage
 import app.opentv.recording.SmbClient
+import app.opentv.recording.SmbConfig
 import kotlinx.serialization.json.Json
 
 /**
- * Reads local state into a [SyncBundle] and applies a received one. The single place that knows
- * how OpenTV's tables map onto the portable, cross-device bundle, so the LAN server/client and the
- * NAS sync all agree on what travels and how it merges.
- *
- * Merge policy (see [SyncBundle]): watch positions are two-way newest-wins; curation (profiles,
- * favourites, hidden channels, hidden categories) and NAS recordings are applied **additively** —
- * we spread what a peer has without deleting anything locally. That keeps a sync from ever wiping a
- * favourite you set on one box, un-hiding the structural separator rows the importer hides, or
- * dropping a recording that only one device knows about.
+ * Reads local state into a portable bundle and applies a received one. Provider URLs never leave
+ * the database as plain text: every cross-device URL identity is a keyed HMAC. The private key is
+ * carried only inside pinned TLS sync or the passphrase-encrypted FullTV backup.
  */
 class SyncEngine(private val graph: ServiceLocator.Graph) {
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
-    /** What a single [apply] actually changed — summed across peers for the NAS "Synced N" line. */
     data class MergeResult(
         val positions: Int = 0,
         val favourites: Int = 0,
@@ -45,13 +40,21 @@ class SyncEngine(private val graph: ServiceLocator.Graph) {
         )
     }
 
-    suspend fun gather(): SyncBundle {
+    /**
+     * [positionsOnly] is used by the LAN Sync screen, which promises to transfer watch positions
+     * only. NAS sync and encrypted backups also include curation and shared recording metadata.
+     */
+    suspend fun gather(
+        includeSyncKey: Boolean = false,
+        positionsOnly: Boolean = false,
+    ): SyncBundle {
+        val key = SyncKeyStore.getOrCreate(graph.applicationContext)
         val profiles = graph.profiles.all()
         val names = profiles.associate { it.id to it.name }
         val positions = graph.playbackPositions.all().mapNotNull { pos ->
             val profileName = names[pos.profileId] ?: return@mapNotNull null
             val parts = pos.mediaKey.split(":", limit = 2)
-            if (parts.size != 2) return@mapNotNull null
+            if (parts.size != 2 || parts[0] !in MEDIA_KINDS) return@mapNotNull null
             val id = parts[1].toLongOrNull() ?: return@mapNotNull null
             val streamUrl = when (parts[0]) {
                 "movie" -> graph.catalogRepository.movie(id)?.streamUrl
@@ -60,131 +63,259 @@ class SyncEngine(private val graph: ServiceLocator.Graph) {
             } ?: return@mapNotNull null
             SyncPosition(
                 profile = profileName,
-                streamUrl = streamUrl,
+                mediaKey = SyncPrivacy.mediaKey(key, parts[0], streamUrl),
                 kind = parts[0],
                 positionMillis = pos.positionMillis,
                 durationMillis = pos.durationMillis,
                 updatedAtMillis = pos.updatedAtMillis,
             )
         }
-        // Only finished recordings that live on the shared NAS travel — a device-local (file://)
-        // capture can't be opened from another box, so sharing its metadata would just create a
-        // library row that fails to play everywhere but here.
-        val recordings = graph.recordingRepository.all()
+
+        val smbConfig = RecordingStorage.smbConfig(graph.settings)
+        val recordings = if (positionsOnly) emptyList() else graph.recordingRepository.all()
+            .asSequence()
             .filter { it.status == RecordingStatus.COMPLETED && SmbClient.isSmb(it.filePath) }
-            .map { r ->
+            .mapNotNull { recording ->
+                val relativePath = runCatching {
+                    SmbClient.relativePath(smbConfig, recording.filePath)
+                }.getOrNull()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
                 SyncRecording(
-                    channelName = r.channelName,
-                    logoUrl = r.logoUrl,
-                    title = r.title,
-                    description = r.description,
-                    filePath = r.filePath,
-                    streamUrl = r.streamUrl,
-                    userAgent = r.userAgent,
-                    scheduledStartMillis = r.scheduledStartMillis,
-                    scheduledEndMillis = r.scheduledEndMillis,
-                    startedAtMillis = r.startedAtMillis,
-                    endedAtMillis = r.endedAtMillis,
-                    sizeBytes = r.sizeBytes,
+                    channelName = recording.channelName.take(MAX_SYNC_TEXT),
+                    title = recording.title.take(MAX_SYNC_TEXT),
+                    description = recording.description?.take(MAX_SYNC_DESCRIPTION),
+                    relativePath = relativePath,
+                    scheduledStartMillis = recording.scheduledStartMillis,
+                    scheduledEndMillis = recording.scheduledEndMillis,
+                    startedAtMillis = recording.startedAtMillis,
+                    endedAtMillis = recording.endedAtMillis,
+                    sizeBytes = recording.sizeBytes.coerceAtLeast(0),
                 )
-            }
+            }.take(MAX_RECORDINGS).toList()
+
+        val favouriteChannels = if (positionsOnly) emptyList() else graph.catalogRepository
+            .favouriteChannelUrls().asSequence()
+            .map { SyncPrivacy.mediaKey(key, "channel", it) }
+            .distinct().take(MAX_SYNC_IDENTIFIERS).toList()
+        val hiddenChannels = if (positionsOnly) emptyList() else graph.catalogRepository
+            .hiddenChannelUrls().asSequence()
+            .map { SyncPrivacy.mediaKey(key, "channel", it) }
+            .distinct().take(MAX_SYNC_IDENTIFIERS).toList()
+        val favouriteMovies = if (positionsOnly) emptyList() else graph.catalogRepository
+            .favouriteMovieUrls().asSequence()
+            .map { SyncPrivacy.mediaKey(key, "movie", it) }
+            .distinct().take(MAX_SYNC_IDENTIFIERS).toList()
+
         return SyncBundle(
+            version = CURRENT_VERSION,
+            groupId = SyncPrivacy.groupId(key),
+            syncGroupKeyBase64 = if (includeSyncKey) SyncKeyStore.encodeForTransfer(key) else "",
             generatedAtMillis = System.currentTimeMillis(),
-            profiles = profiles.map { it.name },
-            positions = positions,
-            favouriteChannels = graph.catalogRepository.favouriteChannelUrls(),
-            hiddenChannels = graph.catalogRepository.hiddenChannelUrls(),
-            favouriteMovies = graph.catalogRepository.favouriteMovieUrls(),
-            favouriteSeries = graph.catalogRepository.favouriteSeriesIds(),
-            hiddenCategories = graph.settings.hiddenCategories.value.toList(),
+            profiles = profiles.map { it.name.take(MAX_SYNC_TEXT) }.distinct().take(MAX_PROFILES),
+            positions = positions.take(MAX_POSITIONS),
+            favouriteChannels = favouriteChannels,
+            hiddenChannels = hiddenChannels,
+            favouriteMovies = favouriteMovies,
+            favouriteSeries = if (positionsOnly) emptyList() else graph.catalogRepository
+                .favouriteSeriesIds().distinct().take(MAX_SYNC_IDENTIFIERS),
+            hiddenCategories = if (positionsOnly) emptyList() else graph.settings.hiddenCategories.value
+                .asSequence().map { it.take(MAX_SYNC_TEXT) }.distinct().take(MAX_SYNC_IDENTIFIERS).toList(),
             recordings = recordings,
-        )
+        ).also(::validateBundle)
     }
 
-    fun encode(bundle: SyncBundle): String = json.encodeToString(SyncBundle.serializer(), bundle)
+    /** NAS serialization always strips the secret, even if a caller accidentally supplies one. */
+    fun encode(bundle: SyncBundle, includeSyncKey: Boolean = false): String {
+        validateBundle(bundle)
+        val portable = if (includeSyncKey) bundle else bundle.copy(syncGroupKeyBase64 = "")
+        return json.encodeToString(SyncBundle.serializer(), portable)
+    }
 
-    fun decode(bundleJson: String): SyncBundle =
-        json.decodeFromString(SyncBundle.serializer(), bundleJson)
+    fun currentGroupId(): String =
+        SyncPrivacy.groupId(SyncKeyStore.getOrCreate(graph.applicationContext))
 
-    /** Applies a received bundle. Returns what changed, so callers can report "Synced N items". */
+    fun decode(bundleJson: String): SyncBundle {
+        require(bundleJson.toByteArray(Charsets.UTF_8).size <= MAX_BUNDLE_BYTES) {
+            "Sync bundle exceeds the safety limit."
+        }
+        return json.decodeFromString(SyncBundle.serializer(), bundleJson).also(::validateBundle)
+    }
+
+    /** Converts a v3 NAS file without ever serializing its raw credential-bearing URLs again. */
+    fun migrateLegacyV3(bundleJson: String, smbConfig: SmbConfig): SyncBundle? {
+        require(bundleJson.toByteArray(Charsets.UTF_8).size <= MAX_BUNDLE_BYTES)
+        val legacy = json.decodeFromString(LegacySyncBundleV3.serializer(), bundleJson)
+        if (legacy.version != 3) return null
+        require(legacy.profiles.size <= MAX_PROFILES && legacy.positions.size <= MAX_POSITIONS)
+        require(legacy.favouriteChannels.size <= MAX_SYNC_IDENTIFIERS)
+        require(legacy.hiddenChannels.size <= MAX_SYNC_IDENTIFIERS)
+        require(legacy.favouriteMovies.size <= MAX_SYNC_IDENTIFIERS)
+        require(legacy.favouriteSeries.size <= MAX_SYNC_IDENTIFIERS)
+        require(legacy.hiddenCategories.size <= MAX_SYNC_IDENTIFIERS)
+        require(legacy.recordings.size <= MAX_RECORDINGS)
+
+        val key = SyncKeyStore.getOrCreate(graph.applicationContext)
+        fun keyed(raw: String, kind: String): String? =
+            raw.takeIf { it.isNotBlank() && it.length <= MAX_LEGACY_URL }
+                ?.let { SyncPrivacy.mediaKey(key, kind, it) }
+        val positions = legacy.positions.mapNotNull { item ->
+            if (item.kind !in MEDIA_KINDS || item.profile.isBlank() || item.profile.length > MAX_SYNC_TEXT) {
+                return@mapNotNull null
+            }
+            val id = keyed(item.streamUrl, item.kind) ?: return@mapNotNull null
+            SyncPosition(
+                profile = item.profile,
+                mediaKey = id,
+                kind = item.kind,
+                positionMillis = item.positionMillis,
+                durationMillis = item.durationMillis,
+                updatedAtMillis = item.updatedAtMillis,
+            )
+        }
+        val recordings = legacy.recordings.mapNotNull { item ->
+            val relativePath = runCatching { SmbClient.relativePath(smbConfig, item.filePath) }
+                .getOrNull()?.takeIf(String::isNotBlank) ?: return@mapNotNull null
+            SyncRecording(
+                channelName = item.channelName.take(MAX_SYNC_TEXT),
+                title = item.title.take(MAX_SYNC_TEXT),
+                description = item.description?.take(MAX_SYNC_DESCRIPTION),
+                relativePath = relativePath,
+                scheduledStartMillis = item.scheduledStartMillis,
+                scheduledEndMillis = item.scheduledEndMillis,
+                startedAtMillis = item.startedAtMillis,
+                endedAtMillis = item.endedAtMillis,
+                sizeBytes = item.sizeBytes.coerceAtLeast(0),
+            )
+        }
+        return SyncBundle(
+            version = CURRENT_VERSION,
+            groupId = SyncPrivacy.groupId(key),
+            generatedAtMillis = legacy.generatedAtMillis.coerceAtLeast(0),
+            profiles = legacy.profiles.filter { it.length <= MAX_SYNC_TEXT }.distinct().take(MAX_PROFILES),
+            positions = positions,
+            favouriteChannels = legacy.favouriteChannels.mapNotNull { keyed(it, "channel") }.distinct(),
+            hiddenChannels = legacy.hiddenChannels.mapNotNull { keyed(it, "channel") }.distinct(),
+            favouriteMovies = legacy.favouriteMovies.mapNotNull { keyed(it, "movie") }.distinct(),
+            favouriteSeries = legacy.favouriteSeries.filter { it.isNotBlank() && it.length <= MAX_SYNC_TEXT }.distinct(),
+            hiddenCategories = legacy.hiddenCategories.filter { it.length <= MAX_SYNC_TEXT }.distinct(),
+            recordings = recordings,
+        ).also(::validateBundle)
+    }
+
+    /** Apply only a current v4 bundle whose group id matches its key (or this device's stored key). */
     suspend fun apply(bundle: SyncBundle): MergeResult {
-        // Profiles — add any the peer has that we're missing. Never remove (that would delete a
-        // local profile's watch history).
+        validateBundle(bundle)
+        val currentKey = SyncKeyStore.getOrCreate(graph.applicationContext)
+        val transferredKey = bundle.syncGroupKeyBase64.takeIf(String::isNotBlank)?.let { encoded ->
+            SyncKeyStore.decodeTransferKey(encoded)
+                ?: throw IllegalArgumentException("Sync-group key is invalid.")
+        }
+        val key = transferredKey ?: currentKey
+        require(bundle.groupId == SyncPrivacy.groupId(key)) {
+            "This NAS sync bundle belongs to another sync group. Pair the devices once over pinned HTTPS first."
+        }
+        // A transported key can only arrive from pinned HTTPS SyncClient or the encrypted backup.
+        // Adopt it after structural/group validation and before applying keyed identifiers.
+        if (transferredKey != null && !currentKey.contentEquals(transferredKey)) {
+            SyncKeyStore.replace(graph.applicationContext, transferredKey)
+        }
+
         for (name in bundle.profiles) {
             if (name.isNotBlank() && graph.profiles.byName(name) == null) {
                 runCatching { graph.profiles.insert(Profile(name = name, createdAtMillis = 0)) }
             }
         }
 
-        // Curation — additive union, keyed by stable identifiers. Count only genuinely new keys
-        // (ones we hadn't already curated) so the "Synced N" line means "new to this device".
-        val localFavChannels = graph.catalogRepository.favouriteChannelUrls().toHashSet()
-        val localHiddenChannels = graph.catalogRepository.hiddenChannelUrls().toHashSet()
-        val localFavMovies = graph.catalogRepository.favouriteMovieUrls().toHashSet()
+        val channelKeysNeeded = (bundle.favouriteChannels + bundle.hiddenChannels).toHashSet()
+        val channelUrlByKey = if (channelKeysNeeded.isEmpty()) emptyMap() else
+            graph.catalogRepository.allChannelStreamUrls().asSequence().filter(String::isNotBlank).distinct()
+                .associateBy { SyncPrivacy.mediaKey(key, "channel", it) }
+        val movieKeysNeeded = bundle.favouriteMovies.toHashSet()
+        val positionMovieKeys = bundle.positions.filter { it.kind == "movie" }.map { it.mediaKey }
+        val movieUrlByKey = if (movieKeysNeeded.isEmpty() && positionMovieKeys.isEmpty()) emptyMap() else
+            graph.catalogRepository.allMovieStreamUrls().asSequence().filter(String::isNotBlank).distinct()
+                .associateBy { SyncPrivacy.mediaKey(key, "movie", it) }
+        val positionEpisodeKeys = bundle.positions.filter { it.kind == "ep" }.map { it.mediaKey }
+        val episodeUrlByKey = if (positionEpisodeKeys.isEmpty()) emptyMap() else
+            graph.catalogRepository.allEpisodeStreamUrls().asSequence().filter(String::isNotBlank).distinct()
+                .associateBy { SyncPrivacy.mediaKey(key, "ep", it) }
+
+        val localFavChannels = graph.catalogRepository.favouriteChannelUrls()
+            .map { SyncPrivacy.mediaKey(key, "channel", it) }.toHashSet()
+        val localHiddenChannels = graph.catalogRepository.hiddenChannelUrls()
+            .map { SyncPrivacy.mediaKey(key, "channel", it) }.toHashSet()
+        val localFavMovies = graph.catalogRepository.favouriteMovieUrls()
+            .map { SyncPrivacy.mediaKey(key, "movie", it) }.toHashSet()
         val localFavSeries = graph.catalogRepository.favouriteSeriesIds().toHashSet()
 
         var favourites = 0
         var hidden = 0
-        for (url in bundle.favouriteChannels) {
+        for (remoteKey in bundle.favouriteChannels) {
+            val url = channelUrlByKey[remoteKey] ?: continue
             graph.catalogRepository.markChannelFavouriteByUrl(url)
-            if (localFavChannels.add(url)) favourites++
+            if (localFavChannels.add(remoteKey)) favourites++
         }
-        for (url in bundle.hiddenChannels) {
+        for (remoteKey in bundle.hiddenChannels) {
+            val url = channelUrlByKey[remoteKey] ?: continue
             graph.catalogRepository.markChannelHiddenByUrl(url)
-            if (localHiddenChannels.add(url)) hidden++
+            if (localHiddenChannels.add(remoteKey)) hidden++
         }
-        for (url in bundle.favouriteMovies) {
+        for (remoteKey in bundle.favouriteMovies) {
+            val url = movieUrlByKey[remoteKey] ?: continue
             graph.catalogRepository.markMovieFavouriteByUrl(url)
-            if (localFavMovies.add(url)) favourites++
+            if (localFavMovies.add(remoteKey)) favourites++
         }
         for (seriesId in bundle.favouriteSeries) {
             graph.catalogRepository.markSeriesFavouriteBySeriesId(seriesId)
             if (localFavSeries.add(seriesId)) favourites++
         }
         if (bundle.hiddenCategories.isNotEmpty()) {
-            graph.settings.setHiddenCategories(
-                graph.settings.hiddenCategories.value + bundle.hiddenCategories,
-            )
+            graph.settings.setHiddenCategories(graph.settings.hiddenCategories.value + bundle.hiddenCategories)
         }
 
-        // NAS recordings — insert any smb:// recording we don't already have, keyed by its locator.
-        // Never touch an existing row; a peer's copy and ours are the same file on the same NAS.
         var recordings = 0
+        val smbConfig = RecordingStorage.smbConfig(graph.settings)
         for (rec in bundle.recordings) {
-            if (!SmbClient.isSmb(rec.filePath)) continue
-            if (graph.recordingRepository.byFilePath(rec.filePath) != null) continue
+            val locator = runCatching { SmbClient.locatorForRelativePath(smbConfig, rec.relativePath) }
+                .getOrNull() ?: continue
+            if (!SmbClient.isValidLocator(smbConfig, locator)) continue
+            if (graph.recordingRepository.byFilePath(locator) != null) continue
             val inserted = runCatching {
                 graph.recordingRepository.insert(
                     Recording(
-                        // Ids from the source device mean nothing here; the row is self-contained.
                         channelId = 0,
                         sourceId = 0,
                         channelName = rec.channelName,
-                        logoUrl = rec.logoUrl,
+                        logoUrl = null,
                         title = rec.title,
                         description = rec.description,
-                        filePath = rec.filePath,
-                        streamUrl = rec.streamUrl,
-                        userAgent = rec.userAgent,
+                        filePath = locator,
+                        // A completed shared recording plays from its NAS file; the original
+                        // credential-bearing provider URL and User-Agent are not needed.
+                        streamUrl = "",
+                        userAgent = "",
                         scheduledStartMillis = rec.scheduledStartMillis,
                         scheduledEndMillis = rec.scheduledEndMillis,
                         startedAtMillis = rec.startedAtMillis,
                         endedAtMillis = rec.endedAtMillis,
                         status = RecordingStatus.COMPLETED,
-                        sizeBytes = rec.sizeBytes,
+                        sizeBytes = rec.sizeBytes.coerceAtLeast(0),
                     ),
                 )
             }.isSuccess
             if (inserted) recordings++
         }
 
-        // Watch positions — two-way, newest wins.
         var positions = 0
         for (item in bundle.positions) {
             val profileId = profileIdFor(item.profile) ?: continue
+            val url = when (item.kind) {
+                "movie" -> movieUrlByKey[item.mediaKey]
+                "ep" -> episodeUrlByKey[item.mediaKey]
+                else -> null
+            } ?: continue
             val localId = when (item.kind) {
-                "movie" -> graph.catalogRepository.movieByStreamUrl(item.streamUrl)?.id
-                "ep" -> graph.catalogRepository.episodeByStreamUrl(item.streamUrl)?.id
+                "movie" -> graph.catalogRepository.movieByStreamUrl(url)?.id
+                "ep" -> graph.catalogRepository.episodeByStreamUrl(url)?.id
                 else -> null
             } ?: continue
             val mediaKey = "${item.kind}:$localId"
@@ -202,16 +333,58 @@ class SyncEngine(private val graph: ServiceLocator.Graph) {
                 positions++
             }
         }
-        return MergeResult(
-            positions = positions,
-            favourites = favourites,
-            hidden = hidden,
-            recordings = recordings,
-        )
+
+        return MergeResult(positions, favourites, hidden, recordings)
     }
 
     private suspend fun profileIdFor(name: String): Long? {
         graph.profiles.byName(name)?.let { return it.id }
         return runCatching { graph.profiles.insert(Profile(name = name, createdAtMillis = 0)) }.getOrNull()
+    }
+
+    private fun validateBundle(bundle: SyncBundle) {
+        require(bundle.version == CURRENT_VERSION) {
+            "This sync bundle version is no longer accepted because it contains raw stream URLs."
+        }
+        require(bundle.groupId.matches(Regex("[0-9a-f]{24}"))) { "Sync bundle group id is invalid." }
+        require(bundle.syncGroupKeyBase64.length <= MAX_KEY_TEXT)
+        require(bundle.profiles.size <= MAX_PROFILES && bundle.positions.size <= MAX_POSITIONS)
+        require(bundle.favouriteChannels.size <= MAX_SYNC_IDENTIFIERS)
+        require(bundle.hiddenChannels.size <= MAX_SYNC_IDENTIFIERS)
+        require(bundle.favouriteMovies.size <= MAX_SYNC_IDENTIFIERS)
+        require(bundle.favouriteSeries.size <= MAX_SYNC_IDENTIFIERS)
+        require(bundle.hiddenCategories.size <= MAX_SYNC_IDENTIFIERS)
+        require(bundle.recordings.size <= MAX_RECORDINGS)
+        bundle.profiles.forEach { require(it.length <= MAX_SYNC_TEXT) }
+        bundle.positions.forEach {
+            require(it.profile.length <= MAX_SYNC_TEXT)
+            require(it.kind in MEDIA_KINDS)
+            require(it.mediaKey.matches(Regex("[0-9a-f]{64}")))
+            require(it.positionMillis >= 0 && it.durationMillis >= 0 && it.updatedAtMillis >= 0)
+        }
+        (bundle.favouriteChannels + bundle.hiddenChannels + bundle.favouriteMovies).forEach {
+            require(it.matches(Regex("[0-9a-f]{64}")))
+        }
+        bundle.recordings.forEach {
+            require(it.channelName.length <= MAX_SYNC_TEXT && it.title.length <= MAX_SYNC_TEXT)
+            require((it.description?.length ?: 0) <= MAX_SYNC_DESCRIPTION)
+            require(it.relativePath.length in 1..MAX_SYNC_PATH)
+            require(it.sizeBytes >= 0)
+        }
+    }
+
+    private companion object {
+        const val CURRENT_VERSION = 4
+        const val MAX_BUNDLE_BYTES = 8 * 1024 * 1024
+        const val MAX_KEY_TEXT = 128
+        const val MAX_PROFILES = 100
+        const val MAX_POSITIONS = 100_000
+        const val MAX_SYNC_IDENTIFIERS = 200_000
+        const val MAX_RECORDINGS = 10_000
+        const val MAX_SYNC_TEXT = 256
+        const val MAX_SYNC_DESCRIPTION = 4_096
+        const val MAX_SYNC_PATH = 1_024
+        const val MAX_LEGACY_URL = 8_192
+        val MEDIA_KINDS = setOf("movie", "ep")
     }
 }

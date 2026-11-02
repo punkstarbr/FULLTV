@@ -320,9 +320,9 @@
     <string name="onboarding_server_address">عنوان الخادم</string>
     <string name="onboarding_playlist_url">رابط قائمة التشغيل</string>
     <string name="onboarding_portal_url">رابط البوابة</string>
-    <string name="onboarding_server_help">على سبيل المثال http://example.com:8080 — يمكنك لصق السطر كاملًا من مزوّدك إن كان ذلك أسهل، وستتم إزالة الأجزاء الزائدة.</string>
+    <string name="onboarding_server_help">على سبيل المثال https://example.com:8080 — يمكنك لصق السطر كاملًا من مزوّدك إن كان ذلك أسهل، وستتم إزالة الأجزاء الزائدة.</string>
     <string name="onboarding_playlist_help">الرابط الكامل (http) لملف .m3u أو .m3u8 الخاص بك.</string>
-    <string name="onboarding_portal_help">عنوان البوابة من مزوّدك، مثل http://host:port/c/ — وستتم إزالة الأجزاء الزائدة.</string>
+    <string name="onboarding_portal_help">عنوان البوابة من مزوّدك، مثل https://host:port/c/ — وستتم إزالة الأجزاء الزائدة.</string>
     <string name="onboarding_mac_address">عنوان MAC</string>
     <string name="onboarding_mac_help">عنوان MAC الذي ربطه مزوّدك بخطك، مثل 00:1A:79:xx:xx:xx.</string>
     <string name="onboarding_hide_advanced">إخفاء الخيارات المتقدمة</string>

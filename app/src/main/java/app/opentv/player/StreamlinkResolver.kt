@@ -53,7 +53,7 @@ class StreamlinkResolver(context: Context) {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                Log.w(TAG, "Streamlink could not resolve the YouTube live stream", error)
+                Log.w(TAG, "Streamlink could not resolve the YouTube live stream (${error.javaClass.simpleName})")
                 throw error
             }
         }

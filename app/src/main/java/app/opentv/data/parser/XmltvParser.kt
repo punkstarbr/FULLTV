@@ -8,9 +8,11 @@ package app.opentv.data.parser
 import android.util.Xml
 import app.opentv.data.model.Programme
 import java.io.InputStream
+import java.net.URI
 import java.util.Calendar
 import java.util.TimeZone
 import org.xmlpull.v1.XmlPullParser
+import org.xmlpull.v1.XmlPullParserException
 
 /**
  * Streaming XMLTV guide parser.
@@ -63,17 +65,22 @@ object XmltvParser {
 
         val parser = Xml.newPullParser()
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
-        parser.setInput(input, null)
+        parser.setFeature(XmlPullParser.FEATURE_PROCESS_DOCDECL, false)
+        parser.setInput(BoundedInputStream(input, MAX_XML_BYTES, "XMLTV guide"), null)
 
         var event = parser.eventType
         while (event != XmlPullParser.END_DOCUMENT) {
+            if (event == XmlPullParser.DOCDECL) {
+                throw XmlPullParserException("DOCTYPE is not supported in XMLTV guides.")
+            }
             if (event == XmlPullParser.START_TAG) {
                 when (parser.name) {
                     "channel" -> {
                         val id = parser.getAttributeValue(null, "id")
                         val displayName = readChannelDisplayName(parser)
-                        if (!id.isNullOrBlank()) {
+                        if (!id.isNullOrBlank() && id.length <= MAX_ID_CHARS) {
                             channelCount++
+                            if (channelCount > MAX_CHANNELS) throw XmlPullParserException("XMLTV has too many channels.")
                             onChannelAlias(id, displayName)
                         }
                     }
@@ -82,6 +89,9 @@ object XmltvParser {
                         val programme = readProgramme(parser, feedId)
                         if (programme != null) {
                             programmeCount++
+                            if (programmeCount > MAX_PROGRAMMES) {
+                                throw XmlPullParserException("XMLTV has too many programmes.")
+                            }
                             onProgramme(programme)
                         } else {
                             skipped++
@@ -100,11 +110,12 @@ object XmltvParser {
         var depth = 1
         while (depth > 0) {
             when (parser.next()) {
-                XmlPullParser.START_TAG -> {
-                    depth++
-                    if (parser.name == "display-name" && displayName == null) {
-                        displayName = parser.nextText().trim().takeIf { it.isNotEmpty() }
-                        depth--
+                    XmlPullParser.START_TAG -> {
+                        depth++
+                        if (parser.name == "display-name" && displayName == null) {
+                            displayName = readBoundedText(parser, MAX_DISPLAY_NAME_CHARS)
+                                .trim().takeIf { it.isNotEmpty() }
+                            depth--
                     }
                 }
                 XmlPullParser.END_TAG -> depth--
@@ -133,20 +144,22 @@ object XmltvParser {
                     depth++
                     when (parser.name) {
                         "title" -> {
-                            if (title == null) { title = parser.nextText().trim(); depth-- }
+                            if (title == null) { title = readBoundedText(parser, MAX_TITLE_CHARS).trim(); depth-- }
                         }
                         "desc" -> {
-                            if (description == null) { description = parser.nextText().trim(); depth-- }
+                            if (description == null) { description = readBoundedText(parser, MAX_DESCRIPTION_CHARS).trim(); depth-- }
                         }
                         "category" -> {
-                            if (category == null) { category = parser.nextText().trim(); depth-- }
+                            if (category == null) { category = readBoundedText(parser, MAX_CATEGORY_CHARS).trim(); depth-- }
                         }
                         "icon" -> {
-                            if (iconUrl == null) iconUrl = parser.getAttributeValue(null, "src")
+                            if (iconUrl == null) {
+                                iconUrl = parser.getAttributeValue(null, "src")?.takeIf(::isSafeHttpsUrl)
+                            }
                         }
                         "episode-num" -> {
                             val system = parser.getAttributeValue(null, "system")
-                            val value = parser.nextText().trim()
+                            val value = readBoundedText(parser, MAX_EPISODE_NUM_CHARS).trim()
                             depth--
                             if (system == "xmltv_ns") {
                                 val parts = value.split('.')
@@ -165,9 +178,9 @@ object XmltvParser {
         }
 
         // A programme with no channel, no start, or a nonsensical span is not recoverable.
-        if (channelId.isNullOrBlank() || start == null) return null
+        if (channelId.isNullOrBlank() || channelId.length > MAX_ID_CHARS || start == null) return null
         val end = stop ?: (start + DEFAULT_DURATION_MILLIS)
-        if (end <= start) return null
+        if (end <= start || end - start > MAX_PROGRAMME_SPAN_MILLIS) return null
 
         return Programme(
             feedId = feedId,
@@ -193,6 +206,7 @@ object XmltvParser {
      */
     fun parseXmltvTime(raw: String?): Long? {
         if (raw.isNullOrBlank()) return null
+        if (raw.length > MAX_TIMESTAMP_CHARS) return null
         val trimmed = raw.trim()
 
         val digits = trimmed.takeWhile { it.isDigit() }
@@ -222,6 +236,42 @@ object XmltvParser {
     private fun String.segmentOrZero(from: Int): Int =
         if (length >= from + 2) substring(from, from + 2).toIntOrNull() ?: 0 else 0
 
+    /** Reads nested text without nextText()'s unbounded String allocation. */
+    private fun readBoundedText(parser: XmlPullParser, maxChars: Int): String {
+        val text = StringBuilder()
+        var nestedDepth = 0
+        while (true) {
+            when (parser.next()) {
+                XmlPullParser.START_TAG -> {
+                    nestedDepth++
+                    if (nestedDepth > MAX_TEXT_NESTING) {
+                        throw XmlPullParserException("XMLTV text nesting exceeds the safety limit.")
+                    }
+                }
+                XmlPullParser.END_TAG -> {
+                    if (nestedDepth == 0) return text.toString()
+                    nestedDepth--
+                }
+                XmlPullParser.TEXT, XmlPullParser.CDSECT, XmlPullParser.ENTITY_REF -> {
+                    val value = parser.text.orEmpty()
+                    if (text.length + value.length > maxChars) {
+                        throw XmlPullParserException("XMLTV text field exceeds the safety limit.")
+                    }
+                    text.append(value)
+                }
+                XmlPullParser.DOCDECL -> throw XmlPullParserException("DOCTYPE is not supported in XMLTV guides.")
+                XmlPullParser.END_DOCUMENT -> return text.toString()
+            }
+        }
+    }
+
+    private fun isSafeHttpsUrl(raw: String): Boolean {
+        if (raw.length !in 9..MAX_ICON_URL_CHARS) return false
+        val uri = runCatching { URI(raw) }.getOrNull() ?: return false
+        return uri.scheme.equals("https", true) && !uri.host.isNullOrBlank() &&
+            uri.rawUserInfo == null && uri.rawFragment == null
+    }
+
     /** `+0100` / `-0530` / `+01:00` / `UTC` / `Z` / empty. Returns minutes east of UTC. */
     private fun parseOffset(raw: String): Int? {
         if (raw.isEmpty()) return null
@@ -241,4 +291,17 @@ object XmltvParser {
 
     private const val DEFAULT_DURATION_MILLIS = 30 * 60 * 1000L
     private const val UNTITLED = "No information"
+    private const val MAX_XML_BYTES = 256L * 1024 * 1024
+    private const val MAX_CHANNELS = 100_000
+    private const val MAX_PROGRAMMES = 2_000_000
+    private const val MAX_ID_CHARS = 512
+    private const val MAX_DISPLAY_NAME_CHARS = 512
+    private const val MAX_TITLE_CHARS = 2_048
+    private const val MAX_DESCRIPTION_CHARS = 16 * 1024
+    private const val MAX_CATEGORY_CHARS = 512
+    private const val MAX_EPISODE_NUM_CHARS = 128
+    private const val MAX_ICON_URL_CHARS = 2_048
+    private const val MAX_TIMESTAMP_CHARS = 64
+    private const val MAX_TEXT_NESTING = 16
+    private const val MAX_PROGRAMME_SPAN_MILLIS = 7L * 24 * 60 * 60 * 1000
 }
