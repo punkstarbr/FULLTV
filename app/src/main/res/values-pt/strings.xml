@@ -385,7 +385,8 @@
     <string name="webmanager_title">Gerir no seu telemóvel ou portátil</string>
     <string name="webmanager_desc">Abra isto num telemóvel ou portátil na mesma wifi para navegar, ocultar, marcar como favoritos, mudar o nome e reordenar os seus canais — com um teclado e rato reais. As alterações aplicam-se de imediato a esta TV.</string>
     <string name="webmanager_qr_desc">Código QR que remete para o gestor de canais neste dispositivo</string>
-    <string name="webmanager_open_browser">A câmara não consegue ler? Abra isto em qualquer navegador na mesma wifi:</string>
+    <string name="webmanager_open_browser">Se não conseguir ler o código QR, digite o endereço completo abaixo num navegador ligado à mesma rede Wi-Fi. Use HTTP, não HTTPS, inclua o token e mantenha esta tela aberta. Junte as linhas do token sem espaços.</string>
+    <string name="webmanager_token_label">Token de acesso (junte as linhas sem espaços):</string>
     <string name="webmanager_local_only">Esta página é servida por esta televisão, na sua própria rede — nunca sai de casa.</string>
     <string name="webmanager_stopped">Gestor fechado</string>
     <string name="channels_manager_title">Gestor de canais</string>

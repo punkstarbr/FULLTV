@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.21
+
+- **Web manager:** show the manual HTTP address and required access token in readable groups, and
+  explain that token lines must be joined without spaces. Clarify that the same-LAN URL uses HTTP,
+  not HTTPS, and improve the Brazilian Portuguese wording.
+
 ## 0.11.20
 
 - **Startup stability:** defer full VOD shelf scans until Movies/Shows is opened, skip heavy VOD

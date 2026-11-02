@@ -516,7 +516,8 @@
     <string name="webmanager_title">Manage on your phone or laptop</string>
     <string name="webmanager_desc">Open this on a phone or laptop on the same wifi to browse, hide, favourite, rename and reorder your channels — with a real keyboard and mouse. Changes apply to this TV straight away.</string>
     <string name="webmanager_qr_desc">QR code linking to the channel manager on this device</string>
-    <string name="webmanager_open_browser">Camera won\'t scan it? Open this in any browser on the same wifi:</string>
+    <string name="webmanager_open_browser">If you cannot scan the QR code, type the complete address below in a browser on the same Wi-Fi. Use HTTP, not HTTPS, include the token, and keep this screen open. Join the token lines without spaces.</string>
+    <string name="webmanager_token_label">Access token (join the lines without spaces):</string>
     <string name="webmanager_local_only">This page is served by this television, over your own network — it never leaves your home.</string>
     <string name="webmanager_stopped">Manager closed</string>
 

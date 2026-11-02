@@ -12,11 +12,14 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -34,6 +37,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -99,6 +103,16 @@ fun WebManagerScreen(
 private fun Listening(session: ManagerServer.Session, onBack: () -> Unit) {
     // Generated once per session — encoding is not free and the content does not change.
     val qr = remember(session.url) { QrCodes.render(session.url, QR_SIZE_PX) }
+    val (manualPrefix, token) = remember(session.url) {
+        val marker = "?t="
+        val markerIndex = session.url.indexOf(marker)
+        if (markerIndex >= 0) {
+            session.url.substring(0, markerIndex + marker.length) to
+                session.url.substring(markerIndex + marker.length)
+        } else {
+            session.url to ""
+        }
+    }
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -116,7 +130,12 @@ private fun Listening(session: ManagerServer.Session, onBack: () -> Unit) {
             )
         }
 
-        Column(Modifier.widthIn(max = 520.dp)) {
+        Column(
+            Modifier
+                .widthIn(max = 520.dp)
+                .fillMaxHeight()
+                .verticalScroll(rememberScrollState()),
+        ) {
             Text(stringResource(R.string.webmanager_title), style = MaterialTheme.typography.displaySmall)
             Spacer(Modifier.height(12.dp))
             Text(
@@ -132,9 +151,21 @@ private fun Listening(session: ManagerServer.Session, onBack: () -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(4.dp))
-            // The FULL url, token and all — this is the address that actually works when typed. The
-            // bare host:port would 404, because every route on the server requires the token.
-            Text(session.url, style = MaterialTheme.typography.titleLarge)
+            // Keep the required token visibly separate from the short IP:port address. The token
+            // is split into lines only for display; joining them without spaces reconstructs URL.
+            Text(
+                manualPrefix,
+                style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
+            )
+            Text(
+                stringResource(R.string.webmanager_token_label),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                token.chunked(12).joinToString("\n"),
+                style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
+            )
 
             Spacer(Modifier.height(20.dp))
             Text(
