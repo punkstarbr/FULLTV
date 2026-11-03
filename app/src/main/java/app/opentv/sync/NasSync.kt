@@ -74,26 +74,21 @@ class NasSync(private val graph: ServiceLocator.Graph) {
                     SmbClient.readText(config, locatorFor(config, name), MAX_SYNC_BUNDLE_BYTES)
                 }
                     .getOrNull() ?: continue
-                val decoded = runCatching { engine.decode(text) }.getOrNull()
-                val legacy = decoded == null
-                val bundle = decoded ?: runCatching { engine.migrateLegacyV3(text, config) }.getOrNull()
-                    ?: continue
-                // NAS is only a rendezvous. A secret may be introduced on this device only by a
-                // PIN-and-SPKI-pinned LAN transfer or an encrypted user backup, never by NAS JSON.
-                if (!legacy && bundle.syncGroupKeyBase64.isNotEmpty()) {
+                // NAS is only a rendezvous. v3/v4 files are not trusted and are deliberately not
+                // migrated here; raw URLs and unauthenticated v4 JSON require an explicit pinned
+                // TLS or encrypted-backup migration. A secret may never arrive through NAS JSON.
+                val bundle = runCatching { engine.decode(text) }.getOrNull() ?: continue
+                if (bundle.syncGroupKeyBase64.isNotEmpty()) {
                     needsPairing = true
                     continue
                 }
-                if (!legacy && bundle.groupId != localGroupId) {
+                if (bundle.groupId != localGroupId) {
                     needsPairing = true
                     continue
                 }
-                merged += engine.apply(bundle)
-                if (legacy) {
-                    // Replace the old raw-URL file only after a successful merge. The new JSON is
-                    // HMAC-only and intentionally contains no NAS host, provider URL or User-Agent.
-                    SmbClient.writeText(config, locatorFor(config, name), engine.encode(bundle))
-                }
+                val applied = runCatching { engine.apply(bundle, allowKeyTransfer = false) }
+                    .getOrNull() ?: continue
+                merged += applied
                 peers++
             }
             Result.Success(merged.total, peers, needsPairing)

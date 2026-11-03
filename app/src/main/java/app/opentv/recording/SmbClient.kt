@@ -45,13 +45,24 @@ class SmbWriteHandle(
     val locator: String,
 ) : Closeable {
     override fun close() {
-        runCatching { output.flush() }
-        runCatching { output.close() }
-        runCatching { file.close() }
-        runCatching { share.close() }
-        runCatching { session.close() }
-        runCatching { connection.close() }
-        runCatching { client.close() }
+        var failure: Throwable? = null
+        fun closeStep(block: () -> Unit) {
+            runCatching(block).onFailure { closeError ->
+                val earlier = failure
+                if (earlier == null) failure = closeError else earlier.addSuppressed(closeError)
+            }
+        }
+        closeStep { output.flush() }
+        closeStep { output.close() }
+        closeStep { file.close() }
+        closeStep { share.close() }
+        closeStep { session.close() }
+        closeStep { connection.close() }
+        closeStep { client.close() }
+        failure?.let { error ->
+            if (error is IOException) throw error
+            throw IOException("SMB recording destination could not be closed.", error)
+        }
     }
 }
 
@@ -112,10 +123,33 @@ object SmbClient {
         validateConfig(config)
         val client = SMBClient(smbjConfig)
         val connection = client.connect(config.host)
-        val auth = AuthenticationContext(config.username, config.password.toCharArray(), null)
-        val session = connection.authenticate(auth)
-        val share = session.connectShare(config.share) as DiskShare
-        return Quad(client, connection, session, share)
+        var session: Session? = null
+        var share: DiskShare? = null
+        try {
+            val auth = AuthenticationContext(config.username, config.password.toCharArray(), null)
+            val authenticated = connection.authenticate(auth)
+            session = authenticated
+            // withEncryptData(true) only advertises a requirement to SMBJ. The server can still
+            // authenticate a signing-only session, so verify the negotiated state before opening
+            // the share and fail closed instead of silently downgrading recording/playback.
+            requireEncryptedSession { authenticated.shouldEncryptData() }
+            val connectedShare = authenticated.connectShare(config.share) as DiskShare
+            share = connectedShare
+            return Quad(client, connection, authenticated, connectedShare)
+        } catch (t: Throwable) {
+            runCatching { share?.close() }
+            runCatching { session?.close() }
+            runCatching { connection.close() }
+            runCatching { client.close() }
+            throw t
+        }
+    }
+
+    /** Testable fail-closed boundary for a session that negotiated signing but not encryption. */
+    internal fun requireEncryptedSession(negotiated: () -> Boolean) {
+        if (!negotiated()) {
+            throw IOException("SMB session encryption was not negotiated; refusing a signing-only session.")
+        }
     }
 
     private class Quad(
@@ -219,17 +253,30 @@ object SmbClient {
         }
     }
 
-    /** Delete a recording from the NAS. */
-    fun delete(config: SmbConfig, locator: String) {
+    /** Delete a recording from the NAS and verify that the server no longer exposes the file. */
+    fun delete(config: SmbConfig, locator: String): Boolean {
         val parsed = validateLocator(config, locator)
         val q = connect(config)
         try {
-            runCatching { q.share.rm(parsed.path.replace('/', '\\')) }
+            val path = parsed.path.replace('/', '\\')
+            if (!q.share.fileExists(path)) return false
+            q.share.rm(path)
+            return !q.share.fileExists(path)
         } finally {
             runCatching { q.share.close() }
             runCatching { q.session.close() }
             runCatching { q.connection.close() }
             runCatching { q.client.close() }
+        }
+    }
+
+    /** Return the server-reported byte length of an SMB recording. */
+    fun sizeOf(config: SmbConfig, locator: String): Long {
+        val handle = openForRead(config, locator)
+        return try {
+            handle.length
+        } finally {
+            handle.close()
         }
     }
 

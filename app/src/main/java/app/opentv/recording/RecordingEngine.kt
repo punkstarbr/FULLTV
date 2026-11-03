@@ -80,6 +80,29 @@ class RecordingEngine(
     /** Stop an in-progress recording. */
     fun stop(recordingId: Long) = RecordingService.stop(appContext, recordingId)
 
+    /** Result of deleting both the physical recording and its database row. */
+    data class DeleteResult(val deleted: Boolean, val error: String? = null)
+
+    /**
+     * Delete a recording without racing its writer. The service joins an in-process capture first;
+     * then reload the row because a SAF capture may have replaced its placeholder with content://.
+     * A false/throwing physical delete preserves the row so the user can retry and see the error.
+     */
+    suspend fun delete(recordingId: Long): DeleteResult {
+        RecordingService.stopAndJoin(appContext, recordingId)
+        val recording = repo.byId(recordingId) ?: return DeleteResult(deleted = true)
+        return try {
+            if (!RecordingStorage.delete(appContext, settings, recording.filePath)) {
+                DeleteResult(false, "The recording file could not be deleted.")
+            } else {
+                repo.delete(recordingId)
+                DeleteResult(deleted = true)
+            }
+        } catch (t: Throwable) {
+            DeleteResult(false, t.message ?: "The recording file could not be deleted.")
+        }
+    }
+
     /**
      * Record a specific programme: if it's already on, start capturing now (bounded to its end);
      * if it's in the future, book an exact alarm to start it at broadcast time.

@@ -1,8 +1,8 @@
-"""Harden the lxml parser entry points used by optional Python dependencies.
+"""Harden the lxml parser entry points used by the bundled Streamlink resolver.
 
-The bundled Chaquopy index currently supplies lxml 5.3.0, whose iterparse and
-ETCompatXMLParser defaults were later fixed upstream in lxml 6.1.0. Keep the
-application boundary safe until an Android wheel with the upstream fix exists.
+Streamlink 8.6.3 directly requires lxml. The bundled Chaquopy index currently supplies
+lxml 5.3.0, whose iterparse and ETCompatXMLParser defaults were later fixed upstream in
+lxml 6.1.0. Keep the application boundary safe until a corrected Android wheel exists.
 """
 
 from functools import wraps

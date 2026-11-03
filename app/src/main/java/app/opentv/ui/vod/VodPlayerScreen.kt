@@ -132,6 +132,7 @@ fun VodPlayerScreen(
         PlayerController(
             context, scope, graph.streamingHttpClient, subtitlesEnabled = false,
             smbDataSourceFactory = app.opentv.player.SmbDataSource.Factory(graph.settings),
+            ftpDataSourceFactory = app.opentv.player.FtpDataSource.Factory(graph.settings),
             // Lets an `optvrec://<id>` recording play while it's still being written.
             growingDataSourceFactory =
                 app.opentv.player.GrowingRecordingDataSource.Factory(context.applicationContext),

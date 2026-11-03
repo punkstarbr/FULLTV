@@ -75,6 +75,8 @@ class PlayerController(
      * seeks in-app. Null for the live/VOD players, which never see an smb URI.
      */
     smbDataSourceFactory: androidx.media3.datasource.DataSource.Factory? = null,
+    /** Explicit FTP reader for completed recordings only; null for Live TV and general VOD routes. */
+    ftpDataSourceFactory: androidx.media3.datasource.DataSource.Factory? = null,
     /**
      * When set, `optvrec://<id>` media (a recording still being written) is read through this
      * tail-following source so it can be watched while it records. Null everywhere except the
@@ -92,6 +94,7 @@ class PlayerController(
 
     private val appContext = context.applicationContext
     private val allowsSmb = smbDataSourceFactory != null
+    private val allowsFtp = ftpDataSourceFactory != null
     private val allowsGrowingRecordings = growingDataSourceFactory != null
 
     /** Channel-surf debounce for this controller — longer for the preview so browsing is calm. */
@@ -145,6 +148,7 @@ class PlayerController(
         DefaultDataSource.Factory(context, httpFactory).let { default ->
             val custom = buildMap<String, androidx.media3.datasource.DataSource.Factory> {
                 if (smbDataSourceFactory != null) put("smb", smbDataSourceFactory)
+                if (ftpDataSourceFactory != null) put("ftp", ftpDataSourceFactory)
                 if (growingDataSourceFactory != null) put("optvrec", growingDataSourceFactory)
             }
             if (custom.isEmpty()) default else RoutingDataSourceFactory(default, custom)
@@ -341,6 +345,7 @@ class PlayerController(
         return when (uri.scheme?.lowercase()) {
             "https" -> !uri.host.isNullOrBlank()
             "smb" -> allowsSmb && !uri.host.isNullOrBlank()
+            "ftp" -> allowsFtp && !uri.host.isNullOrBlank()
             "optvrec" -> allowsGrowingRecordings && !uri.host.isNullOrBlank()
             "content" -> isPersistedReadableContentUri(uri)
             "file", null -> isPrivateRecordingPath(uri.path ?: raw)

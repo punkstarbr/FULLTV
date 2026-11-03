@@ -114,7 +114,7 @@ class XtreamApi(
                 streamId = streamId,
                 name = name,
                 categoryId = obj["category_id"].asStringOrNull,
-                logoUrl = obj["stream_icon"].asStringOrNull?.takeIf { it.isNotBlank() },
+                logoUrl = obj["stream_icon"].asStringOrNull?.let { safeAssetUrl(source, it) },
                 // epg_channel_id is what joins to XMLTV; it is frequently blank, in which
                 // case the channel simply has no guide rather than the guide being broken.
                 epgChannelId = obj["epg_channel_id"].asStringOrNull?.takeIf { it.isNotBlank() },
@@ -138,7 +138,7 @@ class XtreamApi(
                 streamId = streamId,
                 name = name,
                 categoryId = obj["category_id"].asStringOrNull,
-                posterUrl = obj["stream_icon"].asStringOrNull?.takeIf { it.isNotBlank() },
+                posterUrl = obj["stream_icon"].asStringOrNull?.let { safeAssetUrl(source, it) },
                 rating = obj["rating"].asDoubleOrNull,
                 year = obj["year"].asIntOrNull,
                 plot = obj["plot"].asStringOrNull,
@@ -149,7 +149,8 @@ class XtreamApi(
                 // Rich metadata is best-effort here: the streams list carries it on some panels
                 // and not others. Whatever is missing is back-filled from get_vod_info on the
                 // first detail open. See asBackdropUrl for the array-or-string handling.
-                backdropUrl = obj.asBackdropUrl("movie_image", "cover_big"),
+                backdropUrl = obj.asBackdropUrl("movie_image", "cover_big")
+                    ?.let { safeAssetUrl(source, it) },
                 cast = obj["cast"].asStringOrNull ?: obj["actors"].asStringOrNull,
                 director = obj["director"].asStringOrNull,
                 genre = obj["genre"].asStringOrNull,
@@ -168,14 +169,15 @@ class XtreamApi(
                 seriesId = seriesId,
                 name = name,
                 categoryId = obj["category_id"].asStringOrNull,
-                posterUrl = obj["cover"].asStringOrNull?.takeIf { it.isNotBlank() },
+                posterUrl = obj["cover"].asStringOrNull?.let { safeAssetUrl(source, it) },
                 rating = obj["rating"].asDoubleOrNull,
                 year = obj["year"].asIntOrNull ?: obj["releaseDate"].asStringOrNull?.take(4)?.toIntOrNull(),
                 plot = obj["plot"].asStringOrNull,
                 addedMillis = obj["last_modified"].asLongOrNull?.times(1000) ?: 0L,
                 // get_series carries most of this inline on the majority of panels; anything
                 // missing is back-filled from get_series_info on the first detail open.
-                backdropUrl = obj.asBackdropUrl("cover_big", "cover"),
+                backdropUrl = obj.asBackdropUrl("cover_big", "cover")
+                    ?.let { safeAssetUrl(source, it) },
                 cast = obj["cast"].asStringOrNull ?: obj["actors"].asStringOrNull,
                 genre = obj["genre"].asStringOrNull,
                 tmdbId = obj["tmdb_id"].asStringOrNull ?: obj["tmdb"].asStringOrNull,
@@ -222,7 +224,8 @@ class XtreamApi(
                         title = obj["title"].asStringOrNull ?: "Episode",
                         plot = info?.get("plot").asStringOrNull,
                         durationSeconds = info?.get("duration_secs").asIntOrNull,
-                        stillUrl = info?.get("movie_image").asStringOrNull?.takeIf { it.isNotBlank() },
+                        stillUrl = info?.get("movie_image").asStringOrNull
+                            ?.let { safeAssetUrl(source, it) },
                         streamUrl = seriesStreamUrl(source, episodeId, extension),
                     )
                 }
@@ -243,7 +246,8 @@ class XtreamApi(
         }.getOrNull() ?: return@withContext null
         val info = body.jsonObjectOrNull?.get("info").jsonObjectOrNull ?: return@withContext null
         VodInfo(
-            backdropUrl = info.asBackdropUrl("movie_image", "cover_big"),
+            backdropUrl = info.asBackdropUrl("movie_image", "cover_big")
+                ?.let { safeAssetUrl(source, it) },
             cast = info["cast"].asStringOrNull ?: info["actors"].asStringOrNull,
             director = info["director"].asStringOrNull,
             genre = info["genre"].asStringOrNull,
@@ -267,7 +271,8 @@ class XtreamApi(
         }.getOrNull() ?: return@withContext null
         val info = body.jsonObjectOrNull?.get("info").jsonObjectOrNull ?: return@withContext null
         SeriesInfo(
-            backdropUrl = info.asBackdropUrl("cover_big", "cover"),
+            backdropUrl = info.asBackdropUrl("cover_big", "cover")
+                ?.let { safeAssetUrl(source, it) },
             cast = info["cast"].asStringOrNull ?: info["actors"].asStringOrNull,
             genre = info["genre"].asStringOrNull,
             tmdbId = info["tmdb_id"].asStringOrNull ?: info["tmdb"].asStringOrNull,
@@ -331,6 +336,15 @@ class XtreamApi(
             ?: throw XtreamException("The provider URL is invalid.")
     }
 
+    /** Provider-supplied artwork may be remote, but private artwork is only valid on this source. */
+    private fun safeAssetUrl(source: Source, raw: String): String? {
+        val value = raw.trim().takeIf { it.length <= MAX_ASSET_URL_CHARS && it.isNotBlank() }
+            ?: return null
+        return value.takeIf {
+            NetworkDestinationPolicy.isAllowedHttps(it, trustedOriginUrl = source.url)
+        }
+    }
+
     // ---- Plumbing ------------------------------------------------------------------------
 
     private fun getJson(
@@ -370,7 +384,9 @@ class XtreamApi(
         if (!initialUrl.isHttps) throw HttpsRequiredException()
         var target = initialUrl
         repeat(MAX_REDIRECTS + 1) { hop ->
-            val response = noCrossOriginRedirects.newCall(request(source, target)).execute()
+            val response = noCrossOriginRedirects.newCall(
+                request(source, target, initialUrl.toString()),
+            ).execute()
             if (!response.isRedirect) return response
             if (hop >= MAX_REDIRECTS) {
                 response.close()
@@ -378,8 +394,9 @@ class XtreamApi(
             }
             val location = response.header("Location")
             val redirected = location?.let(target::resolve)
-            if (redirected == null || !redirected.isHttps || redirected.host != initialUrl.host ||
-                redirected.port != initialUrl.port
+            if (redirected == null || !redirected.isHttps ||
+                NetworkDestinationPolicy.originOf(redirected.toString()) !=
+                    NetworkDestinationPolicy.originOf(initialUrl.toString())
             ) {
                 response.close()
                 throw XtreamException("The provider redirected outside its HTTPS origin; request blocked.")
@@ -390,11 +407,15 @@ class XtreamApi(
         throw XtreamException("The provider redirected too many times.")
     }
 
-    private fun request(source: Source, url: HttpUrl): Request =
-        Request.Builder()
+    private fun request(source: Source, url: HttpUrl, trustedOriginUrl: String): Request {
+        val scope = NetworkDestinationPolicy.scopeFor(url.toString(), trustedOriginUrl)
+            ?: throw HttpsRequiredException()
+        return Request.Builder()
             .url(url)
             .header("User-Agent", source.userAgent.take(MAX_USER_AGENT_CHARS))
+            .tag(NetworkDestinationPolicy.RequestScope::class.java, scope)
             .build()
+    }
 
     private fun describeHttpFailure(code: Int): String = when (code) {
         401, 403 -> "The server refused the request (HTTP $code). The username or password " +
@@ -449,6 +470,7 @@ class XtreamApi(
         const val MAX_JSON_BYTES = 64L * 1024 * 1024
         const val MAX_REDIRECTS = 3
         const val MAX_USER_AGENT_CHARS = 1_024
+        const val MAX_ASSET_URL_CHARS = 8_192
     }
 }
 

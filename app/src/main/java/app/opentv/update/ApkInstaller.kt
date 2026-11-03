@@ -5,6 +5,7 @@
  */
 package app.opentv.update
 
+import app.opentv.BuildConfig
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageInfo
@@ -137,7 +138,14 @@ class ApkInstaller(private val http: OkHttpClient) {
         }
         val currentSigners = signerDigests(installed)
         val candidateSigners = signerDigests(candidate)
-        require(currentSigners.isNotEmpty() && candidateSigners == currentSigners) {
+        require(
+            signingCertificatesMatch(
+                installed = currentSigners,
+                candidate = candidateSigners,
+                expectedReleaseSigner = BuildConfig.RELEASE_SIGNING_CERT_SHA256,
+                debugBuild = BuildConfig.DEBUG,
+            )
+        ) {
             "Update signing certificate does not match this FullTV installation."
         }
     }
@@ -193,8 +201,21 @@ class ApkInstaller(private val http: OkHttpClient) {
 
     private fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
-    private companion object {
+    internal companion object {
         const val MAX_APK_BYTES = 512L * 1024 * 1024
         val SHA256_HEX = Regex("[0-9a-f]{64}")
+
+        /** Release updates may not inherit an Android debug certificate as their trust anchor. */
+        fun signingCertificatesMatch(
+            installed: Set<String>,
+            candidate: Set<String>,
+            expectedReleaseSigner: String,
+            debugBuild: Boolean,
+        ): Boolean {
+            if (debugBuild) return installed.isNotEmpty() && candidate == installed
+            return expectedReleaseSigner.matches(SHA256_HEX) &&
+                installed == setOf(expectedReleaseSigner) &&
+                candidate == installed
+        }
     }
 }

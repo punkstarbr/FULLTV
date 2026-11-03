@@ -96,7 +96,7 @@ abstract class OpenTvDatabase : RoomDatabase() {
          * v2 → v3: profiles. Adds the profiles table with a default profile (id 1, "Me"), and
          * re-keys resume positions by (profileId, mediaKey) — existing positions all become the
          * default profile's, so nobody loses their place. Written to match Room's own DDL so the
-         * identity check passes; the destructive fallback below is only a backstop.
+         * identity check passes.
          */
         private val MIGRATION_2_3 = object : Migration(2, 3) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -289,14 +289,8 @@ abstract class OpenTvDatabase : RoomDatabase() {
                     MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
                     MIGRATION_11_12,
                 )
-                /*
-                 * Pre-1.0 policy: schema changes drop and rebuild the database. Everything
-                 * in it is re-derivable from the provider (one sync away) except favourites
-                 * and overrides, which is a real but small loss for testers. The policy
-                 * flips to real migrations at the first tagged release — from then on,
-                 * every schema change ships a Migration and this line is deleted.
-                 */
-                .fallbackToDestructiveMigration()
+                // Deliberately omit fallbackToDestructiveMigration: an unknown upgrade path must
+                // fail visibly rather than erase profiles, favourites, recordings, and history.
                 .build()
     }
 }

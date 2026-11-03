@@ -101,7 +101,8 @@ class StalkerApi(
                 streamId = id,
                 name = name,
                 categoryId = o.str("tv_genre_id"),
-                logoUrl = o.str("logo")?.takeIf { it.isNotBlank() }?.let { absoluteLogo(s.endpoint, it) },
+                logoUrl = o.str("logo")?.takeIf { it.isNotBlank() }
+                    ?.let { absoluteLogo(s.endpoint, it, source.url) },
                 epgChannelId = o.str("xmltv_id")?.takeIf { it.isNotBlank() },
                 number = number,
                 // Never played directly — a marker so nothing mistakes it for a real URL; [cmd] is
@@ -287,6 +288,10 @@ class StalkerApi(
                     .header("Referer", "${target.scheme}://${target.host}:${target.port}/c/")
                     .header("Cookie", cookie)
                     .apply { if (token != null) header("Authorization", "Bearer $token") }
+                    .tag(
+                        NetworkDestinationPolicy.RequestScope::class.java,
+                        NetworkDestinationPolicy.scopeFor(url.toString(), source.url),
+                    )
                     .build()
                 noRedirectHttp.newCall(request).execute().use { response ->
                     if (response.isRedirect) {
@@ -347,10 +352,11 @@ class StalkerApi(
     }
 
     /** Provider logos are often relative to the portal host. */
-    private fun absoluteLogo(endpoint: HttpUrl, logo: String): String? {
+    private fun absoluteLogo(endpoint: HttpUrl, logo: String, trustedOriginUrl: String): String? {
         val resolved = logo.toHttpUrlOrNull() ?: endpoint.resolve(logo)
         return resolved?.takeIf {
-            it.isHttps && it.username.isEmpty() && it.password.isEmpty() && it.fragment == null
+            it.isHttps && it.username.isEmpty() && it.password.isEmpty() && it.fragment == null &&
+                NetworkDestinationPolicy.isAllowedHttps(it.toString(), trustedOriginUrl)
         }?.toString()
     }
 

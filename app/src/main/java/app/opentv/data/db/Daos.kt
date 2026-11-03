@@ -763,12 +763,12 @@ interface RecordingDao {
     @Query("DELETE FROM recordings WHERE id = :id")
     suspend fun delete(id: Long)
 
-    /**
-     * On a cold start, any row still marked RECORDING is a leftover from a process that was
-     * killed mid-capture — reconcile it to FAILED so the UI never shows a phantom "recording".
-     */
-    @Query("UPDATE recordings SET status = 'FAILED', error = 'Interrupted' WHERE status = 'RECORDING'")
-    suspend fun failInterrupted()
+    /** Reconcile only captures that started before this process; a fresh alarm may start concurrently. */
+    @Query(
+        "UPDATE recordings SET status = 'FAILED', error = 'Interrupted' " +
+            "WHERE status = 'RECORDING' AND startedAtMillis < :startedBeforeMillis",
+    )
+    suspend fun failInterruptedBefore(startedBeforeMillis: Long)
 }
 
 @Dao

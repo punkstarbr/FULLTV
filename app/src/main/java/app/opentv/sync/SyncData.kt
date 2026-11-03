@@ -22,17 +22,22 @@ import kotlinx.serialization.Serializable
  *    NAS recordings from a peer are merged in without ever removing anything local. You tidy up on
  *    one device and the others adopt it, but a favourite set only on one box is never lost.
  *
- * Version 4 intentionally does not consume version 3 bundles, which stored raw URLs. It is safer to
- * skip an old file than to keep importing credentials from it.
+ * Version 5 authenticates every field (including timestamps, relative locators, hidden state and
+ * profile names) with [mac]. Version 4 intentionally does not consume version 3 bundles, which
+ * stored raw URLs. It is safer to skip an old file than to keep importing credentials from it.
  */
 @Serializable
 data class SyncBundle(
-    val version: Int = 4,
-    /** Public, non-secret check that NAS peers share the same HMAC key. */
+    val version: Int = 5,
+    /** Public, non-secret check that peers share the same HMAC key. */
     val groupId: String = "",
     /** Secret group key; filled only for pinned TLS sync and encrypted FullTV backups. */
     val syncGroupKeyBase64: String = "",
     val generatedAtMillis: Long = 0,
+    /** Stable per-install identity used to scope the replay counter. */
+    val senderDeviceId: String = "",
+    /** Strictly increasing per-[senderDeviceId] counter, persisted on the sending device. */
+    val sequence: Long = 0,
     /** Profile names the peer knows about. Others add any they are missing (add-only). */
     val profiles: List<String> = emptyList(),
     /** Two-way, newest-wins resume points. */
@@ -48,8 +53,10 @@ data class SyncBundle(
      * Recordings that live on the shared NAS (their [SyncRecording.filePath] is an `smb://`
      * locator) and so play on any device pointed at the same NAS. Device-local recordings are
      * never shared — they cannot be opened from another box.
-     */
+    */
     val recordings: List<SyncRecording> = emptyList(),
+    /** Lower-case HMAC-SHA256 over canonical serialization of this bundle with mac blanked. */
+    val mac: String = "",
 )
 
 @Serializable

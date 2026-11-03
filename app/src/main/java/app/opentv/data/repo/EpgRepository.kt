@@ -378,22 +378,31 @@ class EpgRepository(
                     url = HttpsUrlPolicy.withDefaultHttps(stored.url),
                     epgUrl = stored.epgUrl?.let(HttpsUrlPolicy::withDefaultHttps),
                 )
-                NetworkDestinationPolicy.registerTrustedOrigin(source.url)
-                source.epgUrl?.let(NetworkDestinationPolicy::registerTrustedOrigin)
                 HttpsUrlPolicy.requireHttps(source.epgUrl?.takeIf { it.isNotBlank() } ?: source.url)
                 api.openEpgStream(source)
             }
             feed.url != null -> {
                 val secureUrl = HttpsUrlPolicy.withDefaultHttps(feed.url)
-                if (!feed.builtIn && feed.providerSourceId == null && feed.playlistSourceId == null) {
-                    NetworkDestinationPolicy.registerTrustedOrigin(secureUrl)
-                }
                 try {
                     HttpsUrlPolicy.requireHttps(secureUrl)
                 } catch (_: app.opentv.data.remote.HttpsRequiredException) {
                     throw IllegalStateException(HTTPS_REQUIRED_RESULT)
                 }
-                val response = http.newCall(Request.Builder().url(secureUrl).build()).execute()
+                val trustedOriginUrl = when {
+                    feed.builtIn -> null
+                    feed.playlistSourceId != null -> sourceDao.byId(feed.playlistSourceId)?.takeIf {
+                        NetworkDestinationPolicy.originOf(it.url) == NetworkDestinationPolicy.originOf(secureUrl)
+                    }?.url
+                    else -> secureUrl // A manually entered feed is an explicit user choice.
+                }
+                val scope = NetworkDestinationPolicy.scopeFor(secureUrl, trustedOriginUrl)
+                    ?: throw IllegalStateException("Guide destination is not allowed.")
+                val response = http.newCall(
+                    Request.Builder()
+                        .url(secureUrl)
+                        .tag(NetworkDestinationPolicy.RequestScope::class.java, scope)
+                        .build(),
+                ).execute()
                 if (!response.isSuccessful) {
                     response.close()
                     throw IllegalStateException("Guide download failed (HTTP ${response.code}).")

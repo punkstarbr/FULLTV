@@ -56,7 +56,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.opentv.R
+import app.opentv.core.ServiceLocator
 import app.opentv.data.model.shownName
+import app.opentv.security.ParentalAuthorization
+import app.opentv.ui.ParentalPinGate
 import app.opentv.ui.ChannelsViewModel
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
@@ -79,6 +82,10 @@ fun ChannelManagerScreen(
     onBack: () -> Unit,
     viewModel: ChannelsViewModel = viewModel(),
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val settings = remember { ServiceLocator.get(context).settings }
+    val pinIsSet by settings.pinIsSet.collectAsState()
+    val hiddenUnlocked by settings.hiddenUnlocked.collectAsState()
     val sources by viewModel.sources.collectAsState()
     val categoryGroups by viewModel.managerCategoryGroups.collectAsState()
     val selectedSource by viewModel.managerSelectedSource.collectAsState()
@@ -90,6 +97,7 @@ fun ChannelManagerScreen(
     var searchMode by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     val searchResults by viewModel.managerResults.collectAsState()
+    var pendingUnhide by remember { mutableStateOf<ChannelsViewModel.Row?>(null) }
     LaunchedEffect(query) { viewModel.setManagerQuery(query) }
 
     // Focus handoff between the panes, mirroring HomeScreen's rail: the active left entry (the
@@ -102,6 +110,31 @@ fun ChannelManagerScreen(
     }
 
     BackHandler { onBack() }
+
+    fun toggleHidden(row: ChannelsViewModel.Row, hidden: Boolean) {
+        val showing = !hidden
+        if (showing && !ParentalAuthorization.mayUnhide(pinIsSet, hiddenUnlocked)) {
+            pendingUnhide = row
+        } else {
+            viewModel.setRowHidden(row, showing)
+        }
+    }
+
+    pendingUnhide?.let { row ->
+        ParentalPinGate(
+            onCancel = { pendingUnhide = null },
+            onSubmit = { entered ->
+                settings.verifyPin(entered).also { valid ->
+                    if (valid) {
+                        settings.setHiddenUnlocked(true)
+                        viewModel.setRowHidden(row, hidden = false)
+                        pendingUnhide = null
+                    }
+                }
+            },
+        )
+        return
+    }
 
     // Open on the first category so channels show straight away — the whole complaint was that the
     // manager never displayed any. Re-runs when the category set changes (e.g. after switching
@@ -200,7 +233,7 @@ fun ChannelManagerScreen(
                         onSpace = { if (query.length < 40) query += " " },
                         onBackspace = { query = query.dropLast(1) },
                         onClear = { query = "" },
-                        onToggleHidden = { row, hidden -> viewModel.setRowHidden(row, !hidden) },
+                        onToggleHidden = ::toggleHidden,
                         onToggleFavourite = { viewModel.toggleFavourite(it) },
                     )
                 } else {
@@ -209,7 +242,7 @@ fun ChannelManagerScreen(
                         categorySelected = selectedCategory != null,
                         rows = browseRows,
                         onExitLeft = onExitLeftToRail,
-                        onToggleHidden = { row, hidden -> viewModel.setRowHidden(row, !hidden) },
+                        onToggleHidden = ::toggleHidden,
                         onToggleFavourite = { viewModel.toggleFavourite(it) },
                     )
                 }

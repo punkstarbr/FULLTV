@@ -10,6 +10,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import java.security.KeyStore
+import java.security.InvalidKeyException
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.Mac
@@ -20,17 +21,36 @@ import javax.crypto.spec.GCMParameterSpec
 class EncryptedSecretStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-    /** Returns null only when this key has no ciphertext. Corrupt values fail closed as empty. */
-    fun get(name: String): String? = synchronized(lock) {
-        val encoded = prefs.getString(name, null) ?: return@synchronized null
-        runCatching { decrypt(name, encoded) }.getOrDefault("")
+    /** A typed result prevents callers from treating a broken ciphertext as an empty secret. */
+    sealed interface ReadResult {
+        data object Absent : ReadResult
+        data class Present(val value: String) : ReadResult
+        data object DecryptError : ReadResult
+        data object KeystoreUnavailable : ReadResult
+    }
+
+    /**
+     * Reads a ciphertext without ever returning plaintext from preferences as a fallback.
+     * Keystore failures are kept distinct from an invalid/tampered ciphertext so migration code
+     * can preserve a legacy value without exposing it to runtime consumers.
+     */
+    fun get(name: String): ReadResult = synchronized(lock) {
+        require(name.matches(KEY_NAME)) { "Invalid secret key name." }
+        val encoded = prefs.getString(name, null) ?: return@synchronized ReadResult.Absent
+        try {
+            ReadResult.Present(decrypt(name, encoded))
+        } catch (_: KeystoreUnavailableException) {
+            ReadResult.KeystoreUnavailable
+        } catch (_: Exception) {
+            ReadResult.DecryptError
+        }
     }
 
     /** AES-GCM encrypts each value with a fresh random IV and binds ciphertext to its preference key. */
     fun put(name: String, value: String) = synchronized(lock) {
         require(name.matches(KEY_NAME)) { "Invalid secret key name." }
         if (value.isEmpty()) {
-            prefs.edit().remove(name).commit()
+            check(prefs.edit().remove(name).commit()) { "Could not remove encrypted secret." }
             return@synchronized
         }
         val cipher = Cipher.getInstance(AES_TRANSFORMATION)
@@ -62,11 +82,22 @@ class EncryptedSecretStore(context: Context) {
         }
         val iv = record.copyOfRange(1, 1 + IV_BYTES)
         val ciphertext = record.copyOfRange(1 + IV_BYTES, record.size)
-        val cipher = Cipher.getInstance(AES_TRANSFORMATION)
-        cipher.init(Cipher.DECRYPT_MODE, aesKey(), GCMParameterSpec(128, iv))
-        cipher.updateAAD(name.toByteArray(Charsets.UTF_8))
-        return String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+        val key = try {
+            aesKey()
+        } catch (error: Exception) {
+            throw KeystoreUnavailableException(error)
+        }
+        try {
+            val cipher = Cipher.getInstance(AES_TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, iv))
+            cipher.updateAAD(name.toByteArray(Charsets.UTF_8))
+            return String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+        } catch (error: InvalidKeyException) {
+            throw KeystoreUnavailableException(error)
+        }
     }
+
+    private class KeystoreUnavailableException(cause: Throwable) : Exception(cause)
 
     private fun aesKey(): SecretKey = getOrCreateKey(AES_ALIAS) {
         KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, ANDROID_KEYSTORE).apply {

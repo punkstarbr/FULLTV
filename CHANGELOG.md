@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased — hardening de segurança e destino FTP (não publicada)
+
+- **Controle parental e PIN:** exigir autorização nos pontos de entrada de canais ocultos, incluindo
+  player direto, retomada, lembretes e Web Manager; usar backoff monotônico e manter os controles
+  bloqueados quando a persistência do PIN falhar.
+- **Serviços LAN/TLS:** limitar conexões/handshakes, adicionar deadlines e fechar servidores quando
+  suas telas deixam de estar ativas. As mudanças continuam sem fallback para HTTP.
+- **SSRF e respostas:** escopar a confiança de origens por operação, revalidar redirects/destinos,
+  pinçar DNS para mídia pública e limitar o corpo de respostas TMDB. O Streamlink de YouTube usa
+  guard HTTPS com DNS público validado; FTP não foi adicionado às fontes de mídia.
+- **Segredos, sync e gravações:** preservar segredos se a migração do Keystore falhar, autenticar e
+  rejeitar replay de bundles NAS, exigir criptografia SMB negociada e melhorar finalização/recuperação
+  de gravações e remux interrompidos. O fallback destrutivo do Room foi removido.
+- **Destino FTP opcional:** aceitar somente IPv4 privado numérico e pasta relativa; mostrar risco do
+  protocolo sem criptografia e exigir consentimento. Credenciais ficam cifradas no Keystore; uploads
+  binários são staged em `.partial`, confirmados e renomeados, com timeout, leitura/seek de gravações
+  concluídas e limpeza/verificação de falhas. Apache Commons Net 3.13.0 está fixado e verificado.
+- **Cadeia de fornecimento e release:** revalidar hashes das wheels Chaquopy do wheelhouse imediatamente
+  antes da instalação; builds release falham sem uma chave de produção e o instalador rejeita assinatura
+  debug como identidade da aplicação pública.
+- **Riscos restantes:** FTP continua transmitindo usuário, senha e vídeo em claro por escolha explícita;
+  Room ainda não usa SQLCipher e `lxml` 5.3.0 permanece por falta de wheel Android corrigida no índice
+  Chaquopy consultado. Ver relatório desta rodada para limitações e resultados de teste.
+- **Validação local:** `:app:assembleDebug` concluiu com sucesso após incluir o caso de pasta FTP vazia
+  (raiz da conta); o APK gerado é debug, package `app.fulltv.debug`, e não substitui a versão pública.
+  Os testes FTP focados passaram (7/7); na suíte completa, 167/173 passaram e seis XMLTV/Robolectric
+  falharam antes das assertions por falta de Conscrypt nativo Linux ARM64. `:app:lintDebug` permanece
+  vermelho (229 erros, 194 avisos e 6 dicas; primeiro erro em opt-in Media3 de `MosaicScreen.kt`).
+
 ## 0.11.24 (pré-lançamento de teste)
 
 - **Português do Brasil:** preencher as 19 traduções ausentes, substituir vocabulário e construções

@@ -162,8 +162,8 @@ fun ParentalControlsScreen(
 @Composable
 private fun PinSection(
     pinIsSet: Boolean,
-    onSetPin: (String) -> Unit,
-    onClearPin: () -> Unit,
+    onSetPin: (String) -> Boolean,
+    onClearPin: () -> Boolean,
 ) {
     var editing by remember { mutableStateOf(false) }
     var pin by remember { mutableStateOf("") }
@@ -171,11 +171,16 @@ private fun PinSection(
     var error by remember { mutableStateOf<String?>(null) }
     val pinLenError = stringResource(R.string.parental_pin_len_error)
     val pinMismatchError = stringResource(R.string.parental_pin_mismatch)
+    val pinSaveError = stringResource(R.string.parental_pin_save_failed)
 
     Text(stringResource(R.string.parental_pin), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
     Spacer(Modifier.height(8.dp))
     Card {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            error?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(8.dp))
+            }
             if (pinIsSet && !editing) {
                 Text(stringResource(R.string.parental_pin_is_set), style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(12.dp))
@@ -183,7 +188,9 @@ private fun PinSection(
                     OutlinedButton(onClick = { editing = true; pin = ""; confirm = ""; error = null }) {
                         Text(stringResource(R.string.parental_change_pin))
                     }
-                    OutlinedButton(onClick = onClearPin) { Text(stringResource(R.string.parental_remove_pin)) }
+                    OutlinedButton(onClick = {
+                        error = if (onClearPin()) null else pinSaveError
+                    }) { Text(stringResource(R.string.parental_remove_pin)) }
                 }
             } else {
                 Text(
@@ -195,10 +202,6 @@ private fun PinSection(
                     PinField(stringResource(R.string.parental_pin_new), pin) { if (it.length <= 4) pin = it.filter(Char::isDigit) }
                     PinField(stringResource(R.string.parental_pin_confirm), confirm) { if (it.length <= 4) confirm = it.filter(Char::isDigit) }
                 }
-                error?.let {
-                    Spacer(Modifier.height(8.dp))
-                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
-                }
                 Spacer(Modifier.height(12.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Button(
@@ -208,7 +211,14 @@ private fun PinSection(
                                 pin.length != 4 -> error = pinLenError
                                 pin != confirm -> error = pinMismatchError
                                 else -> {
-                                    onSetPin(pin); editing = false; pin = ""; confirm = ""; error = null
+                                    if (onSetPin(pin)) {
+                                        editing = false
+                                        pin = ""
+                                        confirm = ""
+                                        error = null
+                                    } else {
+                                        error = pinSaveError
+                                    }
                                 }
                             }
                         },

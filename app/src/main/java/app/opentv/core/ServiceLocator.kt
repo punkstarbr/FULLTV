@@ -74,7 +74,11 @@ object ServiceLocator {
          * network-destination policy.
          */
         val streamingHttpClient: OkHttpClient by lazy {
-            httpClient.newBuilder()
+            OkHttpClient.Builder()
+                .dns(PinnedPublicDns())
+                .addInterceptor(SafeNetworkRequestInterceptor(allowPublicCrossOriginRedirects = true))
+                .addNetworkInterceptor(SafeNetworkRedirectInterceptor(allowPublicCrossOriginRedirects = true))
+                .connectTimeout(15, TimeUnit.SECONDS)
                 .callTimeout(0, TimeUnit.MILLISECONDS)
                 .readTimeout(30, TimeUnit.SECONDS)
                 .followRedirects(true)

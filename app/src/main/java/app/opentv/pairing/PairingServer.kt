@@ -8,6 +8,7 @@ package app.opentv.pairing
 import android.util.Log
 import app.opentv.data.model.Source
 import app.opentv.data.model.SourceKind
+import app.opentv.security.LanConnectionLimiter
 import app.opentv.security.LanTlsServer
 import java.net.InetAddress
 import java.net.NetworkInterface
@@ -83,11 +84,11 @@ class PairingServer(private val scope: CoroutineScope) {
     private var token: String = ""
     private var confirmCode: String = ""
     private val wrongCodeAttempts = java.util.concurrent.atomic.AtomicInteger(0)
-    private val requestSlots = java.util.concurrent.Semaphore(4)
     @Volatile private var running = false
     @Volatile private var starting = false
     @Volatile private var generation = 0
     private var startJob: Job? = null
+    private val admission = LanConnectionLimiter()
 
     @Synchronized
     fun start() {
@@ -108,13 +109,20 @@ class PairingServer(private val scope: CoroutineScope) {
                 val nextCode = "%06d".format(random.nextInt(1_000_000))
                 val opened = LanTlsServer.open(host)
                 listener = opened
-                if (runGeneration != generation) return@launch
-
-                token = nextToken
-                confirmCode = nextCode
-                wrongCodeAttempts.set(0)
-                serverSocket = opened
-                running = true
+                val installed = synchronized(this@PairingServer) {
+                    if (runGeneration != generation) {
+                        false
+                    } else {
+                        token = nextToken
+                        confirmCode = nextCode
+                        wrongCodeAttempts.set(0)
+                        serverSocket = opened
+                        running = true
+                        admission.reset()
+                        true
+                    }
+                }
+                if (!installed) return@launch
                 val activeListener = opened
                 val session = Session(
                     url = "https://${activeListener.host}:${activeListener.port}/?t=$token",
@@ -135,7 +143,16 @@ class PairingServer(private val scope: CoroutineScope) {
                             Log.w(TAG, "Rejected pairing TLS connection (${error.javaClass.simpleName})")
                             continue
                         }
-                        if (!PairingHttp.isPrivateAddress(client.inetAddress?.hostAddress) || !requestSlots.tryAcquire()) {
+                        if (!running || runGeneration != generation) {
+                            runCatching { client.close() }
+                            break
+                        }
+                        if (!PairingHttp.isPrivateAddress(client.inetAddress?.hostAddress)) {
+                            runCatching { client.close() }
+                            continue
+                        }
+                        val permit = admission.tryAcquire(client.inetAddress?.hostAddress)
+                        if (permit == null) {
                             runCatching { client.close() }
                             continue
                         }
@@ -143,13 +160,15 @@ class PairingServer(private val scope: CoroutineScope) {
                             try {
                                 activeListener.completeHandshake(client)
                                 if (running && runGeneration == generation) {
-                                    handle(client, "${activeListener.host}:${activeListener.port}")
+                                    LanTlsServer.closeAfter(client, RESPONSE_DEADLINE_MILLIS).use {
+                                        handle(client, "${activeListener.host}:${activeListener.port}")
+                                    }
                                 }
                             } catch (error: Exception) {
                                 Log.w(TAG, "Pairing request failed (${error.javaClass.simpleName})")
                             } finally {
                                 runCatching { client.close() }
-                                requestSlots.release()
+                                permit.close()
                             }
                         }
                     }
@@ -358,7 +377,8 @@ class PairingServer(private val scope: CoroutineScope) {
     private companion object {
         const val TAG = "PairingServer"
         const val SESSION_TIMEOUT_MINUTES = 5L
-        const val SOCKET_TIMEOUT_MILLIS = 15_000
+        const val SOCKET_TIMEOUT_MILLIS = 5_000
+        const val RESPONSE_DEADLINE_MILLIS = 8_000L
         const val MAX_BODY_BYTES = 16 * 1024
         const val MAX_CODE_ATTEMPTS = 5
     }

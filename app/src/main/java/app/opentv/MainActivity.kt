@@ -386,13 +386,13 @@ private fun OpenTvApp(isTelevision: Boolean) {
                         // the tail-following optvrec:// source, so it can be watched as it records
                         // with no second connection to the provider. All go through the VOD player.
                         val stillRecording = rec.status == app.opentv.data.model.RecordingStatus.RECORDING
-                        // Internal and NAS in-progress recordings are both tail-followable via the
-                        // growing source; USB (content://) isn't.
-                        val growable = !app.opentv.recording.RecordingStorage.isContent(rec.filePath) &&
-                            !app.opentv.recording.RecordingStorage.isUsbPlaceholder(rec.filePath)
+                        // Internal/NAS files are tail-followable; SAF and FTP publish only when ready.
+                        val growable = app.opentv.recording.RecordingStorage
+                            .supportsGrowingPlayback(rec.filePath)
                         val url = when {
                             stillRecording && growable -> "optvrec://${rec.id}"
                             app.opentv.recording.SmbClient.isSmb(rec.filePath) -> rec.filePath
+                            app.opentv.recording.RecordingStorage.isFtp(rec.filePath) -> rec.filePath
                             app.opentv.recording.RecordingStorage.isContent(rec.filePath) -> rec.filePath
                             else -> android.net.Uri.fromFile(java.io.File(rec.filePath)).toString()
                         }

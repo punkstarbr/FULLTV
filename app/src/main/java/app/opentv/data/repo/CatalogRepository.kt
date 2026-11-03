@@ -766,9 +766,12 @@ class CatalogRepository(
 
     private suspend fun syncM3u(source: Source, nowUtcMillis: Long): SyncResult {
         NetworkDestinationPolicy.registerTrustedOrigin(source.url)
+        val requestScope = NetworkDestinationPolicy.scopeFor(source.url, source.url)
+            ?: return SyncResult.Failed("The playlist URL is not allowed.", null)
         val request = Request.Builder()
             .url(source.url)
             .header("User-Agent", source.userAgent)
+            .tag(NetworkDestinationPolicy.RequestScope::class.java, requestScope)
             .build()
 
         val downloaded = http.newCall(request).execute().use { response ->
@@ -940,7 +943,9 @@ class CatalogRepository(
                 qualityRank = 0,
                 qualityLabel = "",
                 categoryId = categoryId,
-                logoUrl = video.thumbnailUrl,
+                logoUrl = video.thumbnailUrl?.takeIf {
+                    NetworkDestinationPolicy.isAllowedHttps(it, trustedOriginUrl = source.url)
+                },
                 epgChannelId = null,
                 number = index + 1,
                 streamUrl = video.watchUrl,
@@ -1098,6 +1103,11 @@ class CatalogRepository(
         seriesDao.deleteForSource(sourceId)
         episodeDao.deleteForSource(sourceId)
         sourceDao.delete(sourceId)
+        // Reconcile from storage instead of merely appending/removing one entry. This also
+        // handles an edited source, duplicate origins and any process-local stale registrations.
+        NetworkDestinationPolicy.replaceTrustedOrigins(
+            sourceDao.all().flatMap { listOfNotNull(it.url, it.epgUrl) },
+        )
     }
 
     companion object {

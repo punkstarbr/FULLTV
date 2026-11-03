@@ -18,13 +18,14 @@ import java.io.OutputStream
 /**
  * Where a recording's bytes go — and how to read the size back and delete it — hidden behind one
  * small surface so the engine, library and playback don't care whether a recording lives on the
- * box's internal storage, on a NAS over SMB, or on a plugged-in USB / external drive.
+ * box's internal storage, on a NAS over SMB or explicitly local FTP, or on a plugged-in USB / external drive.
  *
  * ## Three shapes of locator
  * A recording's `filePath` (its stored locator) is one of:
  *  - an absolute filesystem path — an INTERNAL recording, played back via a `file://` URI;
  *  - an `smb://host/share/…` locator — a NAS recording, read back over SMB;
- *  - a `content://…` document URI — a USB recording written through the Storage Access Framework.
+ *  - a `content://…` document URI — a USB recording written through the Storage Access Framework;
+ *  - an `ftp://private-ip:port/…` locator — a cleartext LAN recording, never a media source.
  *
  * USB is special because SAF only assigns a document's `content://` URI when the file is actually
  * created. So a USB recording is planned with a [USB_PLACEHOLDER_PREFIX]`filename` marker; when the
@@ -59,6 +60,15 @@ object RecordingStorage {
         password = settings.smbPassword.value,
     )
 
+    fun ftpConfig(settings: AppSettings): FtpConfig = FtpConfig(
+        host = settings.ftpHost.value,
+        port = settings.ftpPort.value,
+        folder = settings.ftpFolder.value,
+        username = settings.ftpUser.value,
+        password = settings.ftpPassword.value,
+        plaintextAcknowledged = settings.ftpPlaintextAcknowledged.value,
+    )
+
     /** Internal recordings dir on the device's own (app-private) external storage — no permission needed. */
     fun internalDir(context: Context): File =
         File(context.getExternalFilesDir(null), "recordings").apply { mkdirs() }
@@ -71,6 +81,8 @@ object RecordingStorage {
         when (settings.recordingTarget.value) {
             AppSettings.RecordingTarget.SMB ->
                 SmbClient.locator(smbConfig(settings), filename)
+            AppSettings.RecordingTarget.FTP ->
+                FtpClient.locator(ftpConfig(settings), filename)
             AppSettings.RecordingTarget.USB ->
                 // The real content:// URI isn't known until the SAF document is created at capture
                 // time; carry the intended filename in a placeholder until then.
@@ -87,14 +99,20 @@ object RecordingStorage {
 
     /**
      * Open the destination named by [locator] for writing. For a USB placeholder this creates the
-     * SAF document and reports its real `content://` URI through [Sink.resolvedLocator]; the caller
-     * persists that so the finished recording can be found again. Throws with a human-readable
-     * message when the USB drive / folder grant is missing, rather than crashing the capture.
+     * SAF document and reports its real `content://` URI through [Sink.resolvedLocator]. The
+     * capture must persist that URI before its first write; the placeholder lookup below is the
+     * crash-recovery fallback for the smaller window between createFile and that persistence.
+     * Throws with a human-readable message when the USB drive / folder grant is missing, rather
+     * than crashing the capture.
      */
     fun openSink(context: Context, settings: AppSettings, locator: String): Sink = when {
         SmbClient.isSmb(locator) -> {
             val handle = SmbClient.openForWrite(smbConfig(settings), locator, overwrite = false)
             Sink(handle.output) { handle.close() }
+        }
+        isFtp(locator) -> {
+            val handle = FtpClient.openForWrite(ftpConfig(settings), locator)
+            Sink(handle.output, resolvedLocator = locator) { handle.close() }
         }
         isUsbPlaceholder(locator) ->
             openUsbSink(context, settings, locator.removePrefix(USB_PLACEHOLDER_PREFIX))
@@ -103,7 +121,7 @@ object RecordingStorage {
             val uri = Uri.parse(locator)
             val out = context.contentResolver.openOutputStream(uri, "w")
                 ?: throw IOException(context.getString(R.string.rec_error_usb_unavailable))
-            Sink(out, resolvedLocator = locator) { runCatching { out.flush(); out.close() } }
+            Sink(out, resolvedLocator = locator) { closeOutput(out) }
         }
         else -> {
             val file = File(locator)
@@ -115,7 +133,7 @@ object RecordingStorage {
                 if (file.exists() && file.length() == 0L) runCatching { file.delete() }
                 throw error
             }
-            Sink(out) { runCatching { out.close() } }
+            Sink(out) { closeOutput(out) }
         }
     }
 
@@ -142,9 +160,7 @@ object RecordingStorage {
             runCatching { doc.delete() }
             throw IOException(context.getString(R.string.rec_error_usb_unavailable))
         }
-        return Sink(out, resolvedLocator = doc.uri.toString()) {
-            runCatching { out.flush(); out.close() }
-        }
+        return Sink(out, resolvedLocator = doc.uri.toString()) { closeOutput(out) }
     }
 
     /** Recordings are MPEG-TS `.ts` or a remuxed `.mp4`; anything else is a generic video type. */
@@ -161,6 +177,7 @@ object RecordingStorage {
     fun copyTo(context: Context, settings: AppSettings, locator: String, out: OutputStream) {
         when {
             SmbClient.isSmb(locator) -> SmbClient.copyTo(smbConfig(settings), locator, out)
+            isFtp(locator) -> FtpClient.copyTo(ftpConfig(settings), locator, out)
             isContent(locator) -> {
                 val input = context.contentResolver.openInputStream(Uri.parse(locator))
                     ?: throw IOException(context.getString(R.string.rec_error_usb_unavailable))
@@ -172,23 +189,107 @@ object RecordingStorage {
     }
 
 
-    fun delete(context: Context, settings: AppSettings, locator: String) {
-        when {
-            SmbClient.isSmb(locator) -> runCatching { SmbClient.delete(smbConfig(settings), locator) }
-            isContent(locator) ->
-                runCatching { DocumentFile.fromSingleUri(context, Uri.parse(locator))?.delete() }
-            isUsbPlaceholder(locator) -> Unit // never created — nothing on disk to remove
-            else -> runCatching { File(locator).delete() }
-        }
+    /**
+     * Delete the physical recording and return only a verifiable success. Exceptions deliberately
+     * escape so callers can keep the database row and surface the failure instead of forgetting a
+     * remote/USB file behind a successful-looking UI action.
+     */
+    fun delete(context: Context, settings: AppSettings, locator: String): Boolean = when {
+        SmbClient.isSmb(locator) -> SmbClient.delete(smbConfig(settings), locator)
+        isFtp(locator) -> FtpClient.delete(ftpConfig(settings), locator)
+        isContent(locator) -> DocumentFile.fromSingleUri(context, Uri.parse(locator))?.let { document ->
+            document.delete() && !document.exists()
+        } == true
+        isUsbPlaceholder(locator) -> deleteUsbPlaceholder(context, settings, locator)
+        else -> File(locator).delete()
     }
 
     /**
-     * Current on-disk size, or -1 when it can't be cheaply known (SMB / USB — the DB tracks it
-     * instead).
+     * Return a current physical size. A negative value means the provider could not report a
+     * reliable size (for example a detached USB tree or an unreachable NAS).
+     */
+    fun sizeOf(context: Context, settings: AppSettings, locator: String): Long = when {
+        SmbClient.isSmb(locator) -> runCatching {
+            SmbClient.sizeOf(smbConfig(settings), locator)
+        }.getOrDefault(-1L)
+        isFtp(locator) -> runCatching {
+            FtpClient.sizeOf(ftpConfig(settings), locator)
+        }.getOrDefault(-1L)
+        isContent(locator) -> runCatching {
+            DocumentFile.fromSingleUri(context, Uri.parse(locator))?.length() ?: -1L
+        }.getOrDefault(-1L)
+        isUsbPlaceholder(locator) -> runCatching {
+            findUsbPlaceholder(context, settings, locator)?.length() ?: -1L
+        }.getOrDefault(-1L)
+        else -> File(locator).length()
+    }
+
+    /**
+     * Local-only compatibility overload. Callers that need USB/SMB sizes must provide context and
+     * settings through [sizeOf] above so the provider can be queried rather than guessed.
      */
     fun sizeOf(locator: String): Long =
-        if (SmbClient.isSmb(locator) || isContent(locator) || isUsbPlaceholder(locator)) -1L
+        if (SmbClient.isSmb(locator) || isFtp(locator) || isContent(locator) || isUsbPlaceholder(locator)) -1L
         else File(locator).length()
+
+    /** Recover a remotely staged FTP recording, returning verified bytes or -1 when not recoverable. */
+    fun recoverInterrupted(context: Context, settings: AppSettings, locator: String): Long =
+        if (isFtp(locator)) FtpClient.recoverInterrupted(ftpConfig(settings), locator) else -1L
+
+    /** Resolve the SAF document created just before a crash, before its content:// URI was persisted. */
+    fun recoverUsbPlaceholderLocator(context: Context, settings: AppSettings, locator: String): String? =
+        if (isUsbPlaceholder(locator)) {
+            findUsbPlaceholder(context, settings, locator)?.uri?.toString()
+        } else {
+            null
+        }
+
+    /** Only local files and SMB expose a readable growing file; FTP publishes after upload completion. */
+    fun supportsGrowingPlayback(locator: String): Boolean =
+        !isContent(locator) && !isUsbPlaceholder(locator) && !isFtp(locator)
+
+    fun isFtp(locator: String): Boolean = locator.startsWith("ftp://", ignoreCase = true)
+
+    private fun deleteUsbPlaceholder(context: Context, settings: AppSettings, locator: String): Boolean {
+        val treeUri = settings.usbTreeUri.value ?: return false
+        val tree = DocumentFile.fromTreeUri(context, Uri.parse(treeUri)) ?: return false
+        val filename = usbPlaceholderFilename(locator) ?: return false
+        val document = tree.findFile(filename) ?: return true
+        if (!document.delete()) return false
+        return tree.findFile(filename) == null
+    }
+
+    /** Resolve a pre-create locator to the document left behind by a crash, if any. */
+    private fun findUsbPlaceholder(
+        context: Context,
+        settings: AppSettings,
+        locator: String,
+    ): DocumentFile? {
+        val filename = usbPlaceholderFilename(locator) ?: return null
+        val treeUri = settings.usbTreeUri.value ?: return null
+        val tree = DocumentFile.fromTreeUri(context, Uri.parse(treeUri)) ?: return null
+        return tree.findFile(filename)
+    }
+
+    private fun closeOutput(output: OutputStream) {
+        var failure: Throwable? = null
+        runCatching { output.flush() }.onFailure { failure = it }
+        runCatching { output.close() }.onFailure { closeError ->
+            val earlier = failure
+            if (earlier == null) failure = closeError else earlier.addSuppressed(closeError)
+        }
+        failure?.let { error ->
+            if (error is IOException) throw error
+            throw IOException("Recording destination could not be closed.", error)
+        }
+    }
+
+    /** Filename lookup key for the crash window after SAF createFile but before DB persistence. */
+    internal fun usbPlaceholderFilename(locator: String): String? {
+        if (!isUsbPlaceholder(locator)) return null
+        val filename = locator.removePrefix(USB_PLACEHOLDER_PREFIX)
+        return filename.takeIf { it.isNotBlank() && !it.contains('/') && !it.contains('\\') }
+    }
 
     /** Filesystem-safe and collision-resistant recording filename. */
     fun fileNameFor(

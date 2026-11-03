@@ -13,10 +13,17 @@ import java.net.UnknownHostException
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Filters network destinations supplied by remote catalogues/add-ons. A source URL entered by the
- * user is trusted only at its exact HTTPS origin; a different origin must resolve only to globally
- * routable addresses. Validated public DNS answers are briefly pinned and reused by OkHttp to reduce
- * DNS rebinding between validation and playback.
+ * Filters network destinations supplied by remote catalogues/add-ons.
+ *
+ * A [RequestScope] is attached to every application-owned request. It records the origin at which
+ * the operation started and, when the user configured a private source, the one exact origin which
+ * may use private DNS/IP answers. A media client may additionally follow redirects to public HTTPS
+ * destinations; private destinations are still limited to the exact configured origin.
+ *
+ * The small trusted-origin set remains only for transports which cannot carry an OkHttp Request tag
+ * (Media3's player requests). It is reconciled from the source table and is never consulted to
+ * authorise a redirect. DNS answers are cached as the complete validated answer set and are never
+ * replaced by an arbitrary system-DNS lookup after validation expires.
  */
 object NetworkDestinationPolicy {
     private const val CACHE_TTL_MILLIS = 60_000L
@@ -26,8 +33,19 @@ object NetworkDestinationPolicy {
     private val trustedOrigins = ConcurrentHashMap.newKeySet<String>()
     private val cacheLock = Any()
     private val trustedLock = Any()
+    private val dnsScope = ThreadLocal<RequestScope?>()
 
-    private data class CachedHost(val addresses: List<InetAddress>, val expiresAt: Long)
+    private data class CachedHost(
+        val addresses: List<InetAddress>,
+        val expiresAt: Long,
+    )
+
+    /** The authorization context of one initial network operation. */
+    data class RequestScope(
+        val initialOrigin: String,
+        val trustedOrigin: String?,
+        val allowPublicCrossOriginRedirects: Boolean = false,
+    )
 
     fun hostOf(raw: String): String? = runCatching { URI(raw).host }
         .getOrNull()?.let(::normalizeHost)
@@ -42,66 +60,158 @@ object NetworkDestinationPolicy {
         val host = normalizeHost(uri.host) ?: return null
         if (uri.port == 0 || uri.port > 65_535) return null
         val port = if (uri.port == -1) 443 else uri.port
-        return "https://$host:$port"
+        val authorityHost = if (host.contains(':')) "[$host]" else host
+        return "https://$authorityHost:$port"
     }
 
-    /** Call only for a URL that the user explicitly configured or approved in the app. */
+    /** Builds a request context. A private exception is valid only for the initial origin itself. */
+    fun scopeFor(
+        initialUrl: String,
+        trustedOriginUrl: String? = null,
+        allowPublicCrossOriginRedirects: Boolean = false,
+    ): RequestScope? {
+        val initialOrigin = originOf(initialUrl) ?: return null
+        val trustedOrigin = trustedOriginUrl?.let(::originOf) ?: if (trustedOriginUrl == null) null else return null
+        if (trustedOrigin != null && trustedOrigin != initialOrigin) return null
+        return RequestScope(initialOrigin, trustedOrigin, allowPublicCrossOriginRedirects)
+    }
+
+    /** Call only for an origin that the user explicitly configured or approved in the app. */
     fun registerTrustedOrigin(raw: String): Boolean {
         val origin = originOf(raw) ?: return false
-        if (origin in trustedOrigins) return true
+        val host = hostOf(raw) ?: return false
         synchronized(trustedLock) {
-            if (trustedOrigins.size >= MAX_TRUSTED_ORIGINS) return false
+            if (origin !in trustedOrigins && trustedOrigins.size >= MAX_TRUSTED_ORIGINS) return false
             trustedOrigins += origin
         }
+        // A host may previously have been cached as public-only. Revalidate it under the new
+        // configured-origin policy rather than silently reusing a less permissive answer forever.
+        resolvedHosts.remove(host)
         return true
+    }
+
+    /** Revokes a configured origin after a source is removed or its URL is replaced. */
+    fun revokeTrustedOrigin(raw: String): Boolean {
+        val origin = originOf(raw) ?: return false
+        val host = hostOf(raw) ?: return false
+        val removed = synchronized(trustedLock) {
+            trustedOrigins.remove(origin)
+        }
+        if (removed) resolvedHosts.remove(host)
+        return removed
+    }
+
+    /** Replaces the process-local compatibility set with the currently configured source origins. */
+    fun replaceTrustedOrigins(rawUrls: Iterable<String>) {
+        val origins = rawUrls.mapNotNull(::originOf).toSet()
+        synchronized(trustedLock) {
+            trustedOrigins.clear()
+            trustedOrigins.addAll(origins.take(MAX_TRUSTED_ORIGINS))
+        }
+        // The validation mode for one of these hosts may have changed in either direction.
+        resolvedHosts.clear()
     }
 
     fun isTrustedOrigin(raw: String): Boolean = originOf(raw)?.let(trustedOrigins::contains) == true
 
+    /** Compatibility path for transports without request tags, such as Media3. */
     fun isAllowedHttpsRequest(raw: String): Boolean {
-        if (isTrustedOrigin(raw)) return true
-        return isAllowedHttps(raw)
+        val trusted = originOf(raw)?.takeIf(trustedOrigins::contains)?.let { raw }
+        return isAllowedHttps(raw, trusted)
     }
 
+    /** Validates an OkHttp request against its operation scope. */
+    fun isAllowedHttpsRequest(raw: String, scope: RequestScope?): Boolean {
+        val origin = originOf(raw) ?: return false
+        if (scope == null) return isAllowedHttps(raw)
+        if (origin == scope.initialOrigin) return isAllowedHttps(raw, scope.trustedOrigin)
+        // Cross-origin redirects are never authorized by another user's configured private origin.
+        // Media requests can follow public HTTPS CDNs without opening a path to private networks.
+        return scope.allowPublicCrossOriginRedirects && isAllowedHttps(raw)
+    }
+
+    /** A cross-origin redirect, when enabled, must resolve exclusively to public Internet IPs. */
+    fun isAllowedRedirect(raw: String, scope: RequestScope?): Boolean =
+        isAllowedHttpsRequest(raw, scope)
+
+    /** Keeps the exact request scope visible to OkHttp's synchronous DNS callback. */
+    internal fun <T> withDnsScope(scope: RequestScope?, block: () -> T): T {
+        val previous = dnsScope.get()
+        dnsScope.set(scope)
+        return try {
+            block()
+        } finally {
+            dnsScope.set(previous)
+        }
+    }
+
+    /**
+     * Validates HTTPS and DNS. When [trustedOriginUrl] has the exact same origin as [raw], private
+     * answers are permitted because that origin was explicitly supplied by the user for this call.
+     * The answer is still resolved and pinned; no private destination bypasses DNS validation.
+     */
     fun isAllowedHttps(raw: String, trustedOriginUrl: String? = null): Boolean {
         val origin = originOf(raw) ?: return false
         val host = hostOf(raw) ?: return false
-        if (trustedOriginUrl != null && origin == originOf(trustedOriginUrl)) return true
-        return publicAddresses(host) != null
+        val trustedOrigin = trustedOriginUrl?.let(::originOf)
+        val allowPrivate = trustedOrigin != null && origin == trustedOrigin
+        return validatedAddresses(host, allowPrivate) != null
     }
 
     fun isPublicInternetHost(rawHost: String): Boolean = publicAddresses(rawHost) != null
 
-    /** Return previously validated public addresses for an OkHttp DNS implementation. */
+    /**
+     * Return previously validated addresses for OkHttp DNS. Unlike Dns.SYSTEM, this never falls back
+     * to a fresh arbitrary answer after a validation failure or a DNS rebinding event.
+     */
     fun pinnedPublicAddresses(rawHost: String): List<InetAddress>? {
         val host = normalizeHost(rawHost) ?: return null
-        val entry = resolvedHosts[host] ?: return null
+        // Trust is request-scoped, never inherited from another configured source on this host.
+        // This matters when a hostname is re-used on a different port or reached through a redirect.
+        val allowPrivate = dnsScope.get()?.trustedOrigin?.let(::hostOf) == host
+        val entry = resolvedHosts[host]
         val now = System.currentTimeMillis()
-        if (now < entry.expiresAt) {
-            if (entry.addresses.isEmpty()) throw UnknownHostException("Host is not globally routable.")
-            return entry.addresses
+        if (entry != null && now < entry.expiresAt) {
+            val addresses = entry.addresses.takeIf {
+                it.isNotEmpty() && (allowPrivate || it.all(::isGloballyRoutable))
+            }
+            if (addresses != null) return addresses
+            throw UnknownHostException("Host is not allowed by the network destination policy.")
         }
-        // Once a host has been validated, do not fall back to arbitrary DNS if its answer changes.
-        return publicAddresses(host) ?: throw UnknownHostException("Validated host no longer resolves publicly.")
+        return validatedAddresses(host, allowPrivate)
+            ?: throw UnknownHostException("Host is not allowed by the network destination policy.")
     }
 
-    private fun publicAddresses(rawHost: String): List<InetAddress>? {
+    private fun publicAddresses(rawHost: String): List<InetAddress>? =
+        validatedAddresses(rawHost, allowPrivate = false)
+
+    private fun validatedAddresses(rawHost: String, allowPrivate: Boolean): List<InetAddress>? {
         val host = normalizeHost(rawHost) ?: return null
         if (isLocalName(host)) return null
         val now = System.currentTimeMillis()
         resolvedHosts[host]?.let { cached ->
-            if (now < cached.expiresAt) return cached.addresses.takeIf { it.isNotEmpty() }
+            if (now < cached.expiresAt) {
+                return cached.addresses.takeIf {
+                    it.isNotEmpty() && (allowPrivate || it.all(::isGloballyRoutable))
+                }
+            }
             resolvedHosts.remove(host, cached)
         }
+
         val addresses = runCatching { InetAddress.getAllByName(host).toList() }
-            .getOrNull()?.takeIf { it.isNotEmpty() && it.all(::isGloballyRoutable) }.orEmpty()
+            .getOrNull().orEmpty()
+        val accepted = addresses.takeIf {
+            it.isNotEmpty() && (allowPrivate || it.all(::isGloballyRoutable))
+        }
         synchronized(cacheLock) {
             val currentTime = System.currentTimeMillis()
             resolvedHosts.entries.removeIf { currentTime >= it.value.expiresAt }
             if (resolvedHosts.size >= MAX_CACHE_ENTRIES && !resolvedHosts.containsKey(host)) return null
+            // Keep the complete DNS answer, even when it is rejected for an untrusted operation, so
+            // a later pinned lookup cannot accidentally use an answer that was never checked.
             resolvedHosts[host] = CachedHost(addresses, currentTime + CACHE_TTL_MILLIS)
         }
-        return addresses.takeIf { it.isNotEmpty() }
+        return accepted
     }
 
     private fun normalizeHost(rawHost: String?): String? = rawHost
@@ -138,10 +248,15 @@ object NetworkDestinationPolicy {
             return true
         }
         if (address is Inet6Address) {
-            // IPv6 unique-local fc00::/7, transition/documentation ranges and mapped IPv4.
+            // IPv6 unique-local fc00::/7, NAT64, 6to4/Teredo, documentation and mapped IPv4.
             if ((bytes[0] and 0xfe) == 0xfc) return false
+            if (bytes[0] == 0x00 && bytes[1] == 0x64 && bytes[2] == 0xff && bytes[3] == 0x9b &&
+                ((4..11).all { bytes[it] == 0 } || (bytes[4] == 0 && bytes[5] == 1))
+            ) return false
+            if (bytes[0] == 0x20 && bytes[1] == 0x02) return false
             if (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0x0d && bytes[3] == 0xb8) return false
-            if (bytes[0] == 0x20 && bytes[1] == 0x01 && bytes[2] == 0 && (bytes[3] and 0xf0) == 0x10) return false
+            val secondHextet = (bytes[2] shl 8) or bytes[3]
+            if (bytes[0] == 0x20 && bytes[1] == 0x01 && secondHextet <= 0x01ff) return false
             if (address.isIPv4CompatibleAddress) return false
             if (bytes.take(10).all { it == 0 } && bytes[10] == 0xff && bytes[11] == 0xff) {
                 val mapped = InetAddress.getByAddress(ByteArray(4) { bytes[bytes.size - 4 + it].toByte() })

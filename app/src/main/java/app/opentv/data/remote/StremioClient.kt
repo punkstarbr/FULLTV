@@ -51,8 +51,7 @@ class StremioClient(
      */
     fun fetchManifest(manifestUrl: String): String? {
         val url = safeHttpsUrl(manifestUrl) ?: return null
-        NetworkDestinationPolicy.registerTrustedOrigin(url.toString())
-        val o = get(url)?.jsonObject ?: return null
+        val o = get(url, trustedOriginUrl = url.toString())?.jsonObject ?: return null
         val name = o["name"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() } ?: return null
         val hasId = o["id"]?.jsonPrimitive?.contentOrNull?.isNotBlank() == true
         return if (hasId) name else null
@@ -66,11 +65,11 @@ class StremioClient(
     fun streams(addonManifestUrl: String, addonName: String, type: String, id: String): List<StremioStream> {
         if (type !in ALLOWED_TYPES || !id.matches(STREMIO_ID)) return emptyList()
         val addonOrigin = safeHttpsUrl(addonManifestUrl) ?: return emptyList()
-        NetworkDestinationPolicy.registerTrustedOrigin(addonOrigin.toString())
         // A manifest URL is "<base>/manifest.json"; resource URLs hang off the same base.
         val base = addonManifestUrl.trim().removeSuffix("manifest.json").trimEnd('/')
         val url = safeHttpsUrl("$base/stream/$type/$id.json") ?: return emptyList()
-        val streams = get(url)?.jsonObject?.get("streams")?.jsonArray ?: return emptyList()
+        val streams = get(url, trustedOriginUrl = addonOrigin.toString())
+            ?.jsonObject?.get("streams")?.jsonArray ?: return emptyList()
         return streams.take(MAX_STREAMS).mapNotNull { element ->
             val s = element.jsonObject
             val streamUrl = s["url"]?.jsonPrimitive?.contentOrNull?.takeIf { it.isNotBlank() }
@@ -84,9 +83,14 @@ class StremioClient(
         }
     }
 
-    private fun get(url: HttpUrl): JsonElement? {
+    private fun get(url: HttpUrl, trustedOriginUrl: String? = null): JsonElement? {
         if (!url.isHttps || url.username.isNotEmpty() || url.password.isNotEmpty()) return null
-        val request = Request.Builder().url(url).header("User-Agent", "OpenTV").build()
+        val scope = NetworkDestinationPolicy.scopeFor(url.toString(), trustedOriginUrl) ?: return null
+        val request = Request.Builder()
+            .url(url)
+            .header("User-Agent", "OpenTV")
+            .tag(NetworkDestinationPolicy.RequestScope::class.java, scope)
+            .build()
         return runCatching {
             var target = url
             repeat(MAX_REDIRECTS + 1) { hop ->

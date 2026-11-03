@@ -6,9 +6,15 @@
 package app.opentv.data.remote
 
 import com.google.common.truth.Truth.assertThat
+import org.junit.After
 import org.junit.Test
 
 class NetworkDestinationPolicyTest {
+    @After
+    fun clearConfiguredOrigins() {
+        NetworkDestinationPolicy.replaceTrustedOrigins(emptyList())
+    }
+
     @Test
     fun rejectsLoopbackAndPrivateAddressLiterals() {
         listOf(
@@ -54,6 +60,9 @@ class NetworkDestinationPolicyTest {
         assertThat(NetworkDestinationPolicy.isAllowedHttps("https://192.0.2.5/stream")).isFalse()
         assertThat(NetworkDestinationPolicy.isAllowedHttps("https://198.51.100.20/stream")).isFalse()
         assertThat(NetworkDestinationPolicy.isAllowedHttps("https://203.0.113.8/stream")).isFalse()
+        assertThat(NetworkDestinationPolicy.isAllowedHttps("https://[64:ff9b::c0a8:101]/stream")).isFalse()
+        assertThat(NetworkDestinationPolicy.isAllowedHttps("https://[2002:c0a8:0101::1]/stream")).isFalse()
+        assertThat(NetworkDestinationPolicy.isAllowedHttps("https://[2001::1]/stream")).isFalse()
     }
 
     @Test
@@ -63,5 +72,68 @@ class NetworkDestinationPolicyTest {
         assertThat(NetworkDestinationPolicy.isAllowedHttps("https://8.8.8.8/stream#secret")).isFalse()
         assertThat(NetworkDestinationPolicy.isAllowedHttps("https://router.local/stream")).isFalse()
         assertThat(NetworkDestinationPolicy.isAllowedHttps("https://localhost/stream")).isFalse()
+    }
+
+    @Test
+    fun privateDnsExceptionRequiresTheExactRequestScope() {
+        val configured = "https://192.168.51.2:47531/playlist.m3u"
+        assertThat(NetworkDestinationPolicy.registerTrustedOrigin(configured)).isTrue()
+
+        // A global allowlist must not make this private address resolvable for another operation.
+        assertThat(runCatching { NetworkDestinationPolicy.pinnedPublicAddresses("192.168.51.2") }.isFailure)
+            .isTrue()
+
+        val scope = NetworkDestinationPolicy.scopeFor(configured, configured)
+        val scoped = NetworkDestinationPolicy.withDnsScope(scope) {
+            NetworkDestinationPolicy.pinnedPublicAddresses("192.168.51.2")
+        }
+        assertThat(scoped).isNotEmpty()
+    }
+
+    @Test
+    fun privateIpv6OriginIsBracketedAndPinnedOnlyWithinItsScope() {
+        val configured = "https://[fd12:3456::20]:47531/playlist.m3u"
+        val scope = NetworkDestinationPolicy.scopeFor(configured, configured)
+
+        assertThat(scope).isNotNull()
+        assertThat(scope!!.initialOrigin).isEqualTo("https://[fd12:3456::20]:47531")
+        assertThat(
+            NetworkDestinationPolicy.withDnsScope(scope) {
+                NetworkDestinationPolicy.pinnedPublicAddresses("fd12:3456::20")
+            },
+        ).isNotEmpty()
+    }
+
+    @Test
+    fun crossOriginPublicRedirectsAreOptInAndPrivateTargetsRemainBlocked() {
+        val strict = NetworkDestinationPolicy.scopeFor("https://8.8.8.8/start")
+        assertThat(NetworkDestinationPolicy.isAllowedRedirect("https://1.1.1.1/cdn.m3u8", strict)).isFalse()
+
+        val media = NetworkDestinationPolicy.scopeFor(
+            "https://8.8.8.8/start",
+            allowPublicCrossOriginRedirects = true,
+        )
+        assertThat(NetworkDestinationPolicy.isAllowedRedirect("https://1.1.1.1/cdn.m3u8", media)).isTrue()
+        assertThat(
+            NetworkDestinationPolicy.isAllowedRedirect("https://192.168.51.2:47531/admin", media),
+        ).isFalse()
+    }
+
+    @Test
+    fun trustedOriginA_cannot_be_a_redirect_target_of_operationB() {
+        val configuredA = "https://192.168.51.2:47531/private.m3u"
+        assertThat(NetworkDestinationPolicy.registerTrustedOrigin(configuredA)).isTrue()
+
+        val operationB = NetworkDestinationPolicy.scopeFor("https://8.8.8.8/start")
+        assertThat(operationB).isNotNull()
+        assertThat(
+            NetworkDestinationPolicy.isAllowedRedirect(
+                "https://192.168.51.2:47531/admin",
+                operationB,
+            ),
+        ).isFalse()
+
+        NetworkDestinationPolicy.revokeTrustedOrigin(configuredA)
+        assertThat(NetworkDestinationPolicy.isTrustedOrigin("https://192.168.51.2:47531/live")).isFalse()
     }
 }

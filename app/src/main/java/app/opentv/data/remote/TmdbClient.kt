@@ -7,6 +7,7 @@ package app.opentv.data.remote
 
 import android.util.Log
 import app.opentv.core.AppSettings
+import app.opentv.data.parser.BoundedInputStream
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.contentOrNull
@@ -34,6 +35,8 @@ data class TmdbMeta(
     val rating: Double? = null,
     val year: Int? = null,
 )
+
+internal const val MAX_TMDB_JSON_BYTES = 8L * 1024 * 1024
 
 /**
  * A thin, read-only TMDB v3 client used to enrich VOD detail pages when the provider's own
@@ -164,8 +167,8 @@ class TmdbClient(
         return runCatching {
             http.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) return null
-                val body = response.body?.string() ?: return null
-                json.parseToJsonElement(body)
+                val body = response.body ?: return null
+                readBoundedTmdbJson(body, json, MAX_TMDB_JSON_BYTES)
             }
         }.onFailure { Log.w(TAG, "TMDB request failed (${it.javaClass.simpleName})") }.getOrNull()
     }
@@ -183,4 +186,17 @@ class TmdbClient(
         const val IMG_BACKDROP = "https://image.tmdb.org/t/p/w1280"
         const val TOP_CAST = 12
     }
+}
+
+/** Reads a TMDB body without trusting Content-Length (chunked responses have no declared size). */
+internal fun readBoundedTmdbJson(
+    body: okhttp3.ResponseBody,
+    json: Json,
+    maxBytes: Long,
+): JsonElement? {
+    if (body.contentLength() > maxBytes) return null
+    val bounded = BoundedInputStream(body.byteStream(), maxBytes, "TMDB response")
+    val text = bounded.use { String(it.readBytes(), Charsets.UTF_8) }
+    if (text.isBlank()) return null
+    return json.parseToJsonElement(text)
 }

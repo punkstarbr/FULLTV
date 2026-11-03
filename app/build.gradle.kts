@@ -13,12 +13,15 @@ val releaseKeystorePath = providers.environmentVariable("KEYSTORE_PATH").orNull
 val releaseKeystorePassword = providers.environmentVariable("KEYSTORE_PASSWORD").orNull
 val releaseKeyAlias = providers.environmentVariable("KEY_ALIAS").orNull
 val releaseKeyPassword = providers.environmentVariable("KEY_PASSWORD").orNull
+val releaseCertificateSha256 = providers.environmentVariable("RELEASE_CERT_SHA256").orNull
+    ?.trim()
+    ?.lowercase()
 val hasReleaseSigning = releaseKeystorePath?.let { it.isNotBlank() && file(it).isFile } == true &&
     !releaseKeystorePassword.isNullOrBlank() &&
     !releaseKeyAlias.isNullOrBlank() &&
-    !releaseKeyPassword.isNullOrBlank()
-val allowDebugSignedRelease =
-    providers.environmentVariable("FULLTV_ALLOW_DEBUG_SIGNED_RELEASE").orNull == "true"
+    !releaseKeyPassword.isNullOrBlank() &&
+    releaseCertificateSha256?.matches(Regex("[0-9a-f]{64}")) == true
+val chaquopyWheelhouse = project.layout.buildDirectory.dir("chaquopy-wheelhouse").get().asFile
 
 dependencyLocking {
     lockAllConfigurations()
@@ -62,12 +65,40 @@ val verifyChaquopyWheelHashes = tasks.register(
         rootProject.file("tools/verify_chaquopy_wheel_hashes.py").absolutePath,
         "python3.11",
         project.file("requirements-android.txt").absolutePath,
+        "--wheelhouse",
+        chaquopyWheelhouse.absolutePath,
     )
+    inputs.file(rootProject.file("tools/verify_chaquopy_wheel_hashes.py"))
+    inputs.file(project.file("requirements-android.txt"))
+    outputs.dir(chaquopyWheelhouse)
+}
+
+// Re-hash the exact wheel files immediately before Chaquopy's per-ABI install. This task has no
+// outputs and is forced to run every build, so a changed wheel cannot be installed from a stale
+// preflight result. The Python requirements file is a full transitive lock; pip's own hash mode
+// rejects Chaquopy's ABI-specific libxml/libxslt dependency edges, so the offline verified wheelhouse
+// is the installation trust boundary instead.
+val verifyChaquopyWheelhouse = tasks.register<org.gradle.api.tasks.Exec>("verifyChaquopyWheelhouse") {
+    group = "verification"
+    description = "Revalidates exact pinned wheel bytes immediately before Chaquopy installation."
+    dependsOn(verifyChaquopyWheelHashes)
+    commandLine(
+        "python3.11",
+        rootProject.file("tools/verify_chaquopy_wheelhouse.py").absolutePath,
+        project.file("requirements-android.txt").absolutePath,
+        chaquopyWheelhouse.absolutePath,
+    )
+    inputs.file(rootProject.file("tools/verify_chaquopy_wheelhouse.py"))
+    inputs.file(rootProject.file("tools/verify_chaquopy_wheel_hashes.py"))
+    inputs.file(project.file("requirements-android.txt"))
+    inputs.file(chaquopyWheelhouse.resolve("wheelhouse-manifest.json"))
+    inputs.files(fileTree(chaquopyWheelhouse) { include("*.whl") })
+    outputs.upToDateWhen { false }
 }
 
 tasks.configureEach {
     if (name == "installDebugPythonRequirements" || name == "installReleasePythonRequirements") {
-        dependsOn(verifyChaquopyWheelHashes)
+        dependsOn(verifyChaquopyWheelhouse)
     }
 }
 
@@ -87,6 +118,11 @@ android {
         versionName = "0.11.24"
         // FullTV publishes versioned GitHub Releases; older releases remain available there.
         buildConfigField("String", "UPDATE_REPO_SLUG", "\"punkstarbr/FULLTV\"")
+        buildConfigField(
+            "String",
+            "RELEASE_SIGNING_CERT_SHA256",
+            "\"${releaseCertificateSha256.orEmpty()}\"",
+        )
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -110,14 +146,9 @@ android {
                 "proguard-rules.pro",
             )
 
-            signingConfig =
-                if (hasReleaseSigning) {
-                    signingConfigs.getByName("upload")
-                } else if (allowDebugSignedRelease) {
-                    signingConfigs.getByName("debug")
-                } else {
-                    null
-                }
+            // Never fall back to the Android debug keystore. The preflight below also makes
+            // assembleRelease fail closed when the production inputs are absent.
+            signingConfig = signingConfigs.getByName("upload")
         }
         debug {
             applicationIdSuffix = ".debug"
@@ -158,7 +189,8 @@ val verifyReleaseSigning = tasks.register<org.gradle.api.tasks.Exec>("verifyRele
 }
 
 tasks.configureEach {
-    if (name == "packageRelease" || name == "bundleRelease" || name == "signReleaseBundle") {
+    if (name == "assembleRelease" || name == "packageRelease" ||
+        name == "bundleRelease" || name == "signReleaseBundle") {
         dependsOn(verifyReleaseSigning)
     }
 }
@@ -168,9 +200,15 @@ chaquopy {
         version = "3.11"
         buildPython("python3.11")
         pip {
-            // The strict, per-ABI SHA-256 preflight above runs before these installs. Chaquopy
-            // reissues native wheel installs per ABI and drops root hashes in that second pass.
-            options("--no-require-hashes", "--only-binary=:all:")
+            // Every ABI install consumes the exact wheelhouse re-hashed immediately before this
+            // task. Do not permit an index/cache fallback or a second online download. All
+            // transitive packages are direct pins in requirements-android.txt.
+            options(
+                "--no-index",
+                "--find-links=${chaquopyWheelhouse.absolutePath}",
+                "--only-binary=:all:",
+                "--no-deps",
+            )
             install("-r", "requirements-android.txt")
         }
     }
@@ -222,6 +260,7 @@ dependencies {
     ksp(libs.room.compiler)
 
     implementation(libs.okhttp)
+    implementation(libs.commons.net)
     implementation(libs.xz)
     implementation(libs.okhttp.logging)
     implementation(libs.kotlinx.serialization.json)

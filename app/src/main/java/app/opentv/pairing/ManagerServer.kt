@@ -15,7 +15,9 @@ import app.opentv.data.repo.CatalogRepository
 import app.opentv.data.repo.SourceRepository
 import app.opentv.recording.SmbClient
 import app.opentv.recording.SmbConfig
+import app.opentv.security.LanConnectionLimiter
 import app.opentv.security.LanTlsServer
+import app.opentv.security.ParentalAuthorization
 import java.io.OutputStream
 import java.net.InetAddress
 import java.net.NetworkInterface
@@ -96,7 +98,7 @@ class ManagerServer(
     @Volatile private var generation = 0
     @Volatile private var lastActivityMillis = 0L
     private var startJob: Job? = null
-    private val requestSlots = java.util.concurrent.Semaphore(4)
+    private val admission = LanConnectionLimiter()
 
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
 
@@ -119,12 +121,19 @@ class ManagerServer(
                 val nextToken = ByteArray(24).also(random::nextBytes).joinToString("") { "%02x".format(it) }
                 val opened = LanTlsServer.open(host)
                 listener = opened
-                if (runGeneration != generation) return@launch
-
-                token = nextToken
-                serverSocket = opened
-                running = true
-                lastActivityMillis = System.currentTimeMillis()
+                val installed = synchronized(this@ManagerServer) {
+                    if (runGeneration != generation) {
+                        false
+                    } else {
+                        token = nextToken
+                        serverSocket = opened
+                        running = true
+                        lastActivityMillis = System.currentTimeMillis()
+                        admission.reset()
+                        true
+                    }
+                }
+                if (!installed) return@launch
                 val activeListener = opened
                 _state.value = State.Listening(
                     Session(
@@ -145,7 +154,16 @@ class ManagerServer(
                             Log.w(TAG, "Rejected manager TLS connection (${error.javaClass.simpleName})")
                             continue
                         }
-                        if (!PairingHttp.isPrivateAddress(client.inetAddress?.hostAddress) || !requestSlots.tryAcquire()) {
+                        if (!running || runGeneration != generation) {
+                            runCatching { client.close() }
+                            break
+                        }
+                        if (!PairingHttp.isPrivateAddress(client.inetAddress?.hostAddress)) {
+                            runCatching { client.close() }
+                            continue
+                        }
+                        val permit = admission.tryAcquire(client.inetAddress?.hostAddress)
+                        if (permit == null) {
                             runCatching { client.close() }
                             continue
                         }
@@ -153,13 +171,15 @@ class ManagerServer(
                             try {
                                 activeListener.completeHandshake(client)
                                 if (running && runGeneration == generation) {
-                                    handle(client, "${activeListener.host}:${activeListener.port}")
+                                    LanTlsServer.closeAfter(client, RESPONSE_DEADLINE_MILLIS).use {
+                                        handle(client, "${activeListener.host}:${activeListener.port}")
+                                    }
                                 }
                             } catch (error: Exception) {
                                 Log.w(TAG, "Manager request failed (${error.javaClass.simpleName})")
                             } finally {
                                 runCatching { client.close() }
-                                requestSlots.release()
+                                permit.close()
                             }
                         }
                     }
@@ -317,6 +337,18 @@ class ManagerServer(
         val patch = runCatching { json.decodeFromString(ChannelPatch.serializer(), body) }.getOrNull()
         if (patch == null || patch.id <= 0L) {
             output.write(PairingHttp.httpResponse("400 Bad Request", "text/plain", "Bad request."))
+            return
+        }
+        if (patch.hidden == false &&
+            !ParentalAuthorization.mayUnhide(settings.pinIsSet.value, settings.hiddenUnlocked.value)
+        ) {
+            output.write(
+                PairingHttp.httpResponse(
+                    "403 Forbidden",
+                    "text/plain",
+                    "Parental PIN required on the TV before hidden channels can be shown remotely.",
+                ),
+            )
             return
         }
         // Unknown ids simply update zero rows — harmless, so no existence check.
@@ -548,7 +580,8 @@ class ManagerServer(
 
     private companion object {
         const val TAG = "ManagerServer"
-        const val SOCKET_TIMEOUT_MILLIS = 15_000
+        const val SOCKET_TIMEOUT_MILLIS = 5_000
+        const val RESPONSE_DEADLINE_MILLIS = 10_000L
         const val IDLE_TIMEOUT_MINUTES = 30L
 
         // Generous next to pairing's 16 KB: a /reorder body carries every channel id in a

@@ -52,8 +52,9 @@ class RecordingRepository(
 
     suspend fun delete(id: Long) = dao.delete(id)
 
-    /** Cold-start reconciliation: anything left "recording" was killed mid-capture. */
-    suspend fun failInterrupted() = dao.failInterrupted()
+    /** Cold-start reconciliation, excluding a new capture started after this process booted. */
+    suspend fun failInterruptedBefore(startedBeforeMillis: Long) =
+        dao.failInterruptedBefore(startedBeforeMillis)
 
     // ---- Series-link rules -------------------------------------------------------------------
 

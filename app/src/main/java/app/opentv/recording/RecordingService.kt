@@ -36,6 +36,33 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 
+/** Serializes sink creation/writes with stop/delete and rejects work after deletion begins. */
+internal class RecordingWriteGate {
+    enum class State { OPEN, STOPPING, DELETING }
+
+    private val monitor = Any()
+    private var state = State.OPEN
+
+    fun requestStop(deleting: Boolean) = synchronized(monitor) {
+        state = when {
+            deleting -> State.DELETING
+            state == State.OPEN -> State.STOPPING
+            else -> state
+        }
+    }
+
+    fun currentState(): State = synchronized(monitor) { state }
+
+    fun <T> withWrite(block: () -> T): T = synchronized(monitor) {
+        if (state != State.OPEN) {
+            throw kotlinx.coroutines.CancellationException(
+                "Recording sink is no longer writable (${state.name.lowercase()}).",
+            )
+        }
+        block()
+    }
+}
+
 /**
  * A foreground service that captures live streams to storage. Recording has to keep going when the
  * user backs out of the player, opens another app, or the screen sleeps — a foreground service
@@ -62,12 +89,15 @@ class RecordingService : Service() {
         @Volatile var call: Call?,
         val job: Job,
         @Volatile var streamlinkReader: StreamlinkResolver.RecordingReader? = null,
-    )
+    ) {
+        val writeGate = RecordingWriteGate()
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
+        activeService = this
         createChannel()
         startForeground(NOTIFICATION_ID, buildNotification(0))
     }
@@ -99,6 +129,7 @@ class RecordingService : Service() {
     }
 
     private suspend fun runCapture(id: Long) {
+        val capture = captures[id] ?: return
         var setupRepo: app.opentv.data.repo.RecordingRepository? = null
         val setup = try {
             val graph = ServiceLocator.get(applicationContext)
@@ -169,30 +200,40 @@ class RecordingService : Service() {
             // zero-byte recording is left behind.
             suspend fun writeChunk(bytes: ByteArray, offset: Int, length: Int) {
                 var newlyOpened = false
-                val destination = sink ?: RecordingStorage.openSink(
-                    applicationContext,
-                    graph.settings,
-                    recording.filePath,
-                ).also { opened ->
-                    sink = opened
-                    outputLocator = opened.resolvedLocator ?: recording.filePath
-                    newlyOpened = true
+                val destination = capture.writeGate.withWrite {
+                    sink ?: RecordingStorage.openSink(
+                        applicationContext,
+                        graph.settings,
+                        recording.filePath,
+                    ).also { opened ->
+                        sink = opened
+                        outputLocator = opened.resolvedLocator ?: recording.filePath
+                        newlyOpened = true
+                    }
+                }
+
+                // SAF has already created the document at this point. Persist its real URI before
+                // allowing any byte to reach the stream; a process crash after this point can be
+                // recovered/deleted from the row rather than leaving an unlocatable file.
+                if (newlyOpened) {
+                    destination.resolvedLocator?.let { actual ->
+                        outputLocator = actual
+                        if (actual != recording.filePath) repo.setFilePath(id, actual)
+                    }
                 }
                 try {
-                    destination.output.write(bytes, offset, length)
-                    if (newlyOpened) {
-                        destination.output.flush()
-                        (destination.output as? FileOutputStream)?.fd?.sync()
+                    capture.writeGate.withWrite {
+                        destination.output.write(bytes, offset, length)
+                        if (newlyOpened) {
+                            destination.output.flush()
+                            (destination.output as? FileOutputStream)?.fd?.sync()
+                        }
                     }
                 } catch (writeError: IOException) {
                     throw RecordingOutputException(writeError)
                 }
                 total += length
                 if (newlyOpened) {
-                    destination.resolvedLocator?.let { actual ->
-                        outputLocator = actual
-                        if (actual != recording.filePath) repo.setFilePath(id, actual)
-                    }
                     // Announce only after the first media bytes exist, so a tail watcher never
                     // receives a path to an empty file.
                     RecordingLiveState.markActive(id, outputLocator)
@@ -274,7 +315,12 @@ class RecordingService : Service() {
         } finally {
             // The file is now at its final size — anyone watching it should see the true end.
             RecordingLiveState.markInactive(id)
-            runCatching { sink?.close() }
+            try {
+                sink?.close()
+            } catch (closeError: Exception) {
+                if (error == null) error = closeError.javaClass.simpleName
+                Log.w(TAG, "Recording $id destination close failed (${closeError.javaClass.simpleName})")
+            }
             if (sink != null && total == 0L) {
                 Log.i(TAG, "Recording $id received no media bytes; removing the empty destination")
                 runCatching { RecordingStorage.delete(applicationContext, graph.settings, outputLocator) }
@@ -378,11 +424,25 @@ class RecordingService : Service() {
         return total
     }
 
-    private fun stopCapture(id: Long) {
+    private fun requestStop(id: Long, deleting: Boolean) {
         val capture = captures[id] ?: return
+        capture.writeGate.requestStop(deleting)
         runCatching { capture.call?.cancel() }
-        capture.streamlinkReader?.let { reader -> scope.launch { runCatching { reader.close() } } }
+        capture.streamlinkReader?.let { reader ->
+            scope.launch {
+                withContext(NonCancellable) { runCatching { reader.close() } }
+            }
+        }
         capture.job.cancel()
+    }
+
+    private fun stopCapture(id: Long) = requestStop(id, deleting = false)
+
+    /** Stop a capture and wait until its finally block has closed the sink and retired the job. */
+    private suspend fun cancelAndJoin(id: Long) {
+        val capture = captures[id] ?: return
+        requestStop(id, deleting = true)
+        capture.job.join()
     }
 
     /** Called from the capture coroutine's finally to retire it and, if it was the last, stop. */
@@ -429,6 +489,7 @@ class RecordingService : Service() {
 
     override fun onDestroy() {
         scope.coroutineContext[Job]?.cancel()
+        if (activeService === this) activeService = null
         releaseWakeLock()
         super.onDestroy()
     }
@@ -487,6 +548,7 @@ class RecordingService : Service() {
     }
 
     companion object {
+        @Volatile private var activeService: RecordingService? = null
         private const val TAG = "OpenTV"
         private const val CHANNEL_ID = "recordings"
         private const val NOTIFICATION_ID = 4210
@@ -521,6 +583,20 @@ class RecordingService : Service() {
                 putExtra(EXTRA_ID, recordingId)
             }
             context.startService(intent)
+        }
+
+        /**
+         * Synchronously retire an in-process capture before a caller removes its physical file.
+         * When no service instance exists there is no active sink to join; sending the normal stop
+         * intent still covers a stale command without pretending that it was joined.
+         */
+        suspend fun stopAndJoin(context: Context, recordingId: Long) {
+            val service = activeService
+            if (service != null) {
+                service.cancelAndJoin(recordingId)
+            } else {
+                stop(context, recordingId)
+            }
         }
     }
 }

@@ -281,6 +281,7 @@
     <string name="parental_pin_confirm">Confirm</string>
     <string name="parental_pin_len_error">PIN must be 4 digits.</string>
     <string name="parental_pin_mismatch">PINs don\'t match.</string>
+    <string name="parental_pin_save_failed">The PIN change could not be saved. Try again.</string>
     <string name="parental_save_pin">Save PIN</string>
     <string name="parental_enter_pin">Enter PIN</string>
     <string name="parental_wrong_pin">Wrong PIN.</string>
@@ -306,13 +307,30 @@
     <string name="provider_stream_format_hint">HLS is the default. If channels won\'t play, try MPEG-TS — some providers only offer .ts.</string>
 
     <!-- ============================ Recording settings ============================ -->
-    <string name="recset_desc">Choose where recordings are saved. Internal keeps them on this device; a USB drive stores them on removable storage; NAS saves them to a shared folder on your network. All still play back here.</string>
+    <string name="recset_desc">Choose where recordings are saved. Internal keeps them on this device; USB uses removable storage; NAS or explicitly enabled FTP saves them to a local network server. Plain FTP is unencrypted. All still play back here.</string>
     <string name="recset_save_to">Save recordings to</string>
     <string name="recset_internal_label">This device (internal storage)</string>
     <string name="recset_smb_label">NAS / network share (SMB)</string>
     <string name="recset_smb_subtitle">Synology, a shared Windows folder, or any SMB2/3 server</string>
     <string name="recset_usb_label">USB / external drive</string>
     <string name="recset_usb_subtitle">A drive plugged into this device (formatted exFAT or FAT32)</string>
+    <string name="recset_ftp_label">Plain FTP (unencrypted)</string>
+    <string name="recset_ftp_subtitle">Private IPv4 server on your local network only</string>
+    <string name="recset_ftp_security_title">Plain FTP security risk</string>
+    <string name="recset_ftp_warning">Plain FTP does not encrypt the username, password, or video. Other devices on the network may capture them. Never use a public network or an Internet server.</string>
+    <string name="recset_ftp_local_only_hint">For safety, FullTV accepts only a numeric private IPv4 address (10.x, 172.16–31.x, or 192.168.x). Hostnames, DNS, and public IP addresses are blocked. FTP is only a recording destination. The folder is relative to the FTP account root (for example, FullTV/Recordings); leave it blank to use the root.</string>
+    <string name="recset_ftp_host">Local IPv4 address</string>
+    <string name="recset_ftp_port">FTP port</string>
+    <string name="recset_ftp_folder">Remote folder (relative; blank = account root)</string>
+    <string name="recset_ftp_username">FTP username</string>
+    <string name="recset_ftp_password">FTP password</string>
+    <string name="recset_ftp_consent">I understand and accept unencrypted transfer</string>
+    <string name="recset_ftp_consent_desc">FullTV will use FTP only for local-network recordings. Anyone able to intercept traffic may read the credentials and video.</string>
+    <string name="recset_ftp_test">Test FTP</string>
+    <string name="recset_ftp_status_connected">Connection and upload/delete test succeeded.</string>
+    <string name="recset_ftp_status_failed">FTP test failed. Check the server IP, port, credentials, folder access, and that this device is on the same local network.</string>
+    <string name="recset_ftp_save_failed">Could not save FTP credentials encrypted on this device.</string>
+    <string name="recset_ftp_config_invalid">Check the FTP settings. Use a numeric private IPv4 address and a relative folder path, or leave the folder blank to use the account root.</string>
     <string name="recset_usb_section">USB folder</string>
     <string name="recset_usb_choose">Choose folder</string>
     <string name="recset_usb_change">Change folder</string>

@@ -233,7 +233,10 @@ class BackupTransfer(
         livePauseEnabled = livePauseEnabled.value,
         playerResizeMode = playerResizeMode.value,
         recordingContainer = recordingContainer.value.name,
-        recordingTarget = if (recordingTarget.value == AppSettings.RecordingTarget.USB) {
+        // USB grants and local-only FTP credentials are device-specific and are never transferred.
+        recordingTarget = if (recordingTarget.value == AppSettings.RecordingTarget.USB ||
+            recordingTarget.value == AppSettings.RecordingTarget.FTP
+        ) {
             AppSettings.RecordingTarget.INTERNAL.name
         } else recordingTarget.value.name,
         smbHost = smbHost.value,
@@ -276,7 +279,11 @@ class BackupTransfer(
             .getOrNull()?.let(::setRecordingContainer)
         val target = runCatching { AppSettings.RecordingTarget.valueOf(saved.recordingTarget) }
             .getOrDefault(AppSettings.RecordingTarget.INTERNAL)
-        setRecordingTarget(if (target == AppSettings.RecordingTarget.USB) AppSettings.RecordingTarget.INTERNAL else target)
+        setRecordingTarget(
+            if (target == AppSettings.RecordingTarget.USB || target == AppSettings.RecordingTarget.FTP) {
+                AppSettings.RecordingTarget.INTERNAL
+            } else target,
+        )
         setSmbConfig(
             saved.smbHost.take(MAX_SETTING_TEXT_LENGTH),
             saved.smbShare.take(MAX_SETTING_TEXT_LENGTH),

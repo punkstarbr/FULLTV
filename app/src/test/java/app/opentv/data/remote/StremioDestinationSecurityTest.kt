@@ -20,8 +20,8 @@ class StremioDestinationSecurityTest {
                 val payload = """
                     {"streams":[
                       {"url":"https://192.168.1.25/private.m3u8","title":"private"},
-                      {"url":"https://8.8.8.8/public.m3u8","title":"public"},
-                      {"url":"https://addon.example/private-stream.m3u8","title":"same origin"},
+                      {"url":"https://1.1.1.1/public.m3u8","title":"public CDN"},
+                      {"url":"https://8.8.8.8/same-origin.m3u8","title":"same origin"},
                       {"url":"file:///etc/passwd","title":"file"}
                     ]}
                 """.trimIndent()
@@ -36,15 +36,15 @@ class StremioDestinationSecurityTest {
             .build()
 
         val streams = StremioClient(client).streams(
-            addonManifestUrl = "https://addon.example/manifest.json",
+            addonManifestUrl = "https://8.8.8.8/manifest.json",
             addonName = "Test add-on",
             type = "movie",
             id = "tt1234567",
         )
 
         assertThat(streams.map { it.url }).containsExactly(
-            "https://8.8.8.8/public.m3u8",
-            "https://addon.example/private-stream.m3u8",
+            "https://1.1.1.1/public.m3u8",
+            "https://8.8.8.8/same-origin.m3u8",
         ).inOrder()
     }
 }

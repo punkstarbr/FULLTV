@@ -21,11 +21,13 @@ import androidx.media3.transformer.TransformationRequest
 import androidx.media3.transformer.Transformer
 import app.opentv.core.ServiceLocator
 import app.opentv.data.model.Recording
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import kotlin.coroutines.resume
 
 /**
@@ -54,6 +56,13 @@ object RecordingRemux {
         val input = File(cache, "in-$stamp.ts")
         val output = File(cache, "out-$stamp.mp4")
         var targetLocator: String? = null
+        fun rollbackTarget() {
+            runCatching {
+                rollbackRemuxTarget(targetLocator, recording.filePath) { locator ->
+                    RecordingStorage.delete(context, settings, locator)
+                }
+            }
+        }
         try {
             // An internal recording already is a local file; skip the cache copy entirely. USB
             // (content://) and NAS recordings are streamed into the cache first — that also gives
@@ -105,23 +114,37 @@ object RecordingRemux {
                 planned
             } else {
                 val sink = RecordingStorage.openSink(context, settings, planned)
+                // Record the actual USB/SMB destination immediately after opening it. If the
+                // following copy fails or is cancelled, catch/finally can remove the partial
+                // remote file instead of losing it because targetLocator was assigned too late.
+                targetLocator = sink.resolvedLocator ?: planned
                 try {
                     withContext(Dispatchers.IO) {
                         result.inputStream().use { bytes -> bytes.copyTo(sink.output) }
                     }
+                    sink.output.flush()
                 } finally {
                     runCatching { sink.close() }
                 }
-                sink.resolvedLocator ?: planned
+                val copiedSize = RecordingStorage.sizeOf(context, settings, targetLocator!!)
+                if (copiedSize != result.length()) {
+                    throw IOException("Remux output size could not be verified.")
+                }
+                targetLocator!!
             }
             targetLocator = finalLocator
             graph.recordingRepository.setFilePath(recording.id, finalLocator)
             graph.recordingRepository.setSize(recording.id, result.length())
-            RecordingStorage.delete(context, settings, recording.filePath)
+            // The old TS is no longer the row's locator. A failed cleanup is non-fatal here: the
+            // validated MP4 remains playable, while the stale TS can be retried/cleaned later.
+            runCatching { RecordingStorage.delete(context, settings, recording.filePath) }
             return true
+        } catch (cancelled: CancellationException) {
+            rollbackTarget()
+            throw cancelled
         } catch (t: Throwable) {
             // Keep whatever is already complete on the destination out of the library.
-            targetLocator?.let { runCatching { RecordingStorage.delete(context, settings, it) } }
+            rollbackTarget()
             return false
         } finally {
             input.delete()
@@ -217,4 +240,14 @@ object RecordingRemux {
             }
         }
     }
+}
+
+/** Remove a newly opened remux target without ever deleting the original recording locator. */
+internal fun rollbackRemuxTarget(
+    targetLocator: String?,
+    originalLocator: String,
+    delete: (String) -> Boolean,
+): Boolean {
+    val target = targetLocator?.takeIf { it != originalLocator } ?: return true
+    return delete(target)
 }

@@ -24,18 +24,25 @@ class SourceRepository(
 ) {
     fun observeAll(): Flow<List<Source>> = dao.observeAll()
 
-    suspend fun enabled(): List<Source> = dao.enabled().also { sources ->
-        sources.forEach(::registerConfiguredOrigins)
+    suspend fun enabled(): List<Source> = dao.enabled().also {
+        // Rebuild rather than append: a deleted or edited source must not leave a private
+        // origin trusted for the rest of the process lifetime.
+        reconcileConfiguredOrigins()
     }
 
     suspend fun byId(id: Long): Source? = dao.byId(id)?.also(::registerConfiguredOrigins)
 
     suspend fun save(source: Source): Long = withContext(Dispatchers.IO) {
         val normalised = normaliseAndValidate(source)
-        registerConfiguredOrigins(normalised)
-        if (source.id == 0L) dao.insert(normalised)
-        else {
+        if (source.id == 0L) {
+            val id = dao.insert(normalised)
+            reconcileConfiguredOrigins()
+            id
+        } else {
+            val previous = dao.byId(source.id)
             dao.update(normalised)
+            registerConfiguredOrigins(normalised)
+            previous?.let { revokeIfNoLongerConfigured(it) }
             source.id
         }
     }
@@ -44,7 +51,6 @@ class SourceRepository(
     suspend fun test(source: Source): Result<String> = withContext(Dispatchers.IO) {
         runCatching {
             val secure = normaliseAndValidate(source)
-            registerConfiguredOrigins(secure)
             when (secure.kind) {
                 SourceKind.XTREAM -> {
                     val info = api.authenticate(secure)
@@ -75,6 +81,23 @@ class SourceRepository(
     private fun registerConfiguredOrigins(source: Source) {
         NetworkDestinationPolicy.registerTrustedOrigin(source.url)
         source.epgUrl?.let(NetworkDestinationPolicy::registerTrustedOrigin)
+    }
+
+    private suspend fun reconcileConfiguredOrigins() {
+        val configured = dao.all().flatMap { source ->
+            listOfNotNull(source.url, source.epgUrl)
+        }
+        NetworkDestinationPolicy.replaceTrustedOrigins(configured)
+    }
+
+    private suspend fun revokeIfNoLongerConfigured(previous: Source) {
+        val stillConfigured = dao.all().flatMap { source ->
+            listOfNotNull(source.url, source.epgUrl)
+        }.mapNotNull(NetworkDestinationPolicy::originOf).toSet()
+        listOfNotNull(previous.url, previous.epgUrl)
+            .mapNotNull(NetworkDestinationPolicy::originOf)
+            .filterNot(stillConfigured::contains)
+            .forEach(NetworkDestinationPolicy::revokeTrustedOrigin)
     }
 
     companion object {

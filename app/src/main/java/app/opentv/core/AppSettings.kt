@@ -6,6 +6,7 @@
 package app.opentv.core
 
 import android.content.Context
+import android.os.SystemClock
 import app.opentv.data.model.StremioAddon
 import app.opentv.security.EncryptedSecretStore
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -121,27 +122,67 @@ class AppSettings private constructor(context: Context) {
     private val _hiddenUnlocked = MutableStateFlow(false)
     val hiddenUnlocked: StateFlow<Boolean> = _hiddenUnlocked.asStateFlow()
 
-    fun setPin(pin: String) {
+    fun setPin(pin: String): Boolean = synchronized(PIN_LOCK) {
         require(pin.length == PIN_LENGTH && pin.all(Char::isDigit)) { "PIN must contain four digits." }
-        prefs.edit()
+        val previousPinHash = prefs.getString(KEY_PIN_HASH, null)
+        val saved = prefs.edit()
             .putString(KEY_PIN_HASH, PIN_HMAC_PREFIX + hashPin(pin))
             .remove(KEY_PIN_FAILURES)
             .remove(KEY_PIN_LOCK_UNTIL)
-            .apply()
-        _pinIsSet.value = true
+            .remove(KEY_PIN_LOCK_UNTIL_ELAPSED)
+            .remove(KEY_PIN_LOCK_DURATION)
+            .remove(KEY_PIN_LAST_ELAPSED)
+            .commit()
+        if (!saved && previousPinHash != null) {
+            runCatching { prefs.edit().putString(KEY_PIN_HASH, previousPinHash).commit() }
+        }
+        _pinIsSet.value = prefs.getString(KEY_PIN_HASH, null) != null
+        saved
     }
 
-    fun clearPin() {
-        prefs.edit().remove(KEY_PIN_HASH).remove(KEY_PIN_FAILURES).remove(KEY_PIN_LOCK_UNTIL).apply()
+    fun clearPin(): Boolean = synchronized(PIN_LOCK) {
+        val previousPinHash = prefs.getString(KEY_PIN_HASH, null)
+        if (previousPinHash == null) {
+            if (_pinIsSet.value) return@synchronized false
+            _pinIsSet.value = false
+            _hiddenUnlocked.value = true
+            return@synchronized true
+        }
+        val saved = prefs.edit()
+            .remove(KEY_PIN_HASH)
+            .remove(KEY_PIN_FAILURES)
+            .remove(KEY_PIN_LOCK_UNTIL)
+            .remove(KEY_PIN_LOCK_UNTIL_ELAPSED)
+            .remove(KEY_PIN_LOCK_DURATION)
+            .remove(KEY_PIN_LAST_ELAPSED)
+            .commit()
+        if (!saved) {
+            // SharedPreferences may already have changed its in-memory map even when disk commit
+            // fails. Restore the prior verifier where possible and remain locked either way.
+            runCatching { prefs.edit().putString(KEY_PIN_HASH, previousPinHash).commit() }
+            _pinIsSet.value = true
+            return@synchronized false
+        }
         _pinIsSet.value = false
         _hiddenUnlocked.value = true
+        true
     }
 
     fun verifyPin(pin: String): Boolean {
         synchronized(PIN_LOCK) {
-            val stored = prefs.getString(KEY_PIN_HASH, null) ?: return true
-            val now = System.currentTimeMillis()
-            if (now < prefs.getLong(KEY_PIN_LOCK_UNTIL, 0L)) return false
+            val stored = prefs.getString(KEY_PIN_HASH, null) ?: return !_pinIsSet.value
+            val nowElapsed = SystemClock.elapsedRealtime()
+            val reconciled = PinLockPolicy.reconcile(
+                PinLockState(
+                    failures = prefs.getInt(KEY_PIN_FAILURES, 0).coerceAtLeast(0),
+                    lockUntilElapsedMillis = prefs.getLong(KEY_PIN_LOCK_UNTIL_ELAPSED, 0L),
+                    lockDurationMillis = prefs.getLong(KEY_PIN_LOCK_DURATION, 0L),
+                    lastElapsedMillis = prefs.getLong(KEY_PIN_LAST_ELAPSED, -1L),
+                ),
+                nowElapsed,
+            )
+            if (!persistPinState(reconciled)) return false
+            if (PinLockPolicy.isLocked(reconciled, nowElapsed)) return false
             val candidate = runCatching {
                 if (stored.startsWith(PIN_HMAC_PREFIX)) {
                     PIN_HMAC_PREFIX + hashPin(pin)
@@ -154,21 +195,32 @@ class AppSettings private constructor(context: Context) {
                 candidate.toByteArray(Charsets.US_ASCII),
             )
             if (matches) {
-                val update = prefs.edit().remove(KEY_PIN_FAILURES).remove(KEY_PIN_LOCK_UNTIL)
+                val update = prefs.edit()
+                    .remove(KEY_PIN_FAILURES)
+                    .remove(KEY_PIN_LOCK_UNTIL)
+                    .remove(KEY_PIN_LOCK_UNTIL_ELAPSED)
+                    .remove(KEY_PIN_LOCK_DURATION)
+                    .putLong(KEY_PIN_LAST_ELAPSED, nowElapsed)
                 if (!stored.startsWith(PIN_HMAC_PREFIX)) {
                     update.putString(KEY_PIN_HASH, PIN_HMAC_PREFIX + hashPin(pin))
                 }
-                update.apply()
-                return true
+                return update.commit()
             }
-            val failures = prefs.getInt(KEY_PIN_FAILURES, 0) + 1
-            val lockMillis = pinLockMillis(failures)
-            prefs.edit().putInt(KEY_PIN_FAILURES, failures)
-                .putLong(KEY_PIN_LOCK_UNTIL, if (lockMillis == 0L) 0L else now + lockMillis)
-                .apply()
+            val failed = PinLockPolicy.registerFailure(reconciled, nowElapsed)
+            if (!persistPinState(failed)) return false
             return false
         }
     }
+
+    private fun persistPinState(state: PinLockState): Boolean =
+        prefs.edit()
+            .putInt(KEY_PIN_FAILURES, state.failures)
+            .putLong(KEY_PIN_LOCK_UNTIL_ELAPSED, state.lockUntilElapsedMillis)
+            .putLong(KEY_PIN_LOCK_DURATION, state.lockDurationMillis)
+            .putLong(KEY_PIN_LAST_ELAPSED, state.lastElapsedMillis)
+            // Do not leave the old wall-clock deadline available to older code after migration.
+            .remove(KEY_PIN_LOCK_UNTIL)
+            .commit()
 
     fun setHiddenCategories(keys: Set<String>) {
         prefs.edit().putStringSet(KEY_HIDDEN_CATS, keys).apply()
@@ -186,13 +238,6 @@ class AppSettings private constructor(context: Context) {
         val digest = java.security.MessageDigest.getInstance("SHA-256")
         val bytes = digest.digest("opentv-pin::$pin".toByteArray())
         return bytes.joinToString("") { "%02x".format(it) }
-    }
-
-    private fun pinLockMillis(failures: Int): Long = when {
-        failures < 5 -> 0L
-        failures < 10 -> (failures - 4) * 10_000L
-        failures < 15 -> (failures - 9) * 60_000L
-        else -> 30 * 60_000L
     }
 
     fun setThemeMode(mode: ThemeMode) {
@@ -447,7 +492,7 @@ class AppSettings private constructor(context: Context) {
      * USB / external drive addressed through the Storage Access Framework (a granted tree URI —
      * the only way to write removable storage on modern Android without a raw filesystem path).
      */
-    enum class RecordingTarget { INTERNAL, SMB, USB }
+    enum class RecordingTarget { INTERNAL, SMB, USB, FTP }
 
     private val _recordingTarget = MutableStateFlow(readRecordingTarget())
     val recordingTarget: StateFlow<RecordingTarget> = _recordingTarget.asStateFlow()
@@ -501,6 +546,21 @@ class AppSettings private constructor(context: Context) {
     private val _smbPassword = MutableStateFlow(readSecret(KEY_SMB_PASS))
     val smbPassword: StateFlow<String> = _smbPassword.asStateFlow()
 
+    /** FTP is a deliberately cleartext exception, restricted by FtpClient to a private IPv4 LAN. */
+    private val _ftpHost = MutableStateFlow(prefs.getString(KEY_FTP_HOST, "").orEmpty())
+    val ftpHost: StateFlow<String> = _ftpHost.asStateFlow()
+    private val _ftpPort = MutableStateFlow(prefs.getInt(KEY_FTP_PORT, 21).coerceIn(1, 65_535))
+    val ftpPort: StateFlow<Int> = _ftpPort.asStateFlow()
+    private val _ftpFolder = MutableStateFlow(prefs.getString(KEY_FTP_FOLDER, "FullTV").orEmpty())
+    val ftpFolder: StateFlow<String> = _ftpFolder.asStateFlow()
+    private val _ftpUser = MutableStateFlow(readSecret(KEY_FTP_USER))
+    val ftpUser: StateFlow<String> = _ftpUser.asStateFlow()
+    private val _ftpPassword = MutableStateFlow(readSecret(KEY_FTP_PASS))
+    val ftpPassword: StateFlow<String> = _ftpPassword.asStateFlow()
+    private val _ftpPlaintextAcknowledged =
+        MutableStateFlow(prefs.getBoolean(KEY_FTP_PLAINTEXT_ACK, false))
+    val ftpPlaintextAcknowledged: StateFlow<Boolean> = _ftpPlaintextAcknowledged.asStateFlow()
+
     fun setRecordingTarget(target: RecordingTarget) {
         prefs.edit().putString(KEY_REC_TARGET, target.name).apply()
         _recordingTarget.value = target
@@ -530,6 +590,68 @@ class AppSettings private constructor(context: Context) {
         _smbFolder.value = folder.trim()
         _smbUser.value = user
         _smbPassword.value = password
+    }
+
+    /** Returns false if the encrypted credential write or durable preferences commit fails. */
+    fun setFtpConfig(
+        host: String,
+        port: Int,
+        folder: String,
+        user: String,
+        password: String,
+        plaintextAcknowledged: Boolean,
+    ): Boolean {
+        if (port !in 1..65_535) return false
+        val previousUser = _ftpUser.value
+        val previousPassword = _ftpPassword.value
+        val previousHost = _ftpHost.value
+        val previousPort = _ftpPort.value
+        val previousFolder = _ftpFolder.value
+        val previousAcknowledgement = _ftpPlaintextAcknowledged.value
+        var userWritten = false
+        var passwordWritten = false
+        var preferencesAttempted = false
+        val success = runCatching {
+            userWritten = true
+            writeSecret(KEY_FTP_USER, user)
+            passwordWritten = true
+            writeSecret(KEY_FTP_PASS, password)
+            val cleanHost = host.trim()
+            val cleanFolder = folder.trim()
+            preferencesAttempted = true
+            check(
+                prefs.edit()
+                    .putString(KEY_FTP_HOST, cleanHost)
+                    .putInt(KEY_FTP_PORT, port)
+                    .putString(KEY_FTP_FOLDER, cleanFolder)
+                    .putBoolean(KEY_FTP_PLAINTEXT_ACK, plaintextAcknowledged)
+                    .remove(KEY_FTP_USER)
+                    .remove(KEY_FTP_PASS)
+                    .commit(),
+            ) { "FTP settings could not be saved." }
+            _ftpHost.value = cleanHost
+            _ftpPort.value = port
+            _ftpFolder.value = cleanFolder
+            _ftpUser.value = user
+            _ftpPassword.value = password
+            _ftpPlaintextAcknowledged.value = plaintextAcknowledged
+        }.isSuccess
+        if (!success) {
+            // If any encrypted write or the settings commit failed, restore the prior config.
+            if (preferencesAttempted) runCatching {
+                prefs.edit()
+                    .putString(KEY_FTP_HOST, previousHost)
+                    .putInt(KEY_FTP_PORT, previousPort)
+                    .putString(KEY_FTP_FOLDER, previousFolder)
+                    .putBoolean(KEY_FTP_PLAINTEXT_ACK, previousAcknowledgement)
+                    .remove(KEY_FTP_USER)
+                    .remove(KEY_FTP_PASS)
+                    .commit()
+            }
+            if (passwordWritten) runCatching { writeSecret(KEY_FTP_PASS, previousPassword) }
+            if (userWritten) runCatching { writeSecret(KEY_FTP_USER, previousUser) }
+        }
+        return success
     }
 
     private fun readRecordingTarget(): RecordingTarget =
@@ -613,24 +735,35 @@ class AppSettings private constructor(context: Context) {
                 ?.let { addonJson.decodeFromString<List<StremioAddon>>(it) }
         }.getOrNull() ?: emptyList()
 
-    /** Encrypts a legacy preference once, then removes the plaintext source value. */
+    /**
+     * Reads an encrypted secret, migrating a legacy preference only after a successful write,
+     * decrypt-and-compare verification, and durable removal of the plaintext source. A Keystore or
+     * decrypt failure never exposes the legacy value to runtime callers.
+     */
     private fun readSecret(key: String): String {
-        val encrypted = secretStore.get(key)
-        if (encrypted != null) {
-            if (prefs.contains(key)) prefs.edit().remove(key).commit()
-            return encrypted
-        }
-        val legacy = prefs.getString(key, null) ?: return ""
-        return runCatching {
-            secretStore.put(key, legacy)
-            check(prefs.edit().remove(key).commit()) { "Could not remove plaintext secret." }
-            legacy
-        }.getOrElse {
-            // Fail closed: do not preserve a plaintext fallback if Keystore is unavailable.
-            prefs.edit().remove(key).commit()
-            ""
+        return when (val encrypted = secretStore.get(key)) {
+            is EncryptedSecretStore.ReadResult.Present -> {
+                if (prefs.contains(key)) prefs.edit().remove(key).commit()
+                encrypted.value
+            }
+            EncryptedSecretStore.ReadResult.Absent -> {
+                val legacy = prefs.getString(key, null) ?: return ""
+                migrateSecret(key, legacy)
+            }
+            EncryptedSecretStore.ReadResult.DecryptError -> ""
+            EncryptedSecretStore.ReadResult.KeystoreUnavailable -> ""
         }
     }
+
+    private fun migrateSecret(key: String, legacy: String): String = runCatching {
+        secretStore.put(key, legacy)
+        val verified = secretStore.get(key)
+        check(verified is EncryptedSecretStore.ReadResult.Present && verified.value == legacy) {
+            "Encrypted secret could not be verified after migration."
+        }
+        check(prefs.edit().remove(key).commit()) { "Could not remove plaintext secret." }
+        verified.value
+    }.getOrDefault("")
 
     private fun writeSecret(key: String, value: String) {
         secretStore.put(key, value)
@@ -649,7 +782,11 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_PREVIEW_SOUND = "guide_preview_sound"
         private const val KEY_PIN_HASH = "parental_pin_hash"
         private const val KEY_PIN_FAILURES = "parental_pin_failed_attempts"
+        /** Legacy wall-clock key is removed and never used as a runtime deadline. */
         private const val KEY_PIN_LOCK_UNTIL = "parental_pin_lock_until"
+        private const val KEY_PIN_LOCK_UNTIL_ELAPSED = "parental_pin_lock_until_elapsed"
+        private const val KEY_PIN_LOCK_DURATION = "parental_pin_lock_duration"
+        private const val KEY_PIN_LAST_ELAPSED = "parental_pin_last_elapsed"
         private const val KEY_HIDDEN_CATS = "hidden_categories"
         private const val KEY_ACTIVE_PROFILE = "active_profile_id"
         private const val KEY_RESUME_LAST = "resume_last_channel"
@@ -676,6 +813,12 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_SMB_FOLDER = "smb_folder"
         private const val KEY_SMB_USER = "smb_user"
         private const val KEY_SMB_PASS = "smb_password"
+        private const val KEY_FTP_HOST = "ftp_host"
+        private const val KEY_FTP_PORT = "ftp_port"
+        private const val KEY_FTP_FOLDER = "ftp_folder"
+        private const val KEY_FTP_USER = "ftp_username"
+        private const val KEY_FTP_PASS = "ftp_password"
+        private const val KEY_FTP_PLAINTEXT_ACK = "ftp_plaintext_acknowledged"
         private const val KEY_USB_TREE = "usb_tree_uri"
         private const val KEY_USB_LABEL = "usb_folder_label"
         private const val KEY_SYNC_DEVICE_ID = "sync_device_id"

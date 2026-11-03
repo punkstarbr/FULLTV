@@ -33,6 +33,8 @@ object SyncKeyStore {
     private const val KEY_BYTES = 32
     private const val IV_BYTES = 12
     private const val TAG_BITS = 128
+    private const val NEXT_SEQUENCE_KEY = "next_bundle_sequence"
+    private const val ACCEPTED_SEQUENCE_PREFIX = "accepted_bundle_sequence_"
     private val lock = Any()
     private val random = SecureRandom()
 
@@ -57,6 +59,43 @@ object SyncKeyStore {
     fun decodeTransferKey(encoded: String): ByteArray? = runCatching {
         Base64.decode(encoded, Base64.NO_WRAP).takeIf { it.size == KEY_BYTES }
     }.getOrNull()
+
+    /** Allocates the next authenticated sender counter durably before a bundle is published. */
+    fun nextSequence(context: Context): Long = synchronized(lock) {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val current = prefs.getLong(NEXT_SEQUENCE_KEY, 0L)
+        require(current < Long.MAX_VALUE) { "The sync sequence counter is exhausted." }
+        val next = current + 1L
+        check(prefs.edit().putLong(NEXT_SEQUENCE_KEY, next).commit()) {
+            "Could not persist the sync sequence counter."
+        }
+        next
+    }
+
+    /**
+     * Atomically records a peer counter. A counter is claimed before applying any bundle fields;
+     * an older or equal counter is therefore rejected after process/device restarts as well.
+     */
+    fun acceptSequence(context: Context, senderDeviceId: String, sequence: Long): Boolean = synchronized(lock) {
+        require(senderDeviceId.matches(Regex("[A-Za-z0-9_-]{1,64}"))) {
+            "The sync sender identity is invalid."
+        }
+        require(sequence > 0L) { "The sync sequence must be positive." }
+        val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val key = ACCEPTED_SEQUENCE_PREFIX + sequenceKey(senderDeviceId)
+        val previous = prefs.getLong(key, 0L)
+        if (sequence <= previous) return@synchronized false
+        check(prefs.edit().putLong(key, sequence).commit()) {
+            "Could not persist the accepted sync sequence."
+        }
+        true
+    }
+
+    private fun sequenceKey(senderDeviceId: String): String =
+        MessageDigest.getInstance("SHA-256")
+            .digest(senderDeviceId.toByteArray(Charsets.UTF_8))
+            .copyOfRange(0, 16)
+            .joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
 
     private fun store(context: Context, key: ByteArray) {
         val encoded = encrypt(key)

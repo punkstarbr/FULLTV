@@ -4,8 +4,10 @@ import base64
 import json
 import threading
 import uuid
+from urllib.parse import urlsplit
 
 from fulltv_lxml_guard import harden_lxml
+from fulltv_network_guard import guard_streamlink_session
 
 harden_lxml()
 
@@ -16,10 +18,27 @@ _recordings = {}
 _recordings_lock = threading.RLock()
 
 
+def _youtube_url(channel_url: str) -> str:
+    """Accept only Kotlin's canonical HTTPS YouTube URL, never an arbitrary plugin URL."""
+    if not isinstance(channel_url, str) or not 16 <= len(channel_url) <= 2048:
+        raise ValueError("Expected a canonical YouTube live URL.")
+    parsed = urlsplit(channel_url)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname != "www.youtube.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+        or parsed.port not in (None, 443)
+    ):
+        raise ValueError("Expected a canonical HTTPS YouTube live URL.")
+    return channel_url
+
+
 def _session():
     session = Streamlink()
     session.set_option("stream-timeout", 30)
-    return session
+    return guard_streamlink_session(session)
 
 
 def _close_session(session) -> None:
@@ -35,6 +54,7 @@ def _close_session(session) -> None:
 
 def resolve_best(channel_url: str) -> str:
     """Resolve a current YouTube live stream using Streamlink's `best` selector."""
+    channel_url = _youtube_url(channel_url)
     session = _session()
     try:
         streams = session.streams(channel_url)
@@ -56,7 +76,8 @@ def resolve_best(channel_url: str) -> str:
 
 
 def open_recording(channel_url: str) -> str:
-    """Open Streamlink's file-like reader and return an opaque handle for Kotlin."""
+    """Open a guarded Streamlink reader and return an opaque handle for Kotlin."""
+    channel_url = _youtube_url(channel_url)
     session = _session()
     reader = None
     try:
@@ -64,6 +85,7 @@ def open_recording(channel_url: str) -> str:
         best = streams.get("best")
         if best is None:
             raise RuntimeError("No current live stream was found for this YouTube URL.")
+        # The session adapters enforce HTTPS, public-only DNS and per-connection DNS pinning.
         reader = best.open()
         token = uuid.uuid4().hex
         with _recordings_lock:

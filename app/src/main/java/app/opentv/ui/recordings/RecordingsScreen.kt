@@ -112,9 +112,16 @@ class RecordingsViewModel(app: Application) : AndroidViewModel(app) {
 
     fun delete(recording: Recording) {
         viewModelScope.launch {
-            if (recording.status == RecordingStatus.RECORDING) graph.recordingEngine.stop(recording.id)
-            RecordingStorage.delete(getApplication(), graph.settings, recording.filePath)
-            graph.recordingRepository.delete(recording.id)
+            val result = graph.recordingEngine.delete(recording.id)
+            if (!result.deleted) {
+                // Keep the row visible and make the physical failure retryable/auditable instead
+                // of reporting a successful UI deletion while an SMB/USB file remains behind.
+                graph.recordingRepository.setStatus(
+                    recording.id,
+                    RecordingStatus.FAILED,
+                    result.error ?: getApplication<Application>().getString(R.string.rec_error_unknown),
+                )
+            }
         }
     }
 }
@@ -346,8 +353,7 @@ private fun RecordingRow(
     // An in-progress recording can be watched as it records — tail-followed off disk (internal) or
     // over SMB (NAS), with no second provider connection. USB (SAF) in-progress isn't offered.
     val watchableLive = recording.status == RecordingStatus.RECORDING &&
-        !RecordingStorage.isContent(recording.filePath) &&
-        !RecordingStorage.isUsbPlaceholder(recording.filePath)
+        RecordingStorage.supportsGrowingPlayback(recording.filePath)
     val profileName = recording.profileId?.takeIf { it != 0L }?.let { profileNames[it] }
     Row(
         Modifier

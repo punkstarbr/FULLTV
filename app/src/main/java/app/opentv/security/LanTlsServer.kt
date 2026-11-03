@@ -10,6 +10,7 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import java.io.Closeable
 import java.net.InetAddress
+import java.net.Socket
 import java.security.KeyPair
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -18,6 +19,10 @@ import java.security.SecureRandom
 import java.security.cert.CertificateException
 import java.security.cert.X509Certificate
 import java.util.Date
+import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledFuture
+import java.util.concurrent.ThreadFactory
+import java.util.concurrent.TimeUnit
 import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLServerSocket
@@ -52,6 +57,11 @@ object LanTlsServer {
     private const val CERT_VALIDITY_MILLIS = 365L * 24 * 60 * 60 * 1000
     const val SYNC_PIN_HEX_CHARS = 24 // 96-bit short authentication string, compared out of band.
     private val keyLock = Any()
+    private val deadlineExecutor = Executors.newSingleThreadScheduledExecutor(
+        ThreadFactory { runnable ->
+            Thread(runnable, "opentv-lan-deadline").apply { isDaemon = true }
+        },
+    )
 
     data class Listener(
         private val serverSocket: SSLServerSocket,
@@ -137,6 +147,20 @@ object LanTlsServer {
             publicKeySha256 = publicKeyHash,
             syncPin = publicKeyHash.take(SYNC_PIN_HEX_CHARS),
         )
+    }
+
+    /**
+     * Closes a client even when a peer stops reading and a response write blocks in the kernel.
+     * The returned handle cancels the deadline once the handler completes normally.
+     */
+    fun closeAfter(socket: Socket, timeoutMillis: Long): Closeable {
+        require(timeoutMillis > 0L)
+        val future: ScheduledFuture<*> = deadlineExecutor.schedule(
+            { runCatching { socket.close() } },
+            timeoutMillis,
+            TimeUnit.MILLISECONDS,
+        )
+        return Closeable { future.cancel(false) }
     }
 
     /**

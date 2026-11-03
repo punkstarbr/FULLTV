@@ -7,6 +7,7 @@ package app.opentv.sync
 
 import android.util.Log
 import app.opentv.pairing.PairingHttp
+import app.opentv.security.LanConnectionLimiter
 import app.opentv.security.LanTlsServer
 import java.net.InetAddress
 import java.net.NetworkInterface
@@ -62,7 +63,7 @@ class SyncServer(private val scope: CoroutineScope) {
     @Volatile private var starting = false
     @Volatile private var generation = 0
     private var startJob: Job? = null
-    private val requestSlots = java.util.concurrent.Semaphore(4)
+    private val admission = LanConnectionLimiter()
 
     @Synchronized
     fun start(bundleJson: String) {
@@ -84,13 +85,20 @@ class SyncServer(private val scope: CoroutineScope) {
                 val nextCode = "%06d".format(random.nextInt(1_000_000))
                 val opened = LanTlsServer.open(host)
                 listener = opened
-                if (runGeneration != generation) return@launch
-
-                code = nextCode
-                bundle = bundleJson
-                wrongAttempts.set(0)
-                serverSocket = opened
-                running = true
+                val installed = synchronized(this@SyncServer) {
+                    if (runGeneration != generation) {
+                        false
+                    } else {
+                        code = nextCode
+                        bundle = bundleJson
+                        wrongAttempts.set(0)
+                        serverSocket = opened
+                        running = true
+                        admission.reset()
+                        true
+                    }
+                }
+                if (!installed) return@launch
                 _state.value = State.Sharing(
                     Session(
                         host = opened.host,
@@ -110,7 +118,16 @@ class SyncServer(private val scope: CoroutineScope) {
                             Log.w(TAG, "Rejected sync TLS connection (${error.javaClass.simpleName})")
                             continue
                         }
-                        if (!PairingHttp.isPrivateAddress(client.inetAddress?.hostAddress) || !requestSlots.tryAcquire()) {
+                        if (!running || runGeneration != generation) {
+                            runCatching { client.close() }
+                            break
+                        }
+                        if (!PairingHttp.isPrivateAddress(client.inetAddress?.hostAddress)) {
+                            runCatching { client.close() }
+                            continue
+                        }
+                        val permit = admission.tryAcquire(client.inetAddress?.hostAddress)
+                        if (permit == null) {
                             runCatching { client.close() }
                             continue
                         }
@@ -118,13 +135,15 @@ class SyncServer(private val scope: CoroutineScope) {
                             try {
                                 opened.completeHandshake(client)
                                 if (running && runGeneration == generation) {
-                                    handle(client, "${opened.host}:${opened.port}")
+                                    LanTlsServer.closeAfter(client, RESPONSE_DEADLINE_MILLIS).use {
+                                        handle(client, "${opened.host}:${opened.port}")
+                                    }
                                 }
                             } catch (error: Exception) {
                                 Log.w(TAG, "Sync request failed (${error.javaClass.simpleName})")
                             } finally {
                                 runCatching { client.close() }
-                                requestSlots.release()
+                                permit.close()
                             }
                         }
                     }
@@ -229,7 +248,8 @@ class SyncServer(private val scope: CoroutineScope) {
     private companion object {
         const val TAG = "OpenTV"
         const val TIMEOUT_MINUTES = 5L
-        const val SOCKET_TIMEOUT_MILLIS = 10_000
+        const val SOCKET_TIMEOUT_MILLIS = 5_000
+        const val RESPONSE_DEADLINE_MILLIS = 10_000L
         const val MAX_ATTEMPTS = 5
         const val MAX_BUNDLE_BYTES = 8 * 1024 * 1024
     }

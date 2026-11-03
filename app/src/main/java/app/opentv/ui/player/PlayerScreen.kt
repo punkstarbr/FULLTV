@@ -116,8 +116,10 @@ import app.opentv.player.ProvidedSubtitleTranslationEngine
 import app.opentv.player.ProvidedSubtitleTranslationPhase
 import app.opentv.player.ProvidedSubtitleTranslationState
 import app.opentv.player.YouTubeChannelUrl
+import app.opentv.security.ParentalAuthorization
 import app.opentv.ui.RecordingBackgroundDialog
 import app.opentv.ui.RecordingBackgroundPrompt
+import app.opentv.ui.ParentalPinGate
 import app.opentv.ui.interfacePalette
 import coil.compose.AsyncImage
 import kotlinx.coroutines.CancellationException
@@ -213,6 +215,7 @@ fun PlayerScreen(
     var variants by remember { mutableStateOf<List<Channel>>(emptyList()) }
     var currentId by remember { mutableStateOf<Long?>(null) }
     var currentChannel by remember { mutableStateOf<Channel?>(null) }
+    var pendingParentalChannel by remember { mutableStateOf<Channel?>(null) }
     var nowProgramme by remember { mutableStateOf<Programme?>(null) }
     var nextProgramme by remember { mutableStateOf<Programme?>(null) }
     var infoClockMillis by remember { mutableStateOf(System.currentTimeMillis()) }
@@ -319,11 +322,32 @@ fun PlayerScreen(
 
     fun tuneTo(channel: Channel) {
         tuneJob?.cancel()
-        currentId = channel.id
-        currentChannel = channel
-        paused = false
-        settings.lastChannelId = channel.id
         tuneJob = scope.launch {
+            val hiddenCategoryIds = ParentalAuthorization.hiddenCategoryIds(
+                graph.catalogRepository.liveCategories(),
+                settings.hiddenCategories.value,
+            )
+            val allowed = ParentalAuthorization.mayStartPlayback(
+                channel = channel,
+                hiddenCategoryIds = hiddenCategoryIds,
+                pinIsSet = settings.pinIsSet.value,
+                hiddenUnlocked = settings.hiddenUnlocked.value,
+            )
+            if (!allowed && !settings.pinIsSet.value) {
+                // With no configured PIN, the existing parental screen treats the unlock as a
+                // normal session preference rather than an authentication event.
+                settings.setHiddenUnlocked(true)
+            } else if (!allowed) {
+                // No route, reminder, resume request or numeric entry may start a protected stream
+                // before the same parental authorization used by the guide has been satisfied.
+                controller.stop()
+                pendingParentalChannel = channel
+                return@launch
+            }
+            currentId = channel.id
+            currentChannel = channel
+            paused = false
+            settings.lastChannelId = channel.id
             val source = graph.sourceRepository.byId(channel.sourceId)
             val youtubeLiveUrl = YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl)
             if (youtubeLiveUrl != null) {
@@ -722,11 +746,7 @@ fun PlayerScreen(
                         Spacer(Modifier.height(24.dp))
                         Button(onClick = {
                             val channel = currentChannel
-                            if (channel != null && YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl) != null) {
-                                tuneTo(channel)
-                            } else {
-                                controller.retry()
-                            }
+                            if (channel != null) tuneTo(channel) else controller.retry()
                         }) { Text(stringResource(R.string.common_try_again)) }
                     }
                 }
@@ -974,6 +994,24 @@ fun PlayerScreen(
                 }
             }
         }
+    }
+
+    pendingParentalChannel?.let { requested ->
+        ParentalPinGate(
+            onCancel = {
+                pendingParentalChannel = null
+                onBack()
+            },
+            onSubmit = { entered ->
+                settings.verifyPin(entered).also { valid ->
+                    if (valid) {
+                        settings.setHiddenUnlocked(true)
+                        pendingParentalChannel = null
+                        tuneTo(requested)
+                    }
+                }
+            },
+        )
     }
 
     if (showBackgroundPrompt) {

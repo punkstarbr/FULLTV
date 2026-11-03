@@ -75,9 +75,12 @@ import app.opentv.core.AppSettings
 import app.opentv.core.ServiceLocator
 import app.opentv.core.isIgnoringBatteryOptimizations
 import app.opentv.core.requestIgnoreBatteryOptimizations
+import app.opentv.recording.FtpClient
+import app.opentv.recording.FtpConfig
 import app.opentv.recording.RecordingStorage
 import app.opentv.recording.SmbClient
 import app.opentv.recording.SmbConfig
+import app.opentv.ui.ProtectSensitiveScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -91,6 +94,7 @@ import kotlinx.coroutines.withContext
  */
 @Composable
 fun RecordingSettingsScreen(onBack: () -> Unit) {
+    ProtectSensitiveScreen()
     val context = LocalContext.current
     val graph = remember { ServiceLocator.get(context) }
     val settings = graph.settings
@@ -102,6 +106,13 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
     var folder by remember { mutableStateOf(settings.smbFolder.value) }
     var user by remember { mutableStateOf(settings.smbUser.value) }
     var password by remember { mutableStateOf(settings.smbPassword.value) }
+    var ftpHost by remember { mutableStateOf(settings.ftpHost.value) }
+    var ftpPort by remember { mutableStateOf(settings.ftpPort.value.toString()) }
+    var ftpFolder by remember { mutableStateOf(settings.ftpFolder.value) }
+    var ftpUser by remember { mutableStateOf(settings.ftpUser.value) }
+    var ftpPassword by remember { mutableStateOf(settings.ftpPassword.value) }
+    var ftpAcknowledged by remember { mutableStateOf(settings.ftpPlaintextAcknowledged.value) }
+    var ftpStatus by remember { mutableStateOf<String?>(null) }
     var usbTree by remember { mutableStateOf(settings.usbTreeUri.value) }
     var usbLabel by remember { mutableStateOf(settings.usbFolderLabel.value) }
     var usbPickerMessage by remember { mutableStateOf<String?>(null) }
@@ -156,14 +167,45 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
         }
     }
 
-    fun persist() {
-        settings.setSmbConfig(host, share, folder, user, password)
+    fun currentFtpConfig() = FtpConfig(
+        host = ftpHost.trim(),
+        port = ftpPort.toIntOrNull() ?: -1,
+        folder = ftpFolder.trim(),
+        username = ftpUser,
+        password = ftpPassword,
+        plaintextAcknowledged = ftpAcknowledged,
+    )
+
+    fun persist(): Boolean {
+        if (target == AppSettings.RecordingTarget.SMB) {
+            settings.setSmbConfig(host, share, folder, user, password)
+        }
+        if (target == AppSettings.RecordingTarget.FTP) {
+            val config = currentFtpConfig()
+            if (FtpClient.validationError(config) != null) {
+                ftpStatus = context.getString(R.string.recset_ftp_config_invalid)
+                return false
+            }
+            if (!settings.setFtpConfig(
+                    host = config.host,
+                    port = config.port,
+                    folder = config.folder,
+                    user = config.username,
+                    password = config.password,
+                    plaintextAcknowledged = config.plaintextAcknowledged,
+                )
+            ) {
+                ftpStatus = context.getString(R.string.recset_ftp_save_failed)
+                return false
+            }
+        }
         // Don't commit USB as the destination unless a folder has actually been granted, so
         // leaving the screen without picking one can never strand recordings with nowhere to go.
         val safeTarget =
             if (target == AppSettings.RecordingTarget.USB && usbTree == null) settings.recordingTarget.value
             else target
         settings.setRecordingTarget(safeTarget)
+        return true
     }
 
     Column(
@@ -175,7 +217,7 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(stringResource(R.string.settings_recording_title), style = MaterialTheme.typography.headlineMedium)
             Spacer(Modifier.weight(1f))
-            OutlinedButton(onClick = { persist(); onBack() }) { Text(stringResource(R.string.common_done)) }
+            OutlinedButton(onClick = { if (persist()) onBack() }) { Text(stringResource(R.string.common_done)) }
         }
         Spacer(Modifier.height(8.dp))
         Text(
@@ -307,6 +349,12 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
                 subtitle = stringResource(R.string.recset_usb_subtitle),
                 selected = target == AppSettings.RecordingTarget.USB,
             ) { target = AppSettings.RecordingTarget.USB }
+            Spacer(Modifier.height(8.dp))
+            TargetRow(
+                label = stringResource(R.string.recset_ftp_label),
+                subtitle = stringResource(R.string.recset_ftp_subtitle),
+                selected = target == AppSettings.RecordingTarget.FTP,
+            ) { target = AppSettings.RecordingTarget.FTP }
         }
 
         if (target == AppSettings.RecordingTarget.SMB) {
@@ -340,6 +388,81 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
                     ) { Text(if (testing) stringResource(R.string.recset_status_testing) else stringResource(R.string.recset_test_connection)) }
                 }
                 status?.let {
+                    Spacer(Modifier.height(10.dp))
+                    Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+
+        if (target == AppSettings.RecordingTarget.FTP) {
+            Spacer(Modifier.height(16.dp))
+            SectionCard(stringResource(R.string.recset_ftp_security_title)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Filled.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error)
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        stringResource(R.string.recset_ftp_warning),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.recset_ftp_local_only_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Field(stringResource(R.string.recset_ftp_host), ftpHost, "192.168.1.20") {
+                    if (it.trim() != ftpHost.trim()) ftpAcknowledged = false
+                    ftpHost = it
+                    ftpStatus = null
+                }
+                Field(stringResource(R.string.recset_ftp_port), ftpPort, "21") {
+                    if (it != ftpPort) ftpAcknowledged = false
+                    ftpPort = it.filter(Char::isDigit).take(5)
+                    ftpStatus = null
+                }
+                Field(stringResource(R.string.recset_ftp_folder), ftpFolder, "FullTV") {
+                    ftpFolder = it
+                    ftpStatus = null
+                }
+                Field(stringResource(R.string.recset_ftp_username), ftpUser, "fulltv") {
+                    ftpUser = it
+                    ftpStatus = null
+                }
+                Field(stringResource(R.string.recset_ftp_password), ftpPassword, "", isPassword = true) {
+                    ftpPassword = it
+                    ftpStatus = null
+                }
+                ToggleRow(
+                    label = stringResource(R.string.recset_ftp_consent),
+                    subtitle = stringResource(R.string.recset_ftp_consent_desc),
+                    checked = ftpAcknowledged,
+                ) { ftpAcknowledged = it; ftpStatus = null }
+                val ftpConfig = currentFtpConfig()
+                Button(
+                    enabled = !testing && FtpClient.isValidConfig(ftpConfig),
+                    onClick = {
+                        testing = true
+                        ftpStatus = context.getString(R.string.recset_status_testing)
+                        scope.launch {
+                            val result = withContext(Dispatchers.IO) {
+                                runCatching { FtpClient.test(ftpConfig) }
+                            }
+                            testing = false
+                            ftpStatus = result.fold(
+                                onSuccess = { context.getString(R.string.recset_ftp_status_connected) },
+                                onFailure = { context.getString(R.string.recset_ftp_status_failed) },
+                            )
+                        }
+                    },
+                ) {
+                    Text(
+                        if (testing) stringResource(R.string.recset_status_testing)
+                        else stringResource(R.string.recset_ftp_test),
+                    )
+                }
+                ftpStatus?.let {
                     Spacer(Modifier.height(10.dp))
                     Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.primary)
                 }
@@ -412,8 +535,11 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
 
         Spacer(Modifier.height(20.dp))
         Button(
-            enabled = target != AppSettings.RecordingTarget.USB || usbTree != null,
-            onClick = { persist(); status = context.getString(R.string.recset_status_saved) },
+            enabled = (target != AppSettings.RecordingTarget.USB || usbTree != null) &&
+                (target != AppSettings.RecordingTarget.FTP || FtpClient.isValidConfig(currentFtpConfig())),
+            onClick = {
+                if (persist()) status = context.getString(R.string.recset_status_saved)
+            },
         ) { Text(stringResource(R.string.common_save)) }
     }
 }

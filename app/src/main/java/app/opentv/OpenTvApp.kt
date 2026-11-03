@@ -66,6 +66,7 @@ class OpenTvApp : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        val processStartedAtMillis = System.currentTimeMillis()
         val graph = ServiceLocator.get(this)
         runCatching { SyncWorker.schedule(this) }
             .onFailure { Log.e(TAG, "Could not schedule background refresh (${it.javaClass.simpleName})") }
@@ -89,20 +90,67 @@ class OpenTvApp : Application(), ImageLoaderFactory {
         // the stored channels and re-run the guide matcher — locally, no re-download. This
         // is why a name-cleanup fix shows up on the next launch rather than the next 6-hour
         // sync, and it costs nothing when the version has not changed.
-        // Cold-start reconciliation: a recording still marked "in progress" at process start is an
-        // orphan from a killed capture. Done here, once per process — NOT when the Recordings screen
-        // opens — so checking on a recording you just started never marks it interrupted.
+        // Cold-start reconciliation: fail only captures whose start predates this process. A
+        // scheduled alarm may start a new capture while this asynchronous check is still running.
+        // Done once per process, not when the Recordings screen opens.
         appScope.launch {
-            val interrupted = runCatching { graph.recordingRepository.active() }
+            val interrupted = runCatching {
+                graph.recordingRepository.active().filter { it.startedAtMillis < processStartedAtMillis }
+            }
                 .onFailure { Log.w(TAG, "Could not inspect interrupted recordings (${it.javaClass.simpleName})") }
                 .getOrDefault(emptyList())
-            runCatching { graph.recordingRepository.failInterrupted() }
+            runCatching { graph.recordingRepository.failInterruptedBefore(processStartedAtMillis) }
                 .onFailure { Log.w(TAG, "Could not mark interrupted recordings (${it.javaClass.simpleName})") }
-            interrupted
-                .filter { RecordingStorage.sizeOf(it.filePath) == 0L }
-                .forEach { recording ->
-                    RecordingStorage.delete(this@OpenTvApp, graph.settings, recording.filePath)
+            interrupted.forEach { recording ->
+                val resolvedUsbLocator = runCatching {
+                    RecordingStorage.recoverUsbPlaceholderLocator(
+                        this@OpenTvApp,
+                        graph.settings,
+                        recording.filePath,
+                    )
+                }.onFailure {
+                    Log.w(TAG, "Could not resolve interrupted USB recording ${recording.id} (${it.javaClass.simpleName})")
+                }.getOrNull()
+                val locatorPersisted = resolvedUsbLocator?.let { resolved ->
+                    runCatching { graph.recordingRepository.setFilePath(recording.id, resolved) }
+                        .onFailure {
+                            Log.w(TAG, "Could not persist interrupted USB locator ${recording.id} (${it.javaClass.simpleName})")
+                        }
+                        .isSuccess
+                } ?: true
+                val effectiveLocator = if (locatorPersisted) resolvedUsbLocator ?: recording.filePath else recording.filePath
+                val recoveredFtpBytes = runCatching {
+                    RecordingStorage.recoverInterrupted(this@OpenTvApp, graph.settings, effectiveLocator)
+                }.onFailure {
+                    Log.w(TAG, "Could not recover interrupted FTP recording ${recording.id} (${it.javaClass.simpleName})")
+                }.getOrDefault(-1L)
+                // Keep any non-empty capture as playable; only remove known-empty outputs and
+                // unresolved USB placeholders. A SAF document created just before death is first
+                // repointed from its temporary placeholder to the actual content:// URI.
+                val size = recoveredFtpBytes.takeIf { it > 0L }
+                    ?: RecordingStorage.sizeOf(this@OpenTvApp, graph.settings, effectiveLocator)
+                val orphanPlaceholder = RecordingStorage.isUsbPlaceholder(effectiveLocator)
+                if (size > 0L && locatorPersisted) {
+                    runCatching {
+                        graph.recordingRepository.markFinished(
+                            id = recording.id,
+                            ok = true,
+                            atMillis = System.currentTimeMillis(),
+                            bytes = size,
+                            error = null,
+                        )
+                    }.onFailure {
+                        Log.w(TAG, "Could not publish recovered recording ${recording.id} (${it.javaClass.simpleName})")
+                    }
+                } else if (locatorPersisted && (orphanPlaceholder || size == 0L)) {
+                    val removed = runCatching {
+                        RecordingStorage.delete(this@OpenTvApp, graph.settings, effectiveLocator)
+                    }.getOrDefault(false)
+                    if (!removed) {
+                        Log.w(TAG, "Could not clean interrupted recording destination ${recording.id}")
+                    }
                 }
+            }
         }
 
         // Re-arm scheduled recordings on every launch, for the same reason as the reminders below:
