@@ -14,22 +14,36 @@ REQUIRED = (
     "KEY_PASSWORD",
     "RELEASE_CERT_SHA256",
 )
+LEGACY_CERT = "01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91"
+LEGACY_OPT_IN = "FULLTV_ALLOW_LEGACY_COMPAT_SIGNING"
 
 
 class ReleaseSigningVerifierTest(unittest.TestCase):
-    def run_verifier(self, values=None):
+    def run_verifier(self, values=None, version=None):
         env = os.environ.copy()
-        for name in REQUIRED:
+        for name in (*REQUIRED, LEGACY_OPT_IN):
             env.pop(name, None)
         if values:
             env.update(values)
+        command = [sys.executable, str(SCRIPT)]
+        if version is not None:
+            command.extend(["--version", version])
         return subprocess.run(
-            [sys.executable, str(SCRIPT)],
+            command,
             env=env,
             check=False,
             capture_output=True,
             text=True,
         )
+
+    def base_values(self, keystore, certificate):
+        return {
+            "KEYSTORE_PATH": str(keystore),
+            "KEYSTORE_PASSWORD": "test-password",
+            "KEY_ALIAS": "test-alias",
+            "KEY_PASSWORD": "test-key-password",
+            "RELEASE_CERT_SHA256": certificate,
+        }
 
     def test_missing_production_inputs_fail_closed(self):
         result = self.run_verifier()
@@ -37,42 +51,54 @@ class ReleaseSigningVerifierTest(unittest.TestCase):
         self.assertIn("Production release signing is not configured", result.stderr)
 
     def test_old_debug_escape_is_ignored(self):
-        # Construct the removed variable name without leaving an accepted escape in the tree.
         removed_escape = "FULLTV_ALLOW_" + "DEBUG_SIGNED_RELEASE"
         result = self.run_verifier({removed_escape: "true"})
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("debug", result.stdout.lower())
 
-    def test_fake_temporary_keystore_and_fingerprint_are_accepted_as_shape_only(self):
-        # This deliberately uses an empty temporary file: the verifier checks explicit inputs and
-        # format, while apksigner/keytool must validate the actual user-owned keystore later.
+    def test_fake_non_legacy_keystore_and_fingerprint_are_accepted_as_shape_only(self):
+        # Actual certificate-to-APK matching is independently checked with apksigner after build.
         with tempfile.TemporaryDirectory() as directory:
             keystore = Path(directory) / "fake-production.jks"
             keystore.write_bytes(b"not a real keystore; never use this to build")
-            result = self.run_verifier(
-                {
-                    "KEYSTORE_PATH": str(keystore),
-                    "KEYSTORE_PASSWORD": "fake-password",
-                    "KEY_ALIAS": "fake-alias",
-                    "KEY_PASSWORD": "fake-key-password",
-                    "RELEASE_CERT_SHA256": "a" * 64,
-                }
-            )
+            result = self.run_verifier(self.base_values(keystore, "a" * 64))
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_fingerprint_must_be_sha256_hex(self):
         with tempfile.NamedTemporaryFile() as keystore:
-            result = self.run_verifier(
-                {
-                    "KEYSTORE_PATH": keystore.name,
-                    "KEYSTORE_PASSWORD": "fake-password",
-                    "KEY_ALIAS": "fake-alias",
-                    "KEY_PASSWORD": "fake-key-password",
-                    "RELEASE_CERT_SHA256": "not-a-fingerprint",
-                }
-            )
+            result = self.run_verifier(self.base_values(keystore.name, "not-a-fingerprint"))
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("RELEASE_CERT_SHA256", result.stderr)
+
+    def test_legacy_debug_certificate_is_rejected_without_explicit_opt_in(self):
+        with tempfile.NamedTemporaryFile() as keystore:
+            result = self.run_verifier(self.base_values(keystore.name, LEGACY_CERT), "0.11.25")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("blocked by default", result.stderr)
+
+    def test_legacy_debug_certificate_is_allowed_for_exact_approved_version(self):
+        with tempfile.NamedTemporaryFile() as keystore:
+            values = self.base_values(keystore.name, LEGACY_CERT)
+            values[LEGACY_OPT_IN] = "1"
+            result = self.run_verifier(values, "0.11.25")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("not production signing", result.stdout)
+
+    def test_legacy_debug_opt_in_does_not_allow_future_versions(self):
+        with tempfile.NamedTemporaryFile() as keystore:
+            values = self.base_values(keystore.name, LEGACY_CERT)
+            values[LEGACY_OPT_IN] = "1"
+            result = self.run_verifier(values, "0.11.26")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("blocked by default", result.stderr)
+
+    def test_legacy_opt_in_does_not_allow_other_certificates(self):
+        with tempfile.NamedTemporaryFile() as keystore:
+            values = self.base_values(keystore.name, "a" * 64)
+            values[LEGACY_OPT_IN] = "1"
+            result = self.run_verifier(values, "0.11.25")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("limited to v0.11.25", result.stderr)
 
 
 if __name__ == "__main__":

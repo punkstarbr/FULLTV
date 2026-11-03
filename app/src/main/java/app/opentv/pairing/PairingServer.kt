@@ -230,7 +230,9 @@ class PairingServer(private val scope: CoroutineScope) {
             output.write(PairingHttp.httpResponse("421 Misdirected Request", "text/plain", "Wrong local host."))
             return
         }
-        if (request.method == "POST" && !PairingHttp.isExpectedOrigin(request.headers["origin"], expectedAuthority)) {
+        if (request.method == "POST" &&
+            !PairingHttp.isAllowedPairingOrigin(request.headers["origin"], expectedAuthority)
+        ) {
             output.write(PairingHttp.httpResponse("403 Forbidden", "text/plain", "Cross-origin submission refused."))
             return
         }

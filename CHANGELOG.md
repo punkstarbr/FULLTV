@@ -1,12 +1,15 @@
 # Changelog
 
-## Unreleased — hardening de segurança e destino FTP (não publicada)
+## 0.11.25 (atualização estável) — 2026-11-03
 
 - **Controle parental e PIN:** exigir autorização nos pontos de entrada de canais ocultos, incluindo
   player direto, retomada, lembretes e Web Manager; usar backoff monotônico e manter os controles
   bloqueados quando a persistência do PIN falhar.
 - **Serviços LAN/TLS:** limitar conexões/handshakes, adicionar deadlines e fechar servidores quando
-  suas telas deixam de estar ativas. As mudanças continuam sem fallback para HTTP.
+  suas telas deixam de estar ativas. O pairing por QR aceita navegadores que omitem `Origin` ou
+  reportam origem opaca `null`, mas mantém `Host`, token e código obrigatórios; origens concretas
+  diferentes continuam bloqueadas.
+  As mudanças continuam sem fallback para HTTP.
 - **SSRF e respostas:** escopar a confiança de origens por operação, revalidar redirects/destinos,
   pinçar DNS para mídia pública e limitar o corpo de respostas TMDB. O Streamlink de YouTube usa
   guard HTTPS com DNS público validado; FTP não foi adicionado às fontes de mídia.
@@ -17,17 +20,23 @@
   protocolo sem criptografia e exigir consentimento. Credenciais ficam cifradas no Keystore; uploads
   binários são staged em `.partial`, confirmados e renomeados, com timeout, leitura/seek de gravações
   concluídas e limpeza/verificação de falhas. Apache Commons Net 3.13.0 está fixado e verificado.
-- **Cadeia de fornecimento e release:** revalidar hashes das wheels Chaquopy do wheelhouse imediatamente
-  antes da instalação; builds release falham sem uma chave de produção e o instalador rejeita assinatura
-  debug como identidade da aplicação pública.
+- **Cadeia de fornecimento e assinatura:** revalidar hashes das wheels Chaquopy do wheelhouse imediatamente
+  antes da instalação. Por compatibilidade, esta versão tem exceção de assinatura autorizada e restrita ao
+  certificado legado Android Debug; não é uma chave de produção e não deve ser reutilizada em releases futuras.
+- **Atualização pelo app:** esta versão é publicada como estável (não pré-release), pois o atualizador ignora
+  versões de teste e só oferece releases estáveis mais novas.
 - **Riscos restantes:** FTP continua transmitindo usuário, senha e vídeo em claro por escolha explícita;
   Room ainda não usa SQLCipher e `lxml` 5.3.0 permanece por falta de wheel Android corrigida no índice
   Chaquopy consultado. Ver relatório desta rodada para limitações e resultados de teste.
-- **Validação local:** `:app:assembleDebug` concluiu com sucesso após incluir o caso de pasta FTP vazia
-  (raiz da conta); o APK gerado é debug, package `app.fulltv.debug`, e não substitui a versão pública.
-  Os testes FTP focados passaram (7/7); na suíte completa, 167/173 passaram e seis XMLTV/Robolectric
-  falharam antes das assertions por falta de Conscrypt nativo Linux ARM64. `:app:lintDebug` permanece
-  vermelho (229 erros, 194 avisos e 6 dicas; primeiro erro em opt-in Media3 de `MosaicScreen.kt`).
+- **Compatibilidade:** o APK universal usa `app.fulltv`, código 37 e o certificado SHA-256 legado
+  `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`, para atualizar a instalação normal.
+  O APK debug tem outro package (`app.fulltv.debug`) e não compartilha a lista M3U do app normal.
+- **Validação:** `PairingHttpTest` passou. Na suíte Kotlin completa, 169/175 passaram; seis testes XMLTV
+  falharam antes das assertions por ausência de Conscrypt nativo no host ARM64. Não houve teste físico em
+  Fire TV/TV box.
+- **Build:** `:app:assembleDebug`, `:app:assembleRelease` e `:app:lintVitalRelease` passaram. O APK universal
+  foi verificado como `app.fulltv`, versionCode 37, minSdk 24, quatro ABIs e certificado esperado. Seu SHA-256
+  é `b64dc7d9fb4f36b8d8525f113ca01afb3db3e60e41d93f9ae79cd21508f47a8a`.
 
 ## 0.11.24 (pré-lançamento de teste)
 

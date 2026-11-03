@@ -13,15 +13,14 @@ O FullTV **não publica releases por GitHub Actions**. O workflow privilegiado d
    ./gradlew --no-daemon clean :app:testDebugUnitTest :app:assembleDebug :app:assembleRelease
    ```
 
-4. O `assembleRelease` exige `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` e `RELEASE_CERT_SHA256` (64 hex dígitos). A tarefa falha fechada antes de empacotar se qualquer entrada de produção faltar; nunca há fallback para o keystore debug. Não coloque keystore, senhas ou tokens no repositório, em logs ou em uma pull request.
+4. O `assembleRelease` exige `KEYSTORE_PATH`, `KEYSTORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` e `RELEASE_CERT_SHA256` (64 dígitos hexadecimais); não há fallback automático para o keystore debug. Só a v0.11.25 tem a exceção estreita descrita em “Assinatura e compatibilidade”. Não coloque keystore, senhas ou tokens no repositório, em logs ou em uma pull request.
 5. Verifique package, versão, SDK mínimo, ABIs e certificado com `apkanalyzer`/`apksigner`. Compare o SHA-256 do certificado com a última release que os usuários instalaram. Se o certificado mudar, o Android não atualizará por cima da instalação atual.
-6. Copie os APKs para uma pasta vazia e gere `SHA256SUMS.txt`. Publique manualmente usando os nomes canônicos `FullTV-<versão>-universal.apk` e `FullTV-<versão>-debug.apk`:
+6. Copie o APK universal para uma pasta vazia e gere `SHA256SUMS.txt`. Publique manualmente usando o nome canônico `FullTV-<versão>-universal.apk`; o APK debug é opcional e tem package separado:
 
    ```bash
-   sha256sum FullTV-<versão>-universal.apk FullTV-<versão>-debug.apk > SHA256SUMS.txt
+   sha256sum FullTV-<versão>-universal.apk > SHA256SUMS.txt
    gh release create v<versão> \
      FullTV-<versão>-universal.apk \
-     FullTV-<versão>-debug.apk \
      SHA256SUMS.txt \
      --repo punkstarbr/FULLTV \
      --title "FullTV v<versão>" \
@@ -32,7 +31,9 @@ Não reutilize uma tag existente nem publique um APK sem validar o certificado e
 
 ## Assinatura e compatibilidade
 
-A release pública `v0.11.22` foi assinada com a chave debug do ambiente de build porque não havia keystore de produção. A opção de repetir esse processo foi removida: não existe build release confiável sem o keystore/certificado de produção e os segredos fornecidos pelo proprietário. Não será possível montar um release instalável confiável nesta cópia sem esses segredos; não crie nem invente uma chave para contornar o bloqueio.
+As releases `v0.11.22` a `v0.11.24` usam o certificado legado Android Debug `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. O proprietário autorizou uma exceção **somente para `v0.11.25`**: essa versão estável deve reutilizar o certificado legado para que instalações existentes possam atualizar e preservar os dados. O verificador só aceita esse certificado para `--version 0.11.25` com `FULLTV_ALLOW_LEGACY_COMPAT_SIGNING=1`; a exceção não deve ser reutilizada. Esse certificado é fraco/compartilhado e não é assinatura de produção.
+
+Depois de `v0.11.25`, as releases precisam de uma chave de produção ou de um plano de migração de assinatura validado. Não crie nem invente uma chave para contornar o bloqueio, e não publique APK release assinado com um certificado diferente do instalado sem planejar a migração: o Android pode rejeitar a atualização e a reinstalação manual pode perder dados locais.
 
 Para uma release real, forneça as variáveis de ambiente por um gerenciador de segredos ou shell privado, nunca por argumentos da linha de comando que possam aparecer no histórico:
 

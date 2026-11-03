@@ -16,6 +16,8 @@ val releaseKeyPassword = providers.environmentVariable("KEY_PASSWORD").orNull
 val releaseCertificateSha256 = providers.environmentVariable("RELEASE_CERT_SHA256").orNull
     ?.trim()
     ?.lowercase()
+val fullTvVersionName = "0.11.25"
+val fullTvVersionCode = 37
 val hasReleaseSigning = releaseKeystorePath?.let { it.isNotBlank() && file(it).isFile } == true &&
     !releaseKeystorePassword.isNullOrBlank() &&
     !releaseKeyAlias.isNullOrBlank() &&
@@ -114,8 +116,8 @@ android {
             // Chaquopy 3.11 builds support these four ABIs, including 32-bit TV boxes.
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
         }
-        versionCode = 36
-        versionName = "0.11.24"
+        versionCode = fullTvVersionCode
+        versionName = fullTvVersionName
         // FullTV publishes versioned GitHub Releases; older releases remain available there.
         buildConfigField("String", "UPDATE_REPO_SLUG", "\"punkstarbr/FULLTV\"")
         buildConfigField(
@@ -185,7 +187,12 @@ android {
 val verifyReleaseSigning = tasks.register<org.gradle.api.tasks.Exec>("verifyReleaseSigning") {
     group = "verification"
     description = "Validates that release signing is explicitly configured."
-    commandLine("python3.11", rootProject.file("tools/verify_release_signing.py").absolutePath)
+    commandLine(
+        "python3.11",
+        rootProject.file("tools/verify_release_signing.py").absolutePath,
+        "--version",
+        fullTvVersionName,
+    )
 }
 
 tasks.configureEach {

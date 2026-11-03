@@ -244,6 +244,17 @@ object PairingHttp {
     fun isExpectedOrigin(origin: String?, expectedAuthority: String): Boolean =
         !origin.isNullOrBlank() && origin.trim().equals("https://$expectedAuthority", ignoreCase = true)
 
+    /**
+     * Some embedded QR/camera browsers omit Origin or serialize an opaque origin as `null` on a
+     * same-origin form POST. Pairing still pins Host to the listener and requires its unguessable
+     * session token plus the six-digit code. Any concrete Origin must match exactly.
+     */
+    fun isAllowedPairingOrigin(origin: String?, expectedAuthority: String): Boolean {
+        val normalized = origin?.trim()
+        return normalized == null || normalized.equals("null", ignoreCase = true) ||
+            isExpectedOrigin(normalized, expectedAuthority)
+    }
+
     fun httpResponse(
         status: String,
         contentType: String,

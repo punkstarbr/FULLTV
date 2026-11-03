@@ -122,6 +122,20 @@ class PairingHttpTest {
     }
 
     @Test
+    fun `pairing accepts absent or opaque origin but rejects explicit foreign origin`() {
+        val authority = "192.168.1.10:43210"
+
+        assertThat(PairingHttp.isAllowedPairingOrigin(null, authority)).isTrue()
+        assertThat(PairingHttp.isAllowedPairingOrigin("https://$authority", authority)).isTrue()
+        assertThat(PairingHttp.isAllowedPairingOrigin("null", authority)).isTrue()
+        assertThat(PairingHttp.isAllowedPairingOrigin(" null ", authority)).isTrue()
+        assertThat(PairingHttp.isAllowedPairingOrigin("", authority)).isFalse()
+        assertThat(PairingHttp.isAllowedPairingOrigin("http://$authority", authority)).isFalse()
+        assertThat(PairingHttp.isAllowedPairingOrigin("https://evil.example", authority)).isFalse()
+        assertThat(PairingHttp.isAllowedPairingOrigin("https://192.168.1.10:43211", authority)).isFalse()
+    }
+
+    @Test
     fun `responses carry a correct byte length for multibyte content`() {
         val response = PairingHttp.httpResponse("200 OK", "text/html", "café ☕")
         val text = String(response, Charsets.UTF_8)
