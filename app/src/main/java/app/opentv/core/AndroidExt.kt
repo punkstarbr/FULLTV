@@ -39,26 +39,26 @@ fun Context.isIgnoringBatteryOptimizations(): Boolean {
 }
 
 /**
- * Opens the system dialog that asks the user to let OpenTV ignore battery optimisation — the
- * exemption a set-top box relies on to keep recording while asleep. This is the correct,
- * user-granted flow; it cannot (and should not) be granted silently. A few TV boxes ship without
- * the per-app request screen, so we fall back to the general battery-optimisation settings list
- * where the user can still find OpenTV and allow it.
+ * Opens a system screen where the user can allow background execution. Fire OS builds vary: some
+ * expose the direct request dialog, some only expose the global battery list or app details, and
+ * some expose none. Return false when every route is unavailable so the UI can explain the limit.
  */
 @SuppressLint("BatteryLife")
-fun Context.requestIgnoreBatteryOptimizations() {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
-    val direct = Intent(
-        Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
-        Uri.parse("package:$packageName"),
-    ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    val launched = runCatching { startActivity(direct) }.isSuccess
-    if (!launched) {
-        runCatching {
-            startActivity(
-                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-            )
-        }
+fun Context.requestIgnoreBatteryOptimizations(): Boolean {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M || isIgnoringBatteryOptimizations()) return true
+
+    val packageUri = Uri.parse("package:$packageName")
+    val candidates = listOf(
+        Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, packageUri),
+        Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, packageUri),
+    )
+    for (intent in candidates) {
+        val launched = runCatching {
+            startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            true
+        }.getOrDefault(false)
+        if (launched) return true
     }
+    return false
 }

@@ -52,6 +52,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -77,6 +79,7 @@ import app.opentv.recording.RecordingStorage
 import app.opentv.recording.SmbClient
 import app.opentv.recording.SmbConfig
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -101,6 +104,8 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
     var password by remember { mutableStateOf(settings.smbPassword.value) }
     var usbTree by remember { mutableStateOf(settings.usbTreeUri.value) }
     var usbLabel by remember { mutableStateOf(settings.usbFolderLabel.value) }
+    var usbPickerMessage by remember { mutableStateOf<String?>(null) }
+    val usbChooseFocus = remember { FocusRequester() }
     var status by remember { mutableStateOf<String?>(null) }
     var testing by remember { mutableStateOf(false) }
     var refreshingSchedule by remember { mutableStateOf(false) }
@@ -116,21 +121,38 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
     var livePause by remember { mutableStateOf(settings.livePauseEnabled.value) }
     var container by remember { mutableStateOf(settings.recordingContainer.value) }
 
-    // The SAF folder picker. On a granted tree we take a persistable read/write permission so the
-    // grant (and thus playback of what we record there) survives restarts, then remember the folder.
+    // SAF pickers vary by TV vendor. Keep the app's own action focusable, and do not claim a folder
+    // was selected unless a persistent read/write grant actually exists.
     val folderPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocumentTree(),
     ) { uri: Uri? ->
         if (uri != null) {
             val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-            runCatching { context.contentResolver.takePersistableUriPermission(uri, flags) }
-            val label = DocumentFile.fromTreeUri(context, uri)?.name
-                ?: uri.lastPathSegment ?: context.getString(R.string.recset_usb_label)
-            settings.setUsbTree(uri.toString(), label)
-            usbTree = uri.toString()
-            usbLabel = label
-            target = AppSettings.RecordingTarget.USB
-            status = context.getString(R.string.recset_usb_saving_to, label)
+            val persisted = runCatching {
+                context.contentResolver.takePersistableUriPermission(uri, flags)
+                context.contentResolver.persistedUriPermissions.any {
+                    it.uri == uri && it.isReadPermission && it.isWritePermission
+                }
+            }.getOrDefault(false)
+            val tree = runCatching { DocumentFile.fromTreeUri(context, uri) }.getOrNull()
+            if (!persisted || tree?.canWrite() != true) {
+                runCatching { context.contentResolver.releasePersistableUriPermission(uri, flags) }
+                usbPickerMessage = context.getString(R.string.recset_usb_permission_failed)
+            } else {
+                val label = tree.name ?: uri.lastPathSegment ?: context.getString(R.string.recset_usb_label)
+                settings.setUsbTree(uri.toString(), label)
+                usbTree = uri.toString()
+                usbLabel = label
+                target = AppSettings.RecordingTarget.USB
+                usbPickerMessage = context.getString(R.string.recset_usb_saving_to, label)
+            }
+        }
+    }
+
+    LaunchedEffect(target, usbTree) {
+        if (target == AppSettings.RecordingTarget.USB && usbTree == null) {
+            delay(100)
+            runCatching { usbChooseFocus.requestFocus() }
         }
     }
 
@@ -347,10 +369,14 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
                     )
                 }
                 Spacer(Modifier.height(12.dp))
-                Button(onClick = {
-                    runCatching { folderPicker.launch(null) }
-                        .onFailure { status = context.getString(R.string.recset_usb_no_picker) }
-                }) {
+                Button(
+                    modifier = Modifier.focusRequester(usbChooseFocus),
+                    onClick = {
+                        usbPickerMessage = null
+                        runCatching { folderPicker.launch(usbTree?.let(Uri::parse)) }
+                            .onFailure { usbPickerMessage = context.getString(R.string.recset_usb_no_picker) }
+                    },
+                ) {
                     Text(
                         if (usbTree != null) stringResource(R.string.recset_usb_change)
                         else stringResource(R.string.recset_usb_choose),
@@ -362,6 +388,10 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                usbPickerMessage?.let {
+                    Spacer(Modifier.height(8.dp))
+                    Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                }
                 if (target == AppSettings.RecordingTarget.USB && usbTree == null) {
                     Spacer(Modifier.height(8.dp))
                     Text(
@@ -636,7 +666,11 @@ private fun BackgroundStatus() {
                     fontWeight = FontWeight.Medium,
                     modifier = Modifier.weight(1f),
                 )
-                Button(onClick = { context.requestIgnoreBatteryOptimizations() }) {
+                Button(onClick = {
+                    if (!context.requestIgnoreBatteryOptimizations()) {
+                        Toast.makeText(context, R.string.recset_background_open_failed, Toast.LENGTH_LONG).show()
+                    }
+                }) {
                     Text(stringResource(R.string.recset_background_fix))
                 }
             }

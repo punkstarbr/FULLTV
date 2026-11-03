@@ -143,8 +143,8 @@
     <string name="rec_error_usb_no_folder">No USB folder chosen. Open Recording settings and pick a folder on your drive.</string>
     <string name="rec_error_usb_unavailable">USB drive not available. Re-plug the drive and choose the folder again in Recording settings.</string>
     <string name="rec_background_prompt_title">Keep recording when you leave?</string>
-    <string name="rec_background_prompt_body">Android may stop this recording when the screen sleeps or you leave FullTV. Allow FullTV to ignore battery optimisation so recordings keep running, even in standby — the way a set-top box does.</string>
-    <string name="rec_background_prompt_allow">Allow</string>
+    <string name="rec_background_prompt_body">Open the system settings and allow background activity if this device offers it. Some Fire TV models do not expose this control; FullTV cannot grant it by itself, and standby may still stop a recording.</string>
+    <string name="rec_background_prompt_allow">Open settings</string>
     <string name="rec_background_prompt_not_now">Not now</string>
 
     <!-- ============================ Player controls ============================ -->
@@ -318,9 +318,10 @@
     <string name="recset_usb_change">Change folder</string>
     <string name="recset_usb_saving_to">Saving to: %1$s</string>
     <string name="recset_usb_none">No folder chosen yet</string>
-    <string name="recset_usb_hint">Plug in a USB drive or external storage formatted exFAT or FAT32, then choose a folder on it. Recordings are written straight to that folder and still play back and delete inside FullTV.</string>
+    <string name="recset_usb_hint">In the system picker, use the remote arrows to enter a folder on the USB drive, then move focus to “Use this folder” or “Select” and press OK. If that button is disabled, choose a subfolder instead of the drive root. If the Fire OS picker cannot be controlled with the remote, use internal storage or NAS/SMB.</string>
     <string name="recset_usb_need_folder">Choose a folder before saving to USB.</string>
     <string name="recset_usb_no_picker">No folder picker is available on this device.</string>
+    <string name="recset_usb_permission_failed">The system did not grant persistent write access to this folder. Try a subfolder on the USB drive and confirm “Use this folder” and “Allow”. If the Fire OS picker cannot focus that button, use internal storage or NAS/SMB.</string>
     <string name="recset_nas_connection">NAS connection</string>
     <string name="recset_field_server">Server (IP or hostname)</string>
     <string name="recset_field_share">Share name</string>
@@ -361,8 +362,9 @@
     <string name="recset_background_title">Recording in the background</string>
     <string name="recset_background_allowed">Allowed</string>
     <string name="recset_background_not_allowed">Not allowed</string>
-    <string name="recset_background_fix">Fix</string>
-    <string name="recset_background_desc">Android may stop recordings when the device sleeps or you leave FullTV, unless FullTV is allowed to ignore battery optimisation. Allowing it keeps recordings running even in standby, like a set-top box.</string>
+    <string name="recset_background_fix">Open settings</string>
+    <string name="recset_background_desc">Open system settings and allow background activity if this device offers the option. Some Fire TV models do not expose it; FullTV cannot enable it by itself, so standby may stop a recording.</string>
+    <string name="recset_background_open_failed">Could not open a system setting for background activity. Check the Fire TV battery/app settings if available; FullTV cannot grant this permission by itself.</string>
     <string name="recset_background_on_title">Background recording is on</string>
     <string name="recset_background_on_desc">Recordings will keep running when you leave FullTV or the TV goes to sleep.</string>
     <string name="recset_background_toast">Background recording enabled — recordings will keep going in the background.</string>
@@ -662,4 +664,17 @@
     <string name="portal_no_favourites">Mark channels as favourites in the guide to pin them here.</string>
     <string name="portal_no_channels">No channel categories yet. Add or refresh a source, then return here.</string>
     <string name="portal_no_source">Add an IPTV source to begin building your channel categories.</string>
+
+    <!-- Update dialog -->
+    <string name="update_title_available">Update available</string>
+    <string name="update_action_update">Update</string>
+    <string name="update_action_later">Later</string>
+    <string name="update_available_message">FullTV %1$s is available. Your installed version is %2$s.</string>
+    <string name="update_title_downloading">Downloading update…</string>
+    <string name="update_progress_percent">%1$d%%</string>
+    <string name="update_action_retry">Retry</string>
+    <string name="update_action_close">Close</string>
+    <string name="update_title_failed">Update failed</string>
+    <string name="update_download_failed">Could not download the update. Check your internet connection and try again.</string>
+    <string name="update_install_permission_required">On the next screen, allow FullTV to install apps from this source, then choose Retry.</string>
 </resources>

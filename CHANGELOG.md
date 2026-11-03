@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.11.24 (pré-lançamento de teste)
+
+- **Português do Brasil:** preencher as 19 traduções ausentes, substituir vocabulário e construções
+  de pt-PT por texto brasileiro consistente e localizar todos os estados do diálogo de atualização,
+  incluindo falha de download e permissão para instalar apps.
+- **Gravação em Fire TV:** facilitar o foco e a seleção da pasta USB pelo controle remoto, reabrir a
+  última pasta SAF, explicar a navegação por D-pad e confirmar o destino apenas depois de validar o
+  acesso persistente de leitura/escrita. A tela de segundo plano agora informa quando o Fire OS não
+  oferece uma configuração compatível.
+- **Validação:** `assembleDebug`, `assembleRelease` e `lintVitalRelease` concluíram. A suíte registrou
+  132/138 testes aprovados; seis casos XMLTV não carregaram Conscrypt no host Linux ARM64. Não houve
+  teste em Fire TV/aparelho Android físico nesta sessão.
+
+> Pré-lançamento para teste manual. Usa a mesma assinatura de transição da v0.11.23 para permitir
+> atualização por cima; essa chave debug não é uma chave de produção.
+
 ## 0.11.23 (pré-lançamento de teste)
 
 - **Subtitles:** remove PCM audio capture and Whisper speech transcription. Portuguese translation

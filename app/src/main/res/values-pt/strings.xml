@@ -103,8 +103,8 @@
     <string name="rec_error_usb_unavailable">Unidade USB não disponível. Volte a ligar a unidade e escolha novamente a pasta nas definições de Gravação.</string>
     <string name="rec_error_stalker_unavailable">Não foi possível resolver o URL do canal Stalker. Verifique a ligação ao fornecedor.</string>
     <string name="rec_background_prompt_title">Continuar a gravar ao sair?</string>
-    <string name="rec_background_prompt_body">O Android pode interromper esta gravação quando o ecrã adormece ou sai do FullTV. Permita que o FullTV ignore a otimização de bateria para que as gravações continuem, mesmo em standby — tal como uma set-top box.</string>
-    <string name="rec_background_prompt_allow">Permitir</string>
+    <string name="rec_background_prompt_body">Abra as definições do sistema e permita atividade em segundo plano, se o dispositivo oferecer essa opção. Algumas Fire TV não mostram esse controlo; o FullTV não consegue conceder a permissão sozinho, e o modo de espera ainda pode interromper a gravação.</string>
+    <string name="rec_background_prompt_allow">Abrir definições</string>
     <string name="rec_background_prompt_not_now">Agora não</string>
     <string name="player_rewind">Retroceder</string>
     <string name="player_pause">Pausa</string>
@@ -232,9 +232,10 @@
     <string name="recset_usb_change">Alterar pasta</string>
     <string name="recset_usb_saving_to">A guardar em: %1$s</string>
     <string name="recset_usb_none">Ainda sem pasta escolhida</string>
-    <string name="recset_usb_hint">Ligue uma unidade USB ou armazenamento externo formatado em exFAT ou FAT32 e escolha depois uma pasta nessa unidade. As gravações são escritas diretamente nessa pasta e continuam a poder ser reproduzidas e eliminadas dentro do FullTV.</string>
+    <string name="recset_usb_hint">No seletor, use as setas do comando para entrar numa pasta da unidade USB; depois mova o foco até “Usar esta pasta” ou “Selecionar” e confirme com OK. Se o botão estiver desativado, escolha uma subpasta em vez da raiz USB. Se o seletor do Fire OS não puder ser controlado pelo comando, use o armazenamento interno ou NAS/SMB.</string>
     <string name="recset_usb_need_folder">Escolha uma pasta antes de guardar em USB.</string>
     <string name="recset_usb_no_picker">Não existe seletor de pastas disponível neste dispositivo.</string>
+    <string name="recset_usb_permission_failed">O sistema não concedeu acesso persistente de escrita a esta pasta. Tente uma subpasta da unidade USB e confirme “Usar esta pasta” e “Permitir”. Se o seletor do Fire OS não deixar focar esse botão, use o armazenamento interno ou NAS/SMB.</string>
     <string name="recset_nas_connection">Ligação NAS</string>
     <string name="recset_field_server">Servidor (IP ou nome de anfitrião)</string>
     <string name="recset_field_share">Nome da partilha</string>
@@ -265,8 +266,9 @@
     <string name="recset_background_title">Gravação em segundo plano</string>
     <string name="recset_background_allowed">Permitido</string>
     <string name="recset_background_not_allowed">Não permitido</string>
-    <string name="recset_background_fix">Corrigir</string>
-    <string name="recset_background_desc">O Android pode interromper as gravações quando o dispositivo adormece ou sai do FullTV, a menos que o FullTV possa ignorar a otimização de bateria. Ao permitir isso, as gravações continuam mesmo em standby, tal como uma set-top box.</string>
+    <string name="recset_background_fix">Abrir definições</string>
+    <string name="recset_background_desc">Abra as definições do sistema e permita atividade em segundo plano, se o dispositivo oferecer essa opção. Algumas Fire TV não mostram esse controlo; o FullTV não consegue ativá-lo sozinho, por isso o modo de espera pode interromper uma gravação.</string>
+    <string name="recset_background_open_failed">Não foi possível abrir uma definição do sistema para atividade em segundo plano. Verifique as opções de bateria/aplicações da Fire TV, se disponíveis; o FullTV não pode conceder essa permissão sozinho.</string>
     <string name="recset_background_on_title">A gravação em segundo plano está ativa</string>
     <string name="recset_background_on_desc">As gravações continuam a decorrer quando sai do FullTV ou a TV entra em suspensão.</string>
     <string name="recset_background_toast">Gravação em segundo plano ativada — as gravações continuam em segundo plano.</string>
@@ -506,4 +508,17 @@
     <string name="recset_container_ts">TS (original)</string>
     <string name="recset_container_mp4">MP4 (remux)</string>
     <string name="rec_notification_converting">A converter a gravação para MP4…</string>
+
+    <!-- Update dialog -->
+    <string name="update_title_available">Atualização disponível</string>
+    <string name="update_action_update">Atualizar</string>
+    <string name="update_action_later">Mais tarde</string>
+    <string name="update_available_message">O FullTV %1$s está disponível. A versão instalada é %2$s.</string>
+    <string name="update_title_downloading">A transferir a atualização…</string>
+    <string name="update_progress_percent">%1$d%%</string>
+    <string name="update_action_retry">Tentar novamente</string>
+    <string name="update_action_close">Fechar</string>
+    <string name="update_title_failed">Falha na atualização</string>
+    <string name="update_download_failed">Não foi possível transferir a atualização. Verifique a ligação à internet e tente novamente.</string>
+    <string name="update_install_permission_required">No ecrã seguinte, permita que o FullTV instale aplicações desta origem e depois selecione Tentar novamente.</string>
 </resources>

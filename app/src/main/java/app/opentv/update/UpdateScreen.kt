@@ -20,12 +20,14 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.opentv.BuildConfig
+import app.opentv.R
 import app.opentv.core.ServiceLocator
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,12 +47,16 @@ fun UpdateGate(viewModel: UpdateViewModel = viewModel()) {
 
         is UpdateUiState.Available -> AlertDialog(
             onDismissRequest = viewModel::dismiss,
-            confirmButton = { TextButton(onClick = viewModel::install) { Text("Update") } },
-            dismissButton = { TextButton(onClick = viewModel::dismiss) { Text("Later") } },
-            title = { Text("Update available") },
+            confirmButton = {
+                TextButton(onClick = viewModel::install) { Text(stringResource(R.string.update_action_update)) }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismiss) { Text(stringResource(R.string.update_action_later)) }
+            },
+            title = { Text(stringResource(R.string.update_title_available)) },
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
-                    Text("FullTV ${s.update.versionName} is available. You have ${BuildConfig.VERSION_NAME}.")
+                    Text(stringResource(R.string.update_available_message, s.update.versionName, BuildConfig.VERSION_NAME))
                     if (s.update.notes.isNotBlank()) {
                         Text(
                             text = s.update.notes,
@@ -66,7 +72,7 @@ fun UpdateGate(viewModel: UpdateViewModel = viewModel()) {
         is UpdateUiState.Downloading -> AlertDialog(
             onDismissRequest = {}, // a download in flight should not be dismissed by a stray click
             confirmButton = {},
-            title = { Text("Downloading update…") },
+            title = { Text(stringResource(R.string.update_title_downloading)) },
             text = {
                 Column {
                     if (s.fraction >= 0f) {
@@ -74,7 +80,10 @@ fun UpdateGate(viewModel: UpdateViewModel = viewModel()) {
                             progress = { s.fraction },
                             modifier = Modifier.fillMaxWidth(),
                         )
-                        Text("${(s.fraction * 100).toInt()}%", Modifier.padding(top = 8.dp))
+                        Text(
+                            stringResource(R.string.update_progress_percent, (s.fraction * 100).toInt()),
+                            Modifier.padding(top = 8.dp),
+                        )
                     } else {
                         LinearProgressIndicator(Modifier.fillMaxWidth())
                     }
@@ -84,12 +93,19 @@ fun UpdateGate(viewModel: UpdateViewModel = viewModel()) {
 
         is UpdateUiState.Failed -> AlertDialog(
             onDismissRequest = viewModel::dismiss,
-            confirmButton = { TextButton(onClick = viewModel::install) { Text("Retry") } },
-            dismissButton = { TextButton(onClick = viewModel::dismiss) { Text("Close") } },
-            title = { Text("Update failed") },
+            confirmButton = {
+                TextButton(onClick = viewModel::install) { Text(stringResource(R.string.update_action_retry)) }
+            },
+            dismissButton = {
+                TextButton(onClick = viewModel::dismiss) { Text(stringResource(R.string.update_action_close)) }
+            },
+            title = { Text(stringResource(R.string.update_title_failed)) },
             text = {
                 Text(
-                    s.reason ?: "Could not download the update. Check the connection and try again.",
+                    stringResource(
+                        if (s.installPermissionRequired) R.string.update_install_permission_required
+                        else R.string.update_download_failed,
+                    ),
                 )
             },
         )
@@ -100,7 +116,7 @@ sealed interface UpdateUiState {
     data object Idle : UpdateUiState
     data class Available(val update: UpdateChecker.Update) : UpdateUiState
     data class Downloading(val update: UpdateChecker.Update, val fraction: Float) : UpdateUiState
-    data class Failed(val update: UpdateChecker.Update, val reason: String? = null) : UpdateUiState
+    data class Failed(val update: UpdateChecker.Update, val installPermissionRequired: Boolean = false) : UpdateUiState
 }
 
 /**
@@ -165,11 +181,7 @@ class UpdateViewModel(app: Application) : AndroidViewModel(app) {
             }.onFailure { error ->
                 _state.value = UpdateUiState.Failed(
                     update,
-                    if (error is ApkInstaller.InstallPermissionRequiredException) {
-                        "Allow FullTV to install unknown apps in the next screen, then tap Retry."
-                    } else {
-                        null
-                    },
+                    installPermissionRequired = error is ApkInstaller.InstallPermissionRequiredException,
                 )
             }
         }

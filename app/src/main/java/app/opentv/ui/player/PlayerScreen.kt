@@ -980,7 +980,9 @@ fun PlayerScreen(
         RecordingBackgroundDialog(
             onAllow = {
                 showBackgroundPrompt = false
-                context.requestIgnoreBatteryOptimizations()
+                if (!context.requestIgnoreBatteryOptimizations()) {
+                    Toast.makeText(context, R.string.recset_background_open_failed, Toast.LENGTH_LONG).show()
+                }
             },
             onDismiss = { showBackgroundPrompt = false },
         )
