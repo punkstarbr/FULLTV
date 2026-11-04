@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.11.26 (atualização estável) — 2026-11-03
+
+- **FTP em dispositivos da rede local:** preencher com um toque o IP do gateway Wi-Fi/Ethernet e
+  localizar serviços FTP anunciados por mDNS. A descoberta aceita somente IPv4 privado e não faz
+  varredura de portas; o roteador/computador ainda precisa ter FTP habilitado e permissão de escrita.
+- **Navegação por controle remoto:** redimensionar a Activity com o teclado, rolar o campo focado para
+  a tela e oferecer ações Próximo/Concluído para percorrer o formulário FTP sem ficar preso no teclado.
+- **Compatibilidade de atualização:** esta é uma release estável do pacote normal `app.fulltv`, código
+  38, assinada com o mesmo certificado legado da v0.11.25 conforme autorização específica do proprietário.
+  O certificado é Android Debug, não é uma chave de produção e não deve ser usado após esta versão.
+- **Validação:** quatro testes de descoberta FTP passaram. Na suíte Kotlin, 173/179 passaram; seis
+  `XmltvChannelParseTest` falharam antes das assertions por falta de `conscrypt_openjdk_jni-linux-aarch_64`
+  no host ARM64. `lintVitalRelease` e `assembleRelease` passaram; não houve teste físico em Fire TV/roteador.
+- **APK universal:** `app.fulltv`, versionCode 38, minSdk 24, quatro ABIs; certificado SHA-256
+  `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. SHA-256 do APK:
+  `ae54b38f42b6f122ba86e0f80730fd2151f8b8f88331d5387c7997dadfc80df8`.
+
 ## 0.11.25 (atualização estável) — 2026-11-03
 
 - **Controle parental e PIN:** exigir autorização nos pontos de entrada de canais ocultos, incluindo

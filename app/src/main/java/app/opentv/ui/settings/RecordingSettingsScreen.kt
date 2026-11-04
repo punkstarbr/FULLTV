@@ -7,6 +7,7 @@ package app.opentv.ui.settings
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,8 +21,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -54,11 +60,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
@@ -77,10 +87,13 @@ import app.opentv.core.isIgnoringBatteryOptimizations
 import app.opentv.core.requestIgnoreBatteryOptimizations
 import app.opentv.recording.FtpClient
 import app.opentv.recording.FtpConfig
+import app.opentv.recording.FtpServerCandidate
+import app.opentv.recording.FtpServerDiscovery
 import app.opentv.recording.RecordingStorage
 import app.opentv.recording.SmbClient
 import app.opentv.recording.SmbConfig
 import app.opentv.ui.ProtectSensitiveScreen
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -99,6 +112,7 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
     val graph = remember { ServiceLocator.get(context) }
     val settings = graph.settings
     val scope = rememberCoroutineScope()
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     var target by remember { mutableStateOf(settings.recordingTarget.value) }
     var host by remember { mutableStateOf(settings.smbHost.value) }
@@ -113,6 +127,19 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
     var ftpPassword by remember { mutableStateOf(settings.ftpPassword.value) }
     var ftpAcknowledged by remember { mutableStateOf(settings.ftpPlaintextAcknowledged.value) }
     var ftpStatus by remember { mutableStateOf<String?>(null) }
+    var ftpDiscoveryStatus by remember { mutableStateOf<String?>(null) }
+    var ftpDiscovering by remember { mutableStateOf(false) }
+    var ftpServers by remember { mutableStateOf<List<FtpServerCandidate>>(emptyList()) }
+    var ftpGateway by remember(context) {
+        mutableStateOf(FtpServerDiscovery.currentPrivateGatewayIpv4(context))
+    }
+    val ftpHostFocus = remember { FocusRequester() }
+    val ftpPortFocus = remember { FocusRequester() }
+    val ftpFolderFocus = remember { FocusRequester() }
+    val ftpUserFocus = remember { FocusRequester() }
+    val ftpPasswordFocus = remember { FocusRequester() }
+    val ftpConsentFocus = remember { FocusRequester() }
+    val ftpTestFocus = remember { FocusRequester() }
     var usbTree by remember { mutableStateOf(settings.usbTreeUri.value) }
     var usbLabel by remember { mutableStateOf(settings.usbFolderLabel.value) }
     var usbPickerMessage by remember { mutableStateOf<String?>(null) }
@@ -176,6 +203,18 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
         plaintextAcknowledged = ftpAcknowledged,
     )
 
+    fun useFtpDestination(selectedHost: String, selectedPort: Int) {
+        val hostChanged = ftpHost.trim() != selectedHost
+        val endpointChanged = hostChanged || ftpPort != selectedPort.toString()
+        ftpHost = selectedHost
+        ftpPort = selectedPort.toString()
+        if (hostChanged) ftpFolder = ""
+        if (endpointChanged) {
+            ftpAcknowledged = false
+            ftpStatus = null
+        }
+    }
+
     fun persist(): Boolean {
         if (target == AppSettings.RecordingTarget.SMB) {
             settings.setSmbConfig(host, share, folder, user, password)
@@ -211,6 +250,7 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
+            .imePadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 32.dp, vertical = 24.dp),
     ) {
@@ -412,25 +452,133 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                Field(stringResource(R.string.recset_ftp_host), ftpHost, "192.168.1.20") {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.recset_ftp_discovery_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedButton(
+                    enabled = ftpGateway != null,
+                    modifier = Modifier.bringFocusedItemIntoView(),
+                    onClick = { ftpGateway?.let { useFtpDestination(it, 21) } },
+                ) {
+                    Text(
+                        ftpGateway?.let { stringResource(R.string.recset_ftp_use_router, it) }
+                            ?: stringResource(R.string.recset_ftp_router_unavailable),
+                    )
+                }
+                Button(
+                    enabled = !ftpDiscovering,
+                    modifier = Modifier.bringFocusedItemIntoView(),
+                    onClick = {
+                        ftpDiscovering = true
+                        ftpServers = emptyList()
+                        ftpGateway = FtpServerDiscovery.currentPrivateGatewayIpv4(context)
+                        ftpDiscoveryStatus = context.getString(R.string.recset_ftp_discovering)
+                        scope.launch {
+                            try {
+                                ftpServers = FtpServerDiscovery.discover(context)
+                                ftpDiscoveryStatus = if (ftpServers.isEmpty()) {
+                                    context.getString(R.string.recset_ftp_discovery_none)
+                                } else {
+                                    context.getString(R.string.recset_ftp_discovery_found, ftpServers.size)
+                                }
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (_: Exception) {
+                                ftpDiscoveryStatus = context.getString(R.string.recset_ftp_discovery_failed)
+                            } finally {
+                                ftpDiscovering = false
+                            }
+                        }
+                    },
+                ) {
+                    Text(
+                        if (ftpDiscovering) stringResource(R.string.recset_ftp_discovering_button)
+                        else stringResource(R.string.recset_ftp_discover),
+                    )
+                }
+                ftpDiscoveryStatus?.let { message ->
+                    Text(message, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                }
+                ftpServers.forEach { server ->
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(server.name, style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "${server.host}:${server.port}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        OutlinedButton(
+                            modifier = Modifier.bringFocusedItemIntoView(),
+                            onClick = { useFtpDestination(server.host, server.port) },
+                        ) { Text(stringResource(R.string.recset_ftp_use_server)) }
+                    }
+                }
+                Field(
+                    stringResource(R.string.recset_ftp_host),
+                    ftpHost,
+                    "192.168.1.20",
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(onNext = { ftpPortFocus.requestFocus() }),
+                    focusRequester = ftpHostFocus,
+                ) {
                     if (it.trim() != ftpHost.trim()) ftpAcknowledged = false
                     ftpHost = it
                     ftpStatus = null
                 }
-                Field(stringResource(R.string.recset_ftp_port), ftpPort, "21") {
+                Field(
+                    stringResource(R.string.recset_ftp_port),
+                    ftpPort,
+                    "21",
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(onNext = { ftpFolderFocus.requestFocus() }),
+                    focusRequester = ftpPortFocus,
+                ) {
                     if (it != ftpPort) ftpAcknowledged = false
                     ftpPort = it.filter(Char::isDigit).take(5)
                     ftpStatus = null
                 }
-                Field(stringResource(R.string.recset_ftp_folder), ftpFolder, "FullTV") {
+                Field(
+                    stringResource(R.string.recset_ftp_folder),
+                    ftpFolder,
+                    "FullTV",
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(onNext = { ftpUserFocus.requestFocus() }),
+                    focusRequester = ftpFolderFocus,
+                ) {
                     ftpFolder = it
                     ftpStatus = null
                 }
-                Field(stringResource(R.string.recset_ftp_username), ftpUser, "fulltv") {
+                Field(
+                    stringResource(R.string.recset_ftp_username),
+                    ftpUser,
+                    "fulltv",
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(onNext = { ftpPasswordFocus.requestFocus() }),
+                    focusRequester = ftpUserFocus,
+                ) {
                     ftpUser = it
                     ftpStatus = null
                 }
-                Field(stringResource(R.string.recset_ftp_password), ftpPassword, "", isPassword = true) {
+                Field(
+                    stringResource(R.string.recset_ftp_password),
+                    ftpPassword,
+                    "",
+                    isPassword = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = {
+                        keyboardController?.hide()
+                        ftpConsentFocus.requestFocus()
+                    }),
+                    focusRequester = ftpPasswordFocus,
+                ) {
                     ftpPassword = it
                     ftpStatus = null
                 }
@@ -438,9 +586,11 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
                     label = stringResource(R.string.recset_ftp_consent),
                     subtitle = stringResource(R.string.recset_ftp_consent_desc),
                     checked = ftpAcknowledged,
+                    focusRequester = ftpConsentFocus,
                 ) { ftpAcknowledged = it; ftpStatus = null }
                 val ftpConfig = currentFtpConfig()
                 Button(
+                    modifier = Modifier.focusRequester(ftpTestFocus).bringFocusedItemIntoView(),
                     enabled = !testing && FtpClient.isValidConfig(ftpConfig),
                     onClick = {
                         testing = true
@@ -535,6 +685,7 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
 
         Spacer(Modifier.height(20.dp))
         Button(
+            modifier = Modifier.bringFocusedItemIntoView(),
             enabled = (target != AppSettings.RecordingTarget.USB || usbTree != null) &&
                 (target != AppSettings.RecordingTarget.FTP || FtpClient.isValidConfig(currentFtpConfig())),
             onClick = {
@@ -650,7 +801,14 @@ private fun formatBytes(bytes: Long): String {
 
 /** A label + subtitle with a Material switch on the right. */
 @Composable
-private fun ToggleRow(label: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+private fun ToggleRow(
+    label: String,
+    subtitle: String,
+    checked: Boolean,
+    focusRequester: FocusRequester? = null,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val switchModifier = focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier
     Row(
         Modifier.fillMaxWidth().padding(vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -660,7 +818,11 @@ private fun ToggleRow(label: String, subtitle: String, checked: Boolean, onCheck
             Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Spacer(Modifier.width(12.dp))
-        Switch(checked = checked, onCheckedChange = onCheckedChange)
+        Switch(
+            modifier = switchModifier.bringFocusedItemIntoView(),
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+        )
     }
 }
 
@@ -860,15 +1022,21 @@ private fun Field(
     value: String,
     placeholder: String,
     isPassword: Boolean = false,
+    keyboardOptions: KeyboardOptions = KeyboardOptions.Default,
+    keyboardActions: KeyboardActions = KeyboardActions.Default,
+    focusRequester: FocusRequester? = null,
     onChange: (String) -> Unit,
 ) {
     var revealed by remember { mutableStateOf(false) }
+    val fieldModifier = focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
         label = { Text(label) },
         placeholder = { if (placeholder.isNotEmpty()) Text(placeholder) },
         singleLine = true,
+        keyboardOptions = keyboardOptions,
+        keyboardActions = keyboardActions,
         // A recording password is a real credential (a NAS login) — don't paint it on a living-room
         // screen. Masked by default, with an eye to reveal it if you need to check what you typed.
         visualTransformation = if (isPassword && !revealed) PasswordVisualTransformation() else VisualTransformation.None,
@@ -884,6 +1052,16 @@ private fun Field(
                 }
             }
         },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = fieldModifier.fillMaxWidth().bringFocusedItemIntoView(),
     )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun Modifier.bringFocusedItemIntoView(): Modifier {
+    val requester = remember { BringIntoViewRequester() }
+    val scope = rememberCoroutineScope()
+    return bringIntoViewRequester(requester).onFocusChanged { focusState ->
+        if (focusState.isFocused) scope.launch { requester.bringIntoView() }
+    }
 }

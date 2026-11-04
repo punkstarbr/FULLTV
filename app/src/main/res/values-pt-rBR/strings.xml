@@ -300,6 +300,16 @@
     <string name="recset_ftp_security_title">Risco do FTP sem criptografia</string>
     <string name="recset_ftp_warning">O FTP simples não criptografa usuário, senha nem vídeo. Outros dispositivos na rede podem capturá-los. Nunca use em rede pública ou em servidor na internet.</string>
     <string name="recset_ftp_local_only_hint">Por segurança, o FullTV aceita somente um endereço IPv4 privado numérico (10.x, 172.16–31.x ou 192.168.x). Nomes de host, DNS e IPs públicos são bloqueados. O FTP serve somente como destino de gravação. O caminho é relativo à pasta inicial da conta FTP (por exemplo, FullTV/Recordings); deixe vazio para usar a raiz.</string>
+    <string name="recset_ftp_discovery_hint">Procure serviços FTP anunciados na rede ou use o endereço do roteador atual. Muitos roteadores não anunciam FTP. O outro dispositivo precisa ter um servidor FTP ativo e permitir gravações. Depois de preencher um campo, use Próximo/Next no teclado para avançar; a tela rola para manter o campo focado visível.</string>
+    <string name="recset_ftp_use_router">Usar roteador atual (%1$s)</string>
+    <string name="recset_ftp_router_unavailable">Endereço do roteador atual indisponível</string>
+    <string name="recset_ftp_discover">Procurar servidores FTP</string>
+    <string name="recset_ftp_discovering_button">Procurando…</string>
+    <string name="recset_ftp_discovering">Procurando servidores FTP anunciados na rede local…</string>
+    <string name="recset_ftp_discovery_none">Nenhum servidor FTP anunciado foi encontrado. Ative um servidor FTP no computador ou roteador, use o atalho do roteador ou digite o IPv4 privado.</string>
+    <string name="recset_ftp_discovery_failed">Não foi possível procurar na rede local. Você ainda pode digitar manualmente um endereço IPv4 privado.</string>
+    <string name="recset_ftp_discovery_found">%1$d servidor(es) FTP encontrado(s). Escolha um para usar.</string>
+    <string name="recset_ftp_use_server">Usar</string>
     <string name="recset_ftp_host">Endereço IPv4 local</string>
     <string name="recset_ftp_port">Porta FTP</string>
     <string name="recset_ftp_folder">Pasta remota (relativa; vazia = raiz da conta)</string>

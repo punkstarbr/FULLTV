@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Validate explicit release-signing inputs without silently falling back to debug signing.
 
-The only compatibility exception is the owner-approved v0.11.25 bridge release, signed with the
-exact legacy certificate already used by public FullTV installations. It is opt-in, version-scoped,
-and remains a non-production signing identity. This script never creates or reads a private key.
+The only compatibility exceptions are the owner-approved v0.11.25 and v0.11.26 bridge releases,
+signed with the exact legacy certificate already used by public FullTV installations. They are opt-in,
+version-scoped, and remain a non-production signing identity. This script never creates or reads a private key.
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ REQUIRED_ENV = (
     "KEY_PASSWORD",
     "RELEASE_CERT_SHA256",
 )
-LEGACY_COMPAT_VERSION = "0.11.25"
+LEGACY_COMPAT_RELEASES = {("0.11.25", 37), ("0.11.26", 38)}
 LEGACY_ANDROID_DEBUG_CERT_SHA256 = "01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91"
 LEGACY_COMPAT_OPT_IN = "FULLTV_ALLOW_LEGACY_COMPAT_SIGNING"
 
@@ -35,6 +35,7 @@ def fail(message: str) -> NoReturn:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", default="", help="FullTV version being packaged")
+    parser.add_argument("--version-code", type=int, default=0, help="Android versionCode being packaged")
     args = parser.parse_args()
 
     keystore_path = os.environ.get("KEYSTORE_PATH", "").strip()
@@ -57,20 +58,20 @@ def main() -> int:
 
     allow_legacy = os.environ.get(LEGACY_COMPAT_OPT_IN, "") == "1"
     if certificate == LEGACY_ANDROID_DEBUG_CERT_SHA256:
-        if not allow_legacy or args.version != LEGACY_COMPAT_VERSION:
+        if not allow_legacy or (args.version, args.version_code) not in LEGACY_COMPAT_RELEASES:
             fail(
                 "The legacy Android Debug certificate is blocked by default; it is allowed only "
-                "for the explicitly approved v0.11.25 compatibility release."
+                "for explicitly approved compatibility releases v0.11.25/code37 and v0.11.26/code38."
             )
         print(
-            "WARNING: v0.11.25 is using the legacy Android Debug certificate for upgrade "
+            f"WARNING: v{args.version} (code {args.version_code}) is using the legacy Android Debug certificate for upgrade "
             "compatibility. This is not production signing and must not be reused for later releases."
         )
         return 0
 
     if allow_legacy:
         fail(
-            f"{LEGACY_COMPAT_OPT_IN} is limited to v{LEGACY_COMPAT_VERSION} and the exact "
+            f"{LEGACY_COMPAT_OPT_IN} is limited to v0.11.25/code37 or v0.11.26/code38 and the exact "
             "legacy Android Debug certificate."
         )
 

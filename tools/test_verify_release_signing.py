@@ -19,7 +19,7 @@ LEGACY_OPT_IN = "FULLTV_ALLOW_LEGACY_COMPAT_SIGNING"
 
 
 class ReleaseSigningVerifierTest(unittest.TestCase):
-    def run_verifier(self, values=None, version=None):
+    def run_verifier(self, values=None, version=None, version_code=None):
         env = os.environ.copy()
         for name in (*REQUIRED, LEGACY_OPT_IN):
             env.pop(name, None)
@@ -28,6 +28,8 @@ class ReleaseSigningVerifierTest(unittest.TestCase):
         command = [sys.executable, str(SCRIPT)]
         if version is not None:
             command.extend(["--version", version])
+        if version_code is not None:
+            command.extend(["--version-code", str(version_code)])
         return subprocess.run(
             command,
             env=env,
@@ -72,23 +74,32 @@ class ReleaseSigningVerifierTest(unittest.TestCase):
 
     def test_legacy_debug_certificate_is_rejected_without_explicit_opt_in(self):
         with tempfile.NamedTemporaryFile() as keystore:
-            result = self.run_verifier(self.base_values(keystore.name, LEGACY_CERT), "0.11.25")
+            result = self.run_verifier(self.base_values(keystore.name, LEGACY_CERT), "0.11.26", 38)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("blocked by default", result.stderr)
 
     def test_legacy_debug_certificate_is_allowed_for_exact_approved_version(self):
         with tempfile.NamedTemporaryFile() as keystore:
-            values = self.base_values(keystore.name, LEGACY_CERT)
-            values[LEGACY_OPT_IN] = "1"
-            result = self.run_verifier(values, "0.11.25")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("not production signing", result.stdout)
+            for version, version_code in (("0.11.25", 37), ("0.11.26", 38)):
+                values = self.base_values(keystore.name, LEGACY_CERT)
+                values[LEGACY_OPT_IN] = "1"
+                result = self.run_verifier(values, version, version_code)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn("not production signing", result.stdout)
 
-    def test_legacy_debug_opt_in_does_not_allow_future_versions(self):
+    def test_legacy_debug_certificate_requires_exact_version_code(self):
         with tempfile.NamedTemporaryFile() as keystore:
             values = self.base_values(keystore.name, LEGACY_CERT)
             values[LEGACY_OPT_IN] = "1"
-            result = self.run_verifier(values, "0.11.26")
+            result = self.run_verifier(values, "0.11.26", 37)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("blocked by default", result.stderr)
+
+    def test_legacy_debug_opt_in_does_not_allow_future_version(self):
+        with tempfile.NamedTemporaryFile() as keystore:
+            values = self.base_values(keystore.name, LEGACY_CERT)
+            values[LEGACY_OPT_IN] = "1"
+            result = self.run_verifier(values, "0.11.27", 39)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("blocked by default", result.stderr)
 
@@ -96,9 +107,9 @@ class ReleaseSigningVerifierTest(unittest.TestCase):
         with tempfile.NamedTemporaryFile() as keystore:
             values = self.base_values(keystore.name, "a" * 64)
             values[LEGACY_OPT_IN] = "1"
-            result = self.run_verifier(values, "0.11.25")
+            result = self.run_verifier(values, "0.11.25", 37)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("limited to v0.11.25", result.stderr)
+        self.assertIn("limited to v0.11.25/code37 or v0.11.26/code38", result.stderr)
 
 
 if __name__ == "__main__":

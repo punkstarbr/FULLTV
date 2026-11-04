@@ -74,6 +74,7 @@
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true"
             android:screenOrientation="fullUser"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.OpenTV" />
 
         <!-- Public launcher ignores all caller extras; internal notification actions target the
