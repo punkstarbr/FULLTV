@@ -80,7 +80,7 @@ class ReleaseSigningVerifierTest(unittest.TestCase):
 
     def test_legacy_debug_certificate_is_allowed_for_exact_approved_version(self):
         with tempfile.NamedTemporaryFile() as keystore:
-            for version, version_code in (("0.11.25", 37), ("0.11.26", 38)):
+            for version, version_code in (("0.11.25", 37), ("0.11.26", 38), ("0.11.27", 39)):
                 values = self.base_values(keystore.name, LEGACY_CERT)
                 values[LEGACY_OPT_IN] = "1"
                 result = self.run_verifier(values, version, version_code)
@@ -99,7 +99,7 @@ class ReleaseSigningVerifierTest(unittest.TestCase):
         with tempfile.NamedTemporaryFile() as keystore:
             values = self.base_values(keystore.name, LEGACY_CERT)
             values[LEGACY_OPT_IN] = "1"
-            result = self.run_verifier(values, "0.11.27", 39)
+            result = self.run_verifier(values, "0.11.28", 40)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("blocked by default", result.stderr)
 
@@ -109,7 +109,7 @@ class ReleaseSigningVerifierTest(unittest.TestCase):
             values[LEGACY_OPT_IN] = "1"
             result = self.run_verifier(values, "0.11.25", 37)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("limited to v0.11.25/code37 or v0.11.26/code38", result.stderr)
+        self.assertIn("limited to v0.11.25/code37, v0.11.26/code38, or v0.11.27/code39", result.stderr)
 
 
 if __name__ == "__main__":

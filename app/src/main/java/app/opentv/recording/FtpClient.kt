@@ -29,6 +29,13 @@ data class FtpConfig(
     val plaintextAcknowledged: Boolean,
 )
 
+/** Parsed pieces of an endpoint pasted into the host field; absent fields keep their separate inputs. */
+data class FtpEndpointInput(
+    val host: String,
+    val port: Int?,
+    val folder: String?,
+)
+
 /** FTP is an exception for recording destinations only; it is not a general media/source policy. */
 object FtpClient {
     private const val CONNECT_TIMEOUT_MILLIS = 10_000
@@ -37,6 +44,39 @@ object FtpClient {
     private const val MAX_PATH_SEGMENTS = 32
     private const val MAX_SEGMENT_CHARS = 128
     private const val MAX_CREDENTIAL_CHARS = 256
+    private val BARE_ENDPOINT_INPUT = Regex("""^(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?(?:/.*)?$""")
+
+    /** Accept a local FTP URL or IPv4:port/path pasted into the host field, never embedded credentials. */
+    fun parseEndpointInput(raw: String): FtpEndpointInput? {
+        val value = raw.trim()
+        if (value.isEmpty()) return null
+        val hasScheme = value.startsWith("ftp://", ignoreCase = true)
+        if (!hasScheme && !BARE_ENDPOINT_INPUT.matches(value)) return null
+
+        val uri = runCatching { URI(if (hasScheme) value else "ftp://$value") }.getOrNull() ?: return null
+        if (!uri.scheme.equals("ftp", ignoreCase = true) || uri.rawUserInfo != null ||
+            uri.rawQuery != null || uri.rawFragment != null
+        ) return null
+        val host = uri.host?.takeIf(::isPrivateRfc1918Ipv4) ?: return null
+        val port = uri.port.takeIf { it != -1 }
+        if (port != null && port !in 1..65_535) return null
+
+        val rawPath = uri.rawPath.orEmpty()
+        val folder = when {
+            rawPath.isEmpty() -> if (hasScheme) "" else null
+            !rawPath.startsWith('/') || rawPath.startsWith("//") -> return null
+            rawPath == "/" -> ""
+            else -> runCatching {
+                URLDecoder.decode(
+                    rawPath.removePrefix("/").removeSuffix("/").replace("+", "%2B"),
+                    Charsets.UTF_8.name(),
+                ).also { safeSegments(it, allowEmpty = true) }
+            }.getOrNull() ?: return null
+        }
+        // A bare host keeps the separately entered port and folder. A URL can also omit both.
+        if (!hasScheme && port == null && rawPath.isEmpty()) return null
+        return FtpEndpointInput(host, port, folder)
+    }
 
     /** Returns a user-safe validation message, or null when the explicit local FTP config is valid. */
     fun validationError(config: FtpConfig): String? =

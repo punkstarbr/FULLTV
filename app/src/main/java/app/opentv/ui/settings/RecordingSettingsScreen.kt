@@ -139,6 +139,7 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
     val ftpUserFocus = remember { FocusRequester() }
     val ftpPasswordFocus = remember { FocusRequester() }
     val ftpConsentFocus = remember { FocusRequester() }
+    val ftpSaveFocus = remember { FocusRequester() }
     val ftpTestFocus = remember { FocusRequester() }
     var usbTree by remember { mutableStateOf(settings.usbTreeUri.value) }
     var usbLabel by remember { mutableStateOf(settings.usbFolderLabel.value) }
@@ -194,14 +195,17 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
         }
     }
 
-    fun currentFtpConfig() = FtpConfig(
-        host = ftpHost.trim(),
-        port = ftpPort.toIntOrNull() ?: -1,
-        folder = ftpFolder.trim(),
-        username = ftpUser,
-        password = ftpPassword,
-        plaintextAcknowledged = ftpAcknowledged,
-    )
+    fun currentFtpConfig(): FtpConfig {
+        val pasted = FtpClient.parseEndpointInput(ftpHost)
+        return FtpConfig(
+            host = pasted?.host ?: ftpHost.trim(),
+            port = pasted?.port ?: ftpPort.toIntOrNull() ?: -1,
+            folder = pasted?.folder ?: ftpFolder.trim(),
+            username = ftpUser,
+            password = ftpPassword,
+            plaintextAcknowledged = ftpAcknowledged,
+        )
+    }
 
     fun useFtpDestination(selectedHost: String, selectedPort: Int) {
         val hostChanged = ftpHost.trim() != selectedHost
@@ -215,34 +219,57 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
         }
     }
 
+    /** Save the endpoint independently of connectivity; only consent may activate cleartext FTP. */
+    fun saveFtpConfig(): Boolean {
+        val config = currentFtpConfig()
+        if (FtpClient.validationError(config.copy(plaintextAcknowledged = true)) != null) {
+            ftpStatus = context.getString(R.string.recset_ftp_config_invalid)
+            return false
+        }
+        if (!settings.setFtpConfig(
+                host = config.host,
+                port = config.port,
+                folder = config.folder,
+                user = config.username,
+                password = config.password,
+                plaintextAcknowledged = config.plaintextAcknowledged,
+            )
+        ) {
+            ftpStatus = context.getString(R.string.recset_ftp_save_failed)
+            return false
+        }
+        // Normalize a pasted ftp://IP:port/path into the separate visible fields after saving.
+        ftpHost = config.host
+        ftpPort = config.port.toString()
+        ftpFolder = config.folder
+        if (config.plaintextAcknowledged) {
+            settings.setRecordingTarget(AppSettings.RecordingTarget.FTP)
+            ftpStatus = context.getString(R.string.recset_status_saved)
+        } else {
+            if (settings.recordingTarget.value == AppSettings.RecordingTarget.FTP) {
+                settings.setRecordingTarget(AppSettings.RecordingTarget.INTERNAL)
+            }
+            ftpStatus = context.getString(R.string.recset_ftp_saved_not_enabled)
+        }
+        return true
+    }
+
     fun persist(): Boolean {
         if (target == AppSettings.RecordingTarget.SMB) {
             settings.setSmbConfig(host, share, folder, user, password)
         }
         if (target == AppSettings.RecordingTarget.FTP) {
-            val config = currentFtpConfig()
-            if (FtpClient.validationError(config) != null) {
-                ftpStatus = context.getString(R.string.recset_ftp_config_invalid)
-                return false
-            }
-            if (!settings.setFtpConfig(
-                    host = config.host,
-                    port = config.port,
-                    folder = config.folder,
-                    user = config.username,
-                    password = config.password,
-                    plaintextAcknowledged = config.plaintextAcknowledged,
-                )
-            ) {
-                ftpStatus = context.getString(R.string.recset_ftp_save_failed)
-                return false
-            }
+            if (!saveFtpConfig()) return false
         }
         // Don't commit USB as the destination unless a folder has actually been granted, so
         // leaving the screen without picking one can never strand recordings with nowhere to go.
-        val safeTarget =
-            if (target == AppSettings.RecordingTarget.USB && usbTree == null) settings.recordingTarget.value
-            else target
+        val safeTarget = when {
+            target == AppSettings.RecordingTarget.USB && usbTree == null -> settings.recordingTarget.value
+            target == AppSettings.RecordingTarget.FTP && !ftpAcknowledged ->
+                settings.recordingTarget.value.takeUnless { it == AppSettings.RecordingTarget.FTP }
+                    ?: AppSettings.RecordingTarget.INTERNAL
+            else -> target
+        }
         settings.setRecordingTarget(safeTarget)
         return true
     }
@@ -458,6 +485,12 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    stringResource(R.string.recset_ftp_address_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 OutlinedButton(
                     enabled = ftpGateway != null,
                     modifier = Modifier.bringFocusedItemIntoView(),
@@ -589,6 +622,16 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
                     focusRequester = ftpConsentFocus,
                 ) { ftpAcknowledged = it; ftpStatus = null }
                 val ftpConfig = currentFtpConfig()
+                OutlinedButton(
+                    modifier = Modifier.focusRequester(ftpSaveFocus).bringFocusedItemIntoView(),
+                    enabled = !testing,
+                    onClick = { saveFtpConfig() },
+                ) {
+                    Text(
+                        if (ftpAcknowledged) stringResource(R.string.recset_ftp_save_and_enable)
+                        else stringResource(R.string.recset_ftp_save_address),
+                    )
+                }
                 Button(
                     modifier = Modifier.focusRequester(ftpTestFocus).bringFocusedItemIntoView(),
                     enabled = !testing && FtpClient.isValidConfig(ftpConfig),
@@ -686,8 +729,7 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
         Spacer(Modifier.height(20.dp))
         Button(
             modifier = Modifier.bringFocusedItemIntoView(),
-            enabled = (target != AppSettings.RecordingTarget.USB || usbTree != null) &&
-                (target != AppSettings.RecordingTarget.FTP || FtpClient.isValidConfig(currentFtpConfig())),
+            enabled = target != AppSettings.RecordingTarget.USB || usbTree != null,
             onClick = {
                 if (persist()) status = context.getString(R.string.recset_status_saved)
             },

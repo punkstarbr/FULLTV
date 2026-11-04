@@ -98,4 +98,32 @@ class FtpClientSecurityTest {
         assertThat(FtpClient.validationError(config(host = "nas.local"))).isNotNull()
         assertThat(FtpClient.validationError(config(host = "203.0.113.42"))).isNotNull()
     }
+
+    @Test
+    fun `parses a private FTP URL pasted into the host field`() {
+        assertThat(FtpClient.parseEndpointInput("ftp://192.168.100.1:2121/USB/My%20Recordings"))
+            .isEqualTo(FtpEndpointInput("192.168.100.1", 2121, "USB/My Recordings"))
+        assertThat(FtpClient.parseEndpointInput("192.168.100.1:21/USB"))
+            .isEqualTo(FtpEndpointInput("192.168.100.1", 21, "USB"))
+        assertThat(FtpClient.parseEndpointInput("ftp://192.168.100.1/"))
+            .isEqualTo(FtpEndpointInput("192.168.100.1", null, ""))
+        assertThat(FtpClient.parseEndpointInput("ftp://192.168.100.1"))
+            .isEqualTo(FtpEndpointInput("192.168.100.1", null, ""))
+    }
+
+    @Test
+    fun `a bare private IP leaves the separate port and folder inputs unchanged`() {
+        assertThat(FtpClient.parseEndpointInput("192.168.100.1")).isNull()
+    }
+
+    @Test
+    fun `rejects public or credential-bearing FTP URLs and traversal`() {
+        listOf(
+            "ftp://203.0.113.10:21/recordings",
+            "ftp://user:password@192.168.1.20/recordings",
+            "ftp://192.168.1.20/../private",
+            "ftp://192.168.1.20/recordings?download=1",
+            "ftp://router.local/recordings",
+        ).forEach { value -> assertThat(FtpClient.parseEndpointInput(value)).isNull() }
+    }
 }

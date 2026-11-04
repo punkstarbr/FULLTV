@@ -319,17 +319,18 @@
     <string name="recset_ftp_security_title">Plain FTP security risk</string>
     <string name="recset_ftp_warning">Plain FTP does not encrypt the username, password, or video. Other devices on the network may capture them. Never use a public network or an Internet server.</string>
     <string name="recset_ftp_local_only_hint">For safety, FullTV accepts only a numeric private IPv4 address (10.x, 172.16–31.x, or 192.168.x). Hostnames, DNS, and public IP addresses are blocked. FTP is only a recording destination. The folder is relative to the FTP account root (for example, FullTV/Recordings); leave it blank to use the root.</string>
-    <string name="recset_ftp_discovery_hint">Find FTP services advertised on this network or use the current router address. Many routers do not advertise FTP. The other device must have an FTP server enabled with write access. After filling a field, press Next on the keyboard to continue; the page scrolls to keep focus visible.</string>
+    <string name="recset_ftp_discovery_hint">Searches mDNS announcements and probes standard FTP port 21 only in this device’s private IPv4 block (up to 254 addresses). A computer/router appears only if an FTP server is active. Other ports must be announced or entered manually.</string>
+    <string name="recset_ftp_address_hint">Enter a private IP, IP:port, or paste ftp://IP:port/folder. You can save the address before the server responds. Saving without accepting the warning does not enable FTP. Press Next on the keyboard to move between fields.</string>
     <string name="recset_ftp_use_router">Use current router (%1$s)</string>
     <string name="recset_ftp_router_unavailable">Current router address unavailable</string>
     <string name="recset_ftp_discover">Find FTP servers</string>
     <string name="recset_ftp_discovering_button">Searching…</string>
     <string name="recset_ftp_discovering">Searching the local network for FTP servers…</string>
-    <string name="recset_ftp_discovery_none">No advertised FTP server was found. Enable an FTP server on the computer/router, use the router shortcut, or enter its private IPv4 address.</string>
+    <string name="recset_ftp_discovery_none">No FTP server was found. Check that FTP is enabled and uses port 21; enter the address manually if it uses another port.</string>
     <string name="recset_ftp_discovery_failed">Could not search the local network. You can still enter a private IPv4 address manually.</string>
     <string name="recset_ftp_discovery_found">Found %1$d FTP server(s). Select one to use.</string>
     <string name="recset_ftp_use_server">Use this</string>
-    <string name="recset_ftp_host">Local IPv4 address</string>
+    <string name="recset_ftp_host">FTP server address</string>
     <string name="recset_ftp_port">FTP port</string>
     <string name="recset_ftp_folder">Remote folder (relative; blank = account root)</string>
     <string name="recset_ftp_username">FTP username</string>
@@ -340,7 +341,10 @@
     <string name="recset_ftp_status_connected">Connection and upload/delete test succeeded.</string>
     <string name="recset_ftp_status_failed">FTP test failed. Check the server IP, port, credentials, folder access, and that this device is on the same local network.</string>
     <string name="recset_ftp_save_failed">Could not save FTP credentials encrypted on this device.</string>
-    <string name="recset_ftp_config_invalid">Check the FTP settings. Use a numeric private IPv4 address and a relative folder path, or leave the folder blank to use the account root.</string>
+    <string name="recset_ftp_save_address">Save address</string>
+    <string name="recset_ftp_save_and_enable">Save and use FTP</string>
+    <string name="recset_ftp_saved_not_enabled">Address saved. To record over FTP, accept the unencrypted-transfer warning and save again.</string>
+    <string name="recset_ftp_config_invalid">Enter a private numeric IPv4 address or local FTP URL, a valid port, and a relative folder. Do not put a username or password in the URL.</string>
     <string name="recset_usb_section">USB folder</string>
     <string name="recset_usb_choose">Choose folder</string>
     <string name="recset_usb_change">Change folder</string>

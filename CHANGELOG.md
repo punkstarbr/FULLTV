@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.27 (atualização estável) — 2026-11-03
+
+- **FTP na rede local:** combinar mDNS com uma verificação limitada da porta 21 somente no bloco IPv4 privado local (máximo 254 endereços, até 32 conexões simultâneas e sem login). O formulário aceita IP, IP:porta ou `ftp://IP:porta/pasta` colado no endereço.
+- **Salvar e ativar separadamente:** a configuração cifrada pode ser salva antes de o servidor responder; FTP só vira destino de gravação após aceite explícito do aviso de transferência sem criptografia. O formulário apresenta erros localizados e não exige conexão para guardar o endereço.
+- **Assinatura compatível:** pacote normal `app.fulltv`, versionCode 39, assinado com o mesmo certificado legado usado na v0.11.26, conforme autorização específica do proprietário. O certificado é Android Debug, não é uma chave de produção e não deve ser reutilizado em versões posteriores.
+- **Validação local:** os 17 testes FTP focados, 9 testes do gate de assinatura e 4 testes de hash Chaquopy passaram. Na suíte completa, 179/185 passaram; seis testes XMLTV falharam antes das assertions por falta de `conscrypt_openjdk_jni-linux-aarch_64` neste host ARM64. `lintVitalRelease` e `assembleRelease` passaram; não houve teste físico em Fire TV nem em roteador.
+- **APK universal:** `app.fulltv`, versionCode 39, minSdk 24, quatro ABIs; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. Tamanho 165.277.179 bytes; SHA-256 `95c7bf5230e7c34d49d96dfaf076a1d1755158609b1c6b23cbce11ac4b7ea5f8`.
+
 ## 0.11.26 (atualização estável) — 2026-11-03
 
 - **FTP em dispositivos da rede local:** preencher com um toque o IP do gateway Wi-Fi/Ethernet e
