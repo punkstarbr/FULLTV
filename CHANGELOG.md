@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.28 (atualização estável) — 2026-11-04
+
+- **Atualização pelo app:** permitir que o download do APK siga o redirecionamento HTTPS público do GitHub Releases para `release-assets.githubusercontent.com`. O instalador continua validando tamanho, SHA-256, pacote, versão e certificado antes de abrir o instalador Android.
+- **Compatibilidade:** pacote normal `app.fulltv`, versionCode 40, assinado com o certificado legado Android Debug já usado nas instalações públicas, conforme autorização específica do proprietário. Esse certificado não é uma chave de produção e esta exceção não vale para versões futuras.
+- **Validação:** 9 testes do gate de assinatura e 4 testes do verificador de wheels passaram; `lintVitalRelease` e `assembleRelease` também. Na suíte Kotlin completa, 179/185 passaram; seis testes XMLTV falharam antes das assertions pela biblioteca Conscrypt nativa ausente no host Linux ARM64. Não houve teste em aparelho físico.
+- **APK universal:** `app.fulltv`, versionCode 40, minSdk 24, targetSdk 35 e quatro ABIs. Tamanho 165.277.175 bytes; SHA-256 `ac576d03327b10bdb87d552a7aaf8286c763268e37038835dc668b3b48593200`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`.
+
 ## 0.11.27 (atualização estável) — 2026-11-03
 
 - **FTP na rede local:** combinar mDNS com uma verificação limitada da porta 21 somente no bloco IPv4 privado local (máximo 254 endereços, até 32 conexões simultâneas e sem login). O formulário aceita IP, IP:porta ou `ftp://IP:porta/pasta` colado no endereço.

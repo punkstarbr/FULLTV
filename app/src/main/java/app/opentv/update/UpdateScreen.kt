@@ -132,7 +132,10 @@ object UpdateHub {
 class UpdateViewModel(app: Application) : AndroidViewModel(app) {
     private val graph = ServiceLocator.get(app)
     private val checker = UpdateChecker(graph.httpClient, BuildConfig.VERSION_NAME)
-    private val installer = ApkInstaller(graph.httpClient)
+    // GitHub release assets redirect from github.com to release-assets.githubusercontent.com.
+    // Use the public-HTTPS redirect client here; ApkInstaller still verifies size, SHA-256,
+    // package id, version and signing certificate before handing the APK to Android.
+    private val installer = ApkInstaller(graph.streamingHttpClient)
 
     // Backed by the shared hub so a manual check from About lights up this same gate.
     private val _state = UpdateHub.state
