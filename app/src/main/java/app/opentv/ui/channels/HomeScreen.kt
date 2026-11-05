@@ -7,6 +7,7 @@ package app.opentv.ui.channels
 
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -21,12 +22,15 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
@@ -55,12 +59,15 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
@@ -99,6 +106,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -144,6 +152,16 @@ fun HomeScreen(
     val favouritesOnly by viewModel.favouritesOnly.collectAsState()
     val sources by viewModel.sources.collectAsState()
     val selectedSource by viewModel.selectedSource.collectAsState()
+    val selectedCategoryIndex = categories.indexOfFirst { it.key == selectedCategory }
+        .takeIf { it >= 0 }
+    val selectedRailIndex = remember(sources.size, categories.size, selectedCategoryIndex, favouritesOnly) {
+        guideRailSelectedItemIndex(
+            sourceCount = sources.size,
+            categoryCount = categories.size,
+            selectedCategoryIndex = selectedCategoryIndex,
+            favouritesOnly = favouritesOnly,
+        )
+    }
     val windowStart by viewModel.windowStartMillis.collectAsState()
     // How many days ahead the guide is scrolled (0 = live now). Drives the ‹ Today › nav.
     val guideDayOffset by viewModel.guideDayOffset.collectAsState()
@@ -217,14 +235,24 @@ fun HomeScreen(
         label = "railWidth",
     )
     val railFocusRequester = remember { FocusRequester() }
-    // Set when LEFT reopens the rail; the effect waits for the rail to be laid out again before
-    // moving focus onto it — a just-revealed node isn't focusable on the very same frame.
+    val categoryRailListState = rememberLazyListState()
+    // Set when LEFT reopens the rail. Wait for its width animation, scroll the selected entry into
+    // the LazyColumn viewport, then request focus after that item has been laid out.
     var pendingRailFocus by remember { mutableStateOf(false) }
-    LaunchedEffect(pendingRailFocus) {
-        if (pendingRailFocus) {
-            delay(50)
-            // runCatching: if the selected category is scrolled out of the rail's list it may not
-            // be composed; a second LEFT press then still reaches the rail by ordinary navigation.
+    LaunchedEffect(pendingRailFocus, railExpanded, selectedRailIndex) {
+        if (!pendingRailFocus || !railExpanded) return@LaunchedEffect
+
+        // Do not guess how long the animation takes: a slow TV box can lay out later than 50 ms.
+        snapshotFlow { railWidth }.first { it >= 239.dp }
+        categoryRailListState.animateScrollToItem(selectedRailIndex)
+        snapshotFlow {
+            categoryRailListState.layoutInfo.visibleItemsInfo.any { it.index == selectedRailIndex }
+        }.first { it }
+        withFrameNanos { }
+
+        // Another RIGHT can move focus back into the guide while scrolling; in that case the keyed
+        // effect is cancelled and must not steal focus back from the newly focused channel.
+        if (pendingRailFocus && railExpanded) {
             runCatching { railFocusRequester.requestFocus() }
             pendingRailFocus = false
         }
@@ -367,6 +395,7 @@ fun HomeScreen(
                 .fillMaxHeight()
                 .background(palette.surface)
                 .clipToBounds()
+                .focusGroup()
                 .padding(vertical = 16.dp),
         ) {
             Text(
@@ -378,6 +407,7 @@ fun HomeScreen(
             // The top "Search channels" bar was removed — Search now lives in the global nav rail.
 
             LazyColumn(
+                state = categoryRailListState,
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
@@ -422,7 +452,8 @@ fun HomeScreen(
                     )
                 }
                 item {
-                    val allSelected = !favouritesOnly && selectedCategory == null
+                    val allSelected = !favouritesOnly &&
+                        (selectedCategory == null || selectedCategoryIndex == null)
                     RailEntry(
                         label = stringResource(R.string.guide_all_channels),
                         selected = allSelected,
@@ -514,6 +545,7 @@ fun HomeScreen(
                 // from the leftmost element reopens the rail (consumed only when it was hidden).
                 val onFocusChannel: (ChannelsViewModel.Row) -> Unit = {
                     highlightedRow = it
+                    pendingRailFocus = false
                     railExpanded = false
                 }
                 val onExitLeftChannel: () -> Boolean = {
@@ -1018,24 +1050,31 @@ private fun RailEntry(
     modifier: Modifier = Modifier,
     palette: InterfacePalette? = null,
 ) {
+    var focused by remember { mutableStateOf(false) }
     val selectedBackground = palette?.selectedChannel ?: MaterialTheme.colorScheme.primaryContainer
     val selectedText = palette?.onSelected ?: MaterialTheme.colorScheme.onPrimaryContainer
     val unselectedBackground = palette?.surface ?: MaterialTheme.colorScheme.surface
     val secondaryText = palette?.mutedText ?: MaterialTheme.colorScheme.onSurfaceVariant
+    val focusAccent = palette?.accent ?: MaterialTheme.colorScheme.primary
     Text(
         text = label,
         style = MaterialTheme.typography.titleMedium,
-        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+        fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Normal,
         color = if (selected) selectedText else secondaryText,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier
             .fillMaxWidth()
+            .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(8.dp))
             .background(
                 if (selected) selectedBackground else unselectedBackground,
             )
-            .clickable(onClick = onClick)
+            .then(
+                if (focused) Modifier.border(2.dp, focusAccent, RoundedCornerShape(8.dp))
+                else Modifier,
+            )
+            .selectable(selected = selected, role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
     )
 }

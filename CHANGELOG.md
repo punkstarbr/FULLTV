@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.11.29 (atualização estável) — 2026-11-05
+
+- **Navegação por controle remoto:** ao voltar do primeiro canal para a rail, aguardar a animação real,
+  rolar até a categoria selecionada e pedir foco somente depois que o item estiver visível. Um foco novo
+  no guia cancela a restauração pendente. A rail agora distingue foco de seleção e expõe o estado
+  selecionado à acessibilidade; o foco no botão de favorito também atualiza o canal destacado/preview.
+- **Validação local:** 2 testes de política de navegação, 9 testes do gate de assinatura e 4 testes do
+  verificador de wheels passaram. Na suíte Android completa, 181/187 passaram; seis
+  `XmltvChannelParseTest` falharam antes das assertions pela ausência de
+  `conscrypt_openjdk_jni-linux-aarch_64` no host ARM64. `lintVitalRelease` e `assembleRelease` passaram;
+  o R8 emitiu avisos de parsing de metadados Kotlin. Não houve teste em Fire TV/Android TV físico.
+- **Compatibilidade:** atualização do pacote normal `app.fulltv`, versionCode 41, assinada com o mesmo
+  certificado legado das instalações existentes, conforme autorização específica do proprietário. O
+  certificado é Android Debug compartilhado, não uma chave de produção.
+- **APK universal:** minSdk 24, targetSdk 35, quatro ABIs; tamanho 165.277.179 bytes; SHA-256
+  `39ba2855cbcd6e91a24f3c612d581d8fb7ddf8b96e7d5d804efcbdbb08b9c562`; certificado SHA-256
+  `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`.
+
 ## 0.11.28 (atualização estável) — 2026-11-04
 
 - **Atualização pelo app:** permitir que o download do APK siga o redirecionamento HTTPS público do GitHub Releases para `release-assets.githubusercontent.com`. O instalador continua validando tamanho, SHA-256, pacote, versão e certificado antes de abrir o instalador Android.

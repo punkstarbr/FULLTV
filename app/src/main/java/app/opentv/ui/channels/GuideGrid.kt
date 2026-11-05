@@ -220,8 +220,10 @@ private fun ChannelListRow(
                 if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionLeft) onExitLeft() else false
             }
             .onFocusChanged {
-                focused = it.isFocused
-                if (it.isFocused) onFocus()
+                // The nested favourite button is a separate focus target. Track focus anywhere
+                // inside the channel cell so the highlighted row and preview do not go stale.
+                focused = it.hasFocus
+                if (it.hasFocus) onFocus()
             }
             .clickable(onClick = onSelect)
             .padding(horizontal = 10.dp, vertical = 8.dp),
@@ -392,8 +394,10 @@ private fun GuideRow(
                     else false
                 }
                 .onFocusChanged {
-                    focused = it.isFocused
-                    if (it.isFocused) onFocus()
+                    // A favourite IconButton is nested in this cell; its focus must still update
+                    // the row highlight and the live preview.
+                    focused = it.hasFocus
+                    if (it.hasFocus) onFocus()
                 }
                 .clickable(onClick = onSelect)
                 .padding(horizontal = 10.dp),
