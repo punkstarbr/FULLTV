@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">Auf dem anderen Gerät: Einstellungen → Sync → Empfangen, und gib ein:</string>
     <string name="sync_address">Adresse</string>
     <string name="sync_code">Code</string>
-    <string name="sync_type_in_one_go">Oder gib es in einem Schritt ein:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Oder gib es in einem Schritt ein:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Freigabe beenden</string>
     <string name="sync_will_share">Dieses Gerät gibt seinen Wiedergabeverlauf für ein paar Minuten frei, geschützt durch einen Code.</string>
     <string name="sync_start_sharing">Freigabe starten</string>

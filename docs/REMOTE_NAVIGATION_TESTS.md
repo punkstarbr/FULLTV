@@ -23,10 +23,18 @@ Este roteiro cobre o comportamento do rail de categorias e do guia Live TV. Os t
 8. Repetir no layout de lista. A célula focada deve continuar destacada quando o foco estiver no botão de favorito interno.
 9. Repetir nos estilos de interface disponíveis, especialmente EPG clássico e tela cheia. Confirmar **Voltar/Back** fecha primeiro qualquer menu aberto e não sai do app por baixo de um diálogo.
 
+## Busca, diálogos e retorno de foco
+
+10. A partir do rail, abrir **Busca**; digitar um título de programa que apareça no EPG e conferir se os resultados incluem nome do canal e horário, além de canais/filmes/séries.
+11. Focar um resultado de programa e pressionar **OK**. Deve abrir o diálogo de ações de programa já usado no guia, com foco inicial em uma ação válida; não deve iniciar reprodução automaticamente.
+12. Pressionar **Voltar** para fechar o diálogo e novamente para retornar à busca. A consulta e os resultados devem continuar presentes, e o foco deve voltar para o resultado que abriu o diálogo.
+13. Abrir um diálogo do canal/programa, percorrer ações com o D-pad e fechar. A ação que abriu o diálogo deve recuperar o foco, sem saltar para a primeira ação da tela.
+14. Abrir uma opção no hub de configurações, voltar da tela filha e confirmar que o foco regressa à mesma opção. Repetir alternando rapidamente entre rail, busca e guia.
+
 ## Acessibilidade e regressão
 
-10. Com TalkBack/serviço de acessibilidade compatível, verificar se a rail anuncia a categoria selecionada e se o contorno visível acompanha o foco físico.
-11. Alternar categorias/fontes enquanto navega e verificar que uma categoria removida/ocultada não deixa o foco preso num item inexistente; o fallback visual deve ser **Todos**.
-12. Repetir rapidamente a sequência Esquerda/Direita várias vezes e confirmar que não há foco perdido, animação antiga em disputa ou crash.
+15. Com TalkBack/serviço de acessibilidade compatível, verificar se a rail anuncia item selecionado; cada canal anuncia o programa atual; cada bloco EPG anuncia título, canal, horário e se está no ar ou é próximo.
+16. Alternar categorias/fontes enquanto navega e verificar que uma categoria removida/ocultada não deixa o foco preso num item inexistente; o fallback visual deve ser **Todos**.
+17. Repetir rapidamente a sequência Esquerda/Direita várias vezes e confirmar que não há foco perdido, animação antiga em disputa ou crash.
 
 Registrar modelo do dispositivo, versão Android/Fire OS, layout (grade/lista), estilo de interface e qualquer resultado diferente do esperado. Esta sessão não teve aparelho conectado; não marcar estes passos como executados até testá-los fisicamente.

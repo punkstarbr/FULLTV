@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">På den anden enhed: Indstillinger → Synkroniser → Modtag, og indtast:</string>
     <string name="sync_address">Adresse</string>
     <string name="sync_code">Kode</string>
-    <string name="sync_type_in_one_go">Eller indtast det hele på én gang:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Eller indtast det hele på én gang:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Stop deling</string>
     <string name="sync_will_share">Denne enhed deler sin seerhistorik i et par minutter, beskyttet af en kode.</string>
     <string name="sync_start_sharing">Start deling</string>

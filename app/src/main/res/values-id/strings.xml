@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">Di perangkat lain: Pengaturan → Sinkron → Terima, lalu masukkan:</string>
     <string name="sync_address">Alamat</string>
     <string name="sync_code">Kode</string>
-    <string name="sync_type_in_one_go">Atau ketik sekaligus:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Atau ketik sekaligus:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Hentikan berbagi</string>
     <string name="sync_will_share">Perangkat ini akan membagikan riwayat tontonannya selama beberapa menit, dilindungi kode.</string>
     <string name="sync_start_sharing">Mulai berbagi</string>

@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">Sur l\'autre appareil : Paramètres → Synchronisation → Recevoir, puis saisissez :</string>
     <string name="sync_address">Adresse</string>
     <string name="sync_code">Code</string>
-    <string name="sync_type_in_one_go">Ou saisissez le tout d\'un coup :  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Ou saisissez le tout d\'un coup :  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Arrêter le partage</string>
     <string name="sync_will_share">Cet appareil partagera son historique de visionnage pendant quelques minutes, protégé par un code.</string>
     <string name="sync_start_sharing">Démarrer le partage</string>

@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">على الجهاز الآخر: الإعدادات ← المزامنة ← استقبال، ثم أدخل:</string>
     <string name="sync_address">العنوان</string>
     <string name="sync_code">الرمز</string>
-    <string name="sync_type_in_one_go">أو أدخله دفعة واحدة:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">أدخل القيم الثلاث دون مسافات: %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">إيقاف المشاركة</string>
     <string name="sync_will_share">سيشارك هذا الجهاز سجل المشاهدة الخاص به لبضع دقائق، محميًا برمز.</string>
     <string name="sync_start_sharing">بدء المشاركة</string>

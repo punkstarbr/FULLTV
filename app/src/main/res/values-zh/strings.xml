@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">在另一台设备上：设置 → 同步 → 接收，然后输入：</string>
     <string name="sync_address">地址</string>
     <string name="sync_code">代码</string>
-    <string name="sync_type_in_one_go">或一次性输入：%1$s#%2$s</string>
+    <string name="sync_type_in_one_go">或一次性输入：%1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">停止共享</string>
     <string name="sync_will_share">本设备将在几分钟内通过一个代码共享其观看记录。</string>
     <string name="sync_start_sharing">开始共享</string>

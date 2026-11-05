@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">Na druhom zariadení: Nastavenia → Synchronizácia → Prijať a zadajte:</string>
     <string name="sync_address">Adresa</string>
     <string name="sync_code">Kód</string>
-    <string name="sync_type_in_one_go">Alebo zadajte naraz:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Alebo zadajte naraz:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Zastaviť zdieľanie</string>
     <string name="sync_will_share">Toto zariadenie bude niekoľko minút zdieľať svoju históriu sledovania chránenú kódom.</string>
     <string name="sync_start_sharing">Spustiť zdieľanie</string>

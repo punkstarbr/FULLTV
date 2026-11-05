@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">På den andre enheten: Innstillinger → Synkronisering → Motta, og angi:</string>
     <string name="sync_address">Adresse</string>
     <string name="sync_code">Kode</string>
-    <string name="sync_type_in_one_go">Eller skriv det i ett:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Eller skriv det i ett:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Stopp deling</string>
     <string name="sync_will_share">Denne enheten vil dele sin sette-historikk i noen minutter, bak en kode.</string>
     <string name="sync_start_sharing">Start deling</string>

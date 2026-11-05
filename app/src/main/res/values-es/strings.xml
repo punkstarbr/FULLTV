@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">En el otro dispositivo: Ajustes → Sincronizar → Recibir, e ingresa:</string>
     <string name="sync_address">Dirección</string>
     <string name="sync_code">Código</string>
-    <string name="sync_type_in_one_go">O escríbelo todo junto:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">O escríbelo todo junto:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Dejar de compartir</string>
     <string name="sync_will_share">Este dispositivo compartirá su historial de visualización durante unos minutos, protegido con un código.</string>
     <string name="sync_start_sharing">Empezar a compartir</string>

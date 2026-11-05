@@ -1,7 +1,7 @@
 [versions]
-agp = "8.12.2"
-kotlin = "2.4.20"
-# KSP 2.3+ is compiler-independent (KSP2), so it can be used with Kotlin 2.4.x.
+agp = "8.13.2"
+kotlin = "2.3.20"
+# KSP 2.3+ uses KSP2 and is compatible with Kotlin 2.3.x.
 ksp = "2.3.12"
 chaquopy = "17.2.0"
 coreKtx = "1.13.1"
@@ -26,6 +26,7 @@ navigation = "2.8.4"
 junit = "4.13.2"
 truth = "1.4.4"
 robolectric = "4.13"
+conscryptUber = "2.8.0"
 androidxTestExt = "1.2.1"
 bouncyCastle = "1.86"
 guavaAndroid = "33.7.2-android"
@@ -93,6 +94,7 @@ guava-android = { group = "com.google.guava", name = "guava", version.ref = "gua
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 truth = { group = "com.google.truth", name = "truth", version.ref = "truth" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+conscrypt-openjdk-uber = { group = "org.conscrypt", name = "conscrypt-openjdk-uber", version.ref = "conscryptUber" }
 androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExt" }
 
 [plugins]

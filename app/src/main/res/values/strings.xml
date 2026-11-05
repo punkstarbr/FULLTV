@@ -589,6 +589,13 @@
     <string name="search_start_hint">Start typing to search channels, movies and shows.</string>
     <string name="search_no_results">No results for “%1$s”.</string>
 
+    <string name="search_programmes">Programmes</string>
+    <string name="search_programme_time">%1$s · %2$s–%3$s</string>
+    <string name="guide_channel_accessibility">Channel %1$s. Now: %2$s</string>
+    <string name="guide_channel_preview_state">Current preview channel</string>
+    <string name="guide_programme_accessibility">%1$s on %2$s, %3$s to %4$s</string>
+    <string name="guide_programme_current_state">On now</string>
+    <string name="guide_programme_upcoming_state">Upcoming programme</string>
     <!-- ============================ On-screen keyboard ============================ -->
     <string name="kbd_space">Space</string>
     <string name="kbd_del">Del</string>

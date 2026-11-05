@@ -82,6 +82,10 @@ class EpgRepository(
     val retentionFutureMillis: Long
         get() = TimeUnit.DAYS.toMillis(settings.recordScheduleLookaheadDays.value.toLong())
 
+    /** Past guide window used by one-shot searches as well as the sync/prune policy. */
+    val retentionPastMillis: Long
+        get() = RETENTION_PAST_MILLIS
+
     data class SyncSummary(
         val feedsSucceeded: Int,
         val feedsFailed: Int,
@@ -102,6 +106,28 @@ class EpgRepository(
 
     suspend fun upcoming(epgChannelId: String, nowUtcMillis: Long, limit: Int = 12): List<Programme> =
         programmeDao.upcoming(epgChannelId, nowUtcMillis, limit)
+
+    /**
+     * Searches only the programme rows retained around [nowUtcMillis]. This is deliberately a
+     * one-shot read rather than [observeWindow]: the unified search screen must never load or
+     * regroup the complete guide for every key press.
+     */
+    suspend fun searchProgrammes(
+        query: String,
+        nowUtcMillis: Long,
+        limit: Int = MAX_SEARCH_RESULTS,
+    ): List<Programme> {
+        val trimmed = query.trim()
+        if (trimmed.length < 2) return emptyList()
+        return withContext(Dispatchers.IO) {
+            programmeDao.search(
+                query = trimmed,
+                fromUtcMillis = nowUtcMillis - retentionPastMillis,
+                toUtcMillis = nowUtcMillis + retentionFutureMillis,
+                limit = limit.coerceIn(1, MAX_SEARCH_RESULTS),
+            )
+        }
+    }
 
     // ---- Feed management -------------------------------------------------------------------
 
@@ -516,6 +542,9 @@ class EpgRepository(
 
         /** Writes per transaction. Large enough to be fast, small enough not to hold WAL open. */
         const val BATCH_SIZE = 500
+
+        /** Hard cap shared by the Room query and the unified search mapping policy. */
+        const val MAX_SEARCH_RESULTS = 100
 
         private const val MAX_COMPRESSED_BYTES = 256L * 1024 * 1024
         private const val MAX_XML_BYTES = 256L * 1024 * 1024

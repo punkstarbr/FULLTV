@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.30 (atualização estável) — 2026-11-05
+
+- **Foco e retorno por D-pad:** restaurar a rail principal e o hub de configurações ao filho focado; marcar seleção e foco com estados visuais/semânticos distintos; dar foco inicial previsível aos diálogos de programa/canal.
+- **Navegação no EPG:** mover Esquerda/Direita entre programas e Cima/Baixo para o bloco temporalmente mais próximo da linha adjacente, rolando a grade virtualizada até o alvo.
+- **Busca de programação:** pesquisar títulos, descrições e categorias do EPG dentro da janela retida, com limite de 100 resultados e exclusão de canais/categorias ocultos. Selecionar um programa abre o diálogo normal do guia; Voltar retorna à busca com consulta preservada.
+- **Acessibilidade:** anunciar canal/programa, horário e estado atual/próximo; expor a rail selecionada e identificar linhas/ações interativas como botões.
+- **Sincronização e traduções:** corrigimos o formato para mostrar endereço, código e PIN juntos nas traduções afetadas; a checagem de 32 variantes não encontrou divergências de placeholders e pt-BR está completo (659/659 chaves).
+- **Toolchain e testes:** alinhar AGP 8.13.2/Kotlin 2.3.20 à matriz oficial de compatibilidade Android para remover o aviso R8 de metadata. Conscrypt 2.8.0 fica somente no runtime de testes e fornece a biblioteca Linux ARM64 do Robolectric. Os 9 testes focados de política EPG/D-pad e os 196/196 testes Kotlin passaram.
+- **Build:** `lintVitalRelease` e `assembleRelease` passaram com verificação estrita de dependências; o APK foi conferido com `apksigner` e `apkanalyzer`. Não houve teste físico em Fire TV/Android TV.
+- **Compatibilidade:** o APK usa o pacote normal `app.fulltv`, versionCode 42, e a mesma assinatura Android Debug compartilhada das instalações existentes; exceção v0.11.30 autorizada especificamente pelo proprietário. Esse certificado não é assinatura de produção.
+- **APK universal:** minSdk 24, targetSdk 35, quatro ABIs; tamanho 165.298.223 bytes; SHA-256 `68efc9f93e8eed835e38fb0b1a9064f5a7982dc51b10a7fc43bd6d78c7f9a5a5`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`.
+
 ## 0.11.29 (atualização estável) — 2026-11-05
 
 - **Navegação por controle remoto:** ao voltar do primeiro canal para a rail, aguardar a animação real,

@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">Pe celălalt dispozitiv: Setări → Sincronizare → Primește, apoi introdu:</string>
     <string name="sync_address">Adresă</string>
     <string name="sync_code">Cod</string>
-    <string name="sync_type_in_one_go">Sau introdu-l dintr-o dată:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Sau introdu-l dintr-o dată:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Oprește partajarea</string>
     <string name="sync_will_share">Acest dispozitiv își va partaja istoricul de vizionare timp de câteva minute, protejat printr-un cod.</string>
     <string name="sync_start_sharing">Începe partajarea</string>

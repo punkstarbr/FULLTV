@@ -58,9 +58,11 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import app.opentv.core.AppSettings
 import app.opentv.core.ServiceLocator
+import app.opentv.data.model.Programme
 import app.opentv.data.parser.displayTitle
 import app.opentv.data.work.SyncWorker
 import app.opentv.ui.MainScreen
+import app.opentv.ui.ChannelsViewModel
 import app.opentv.ui.PersistentLocalClock
 import app.opentv.ui.ProfilesViewModel
 import app.opentv.ui.SourcesViewModel
@@ -236,6 +238,9 @@ object Routes {
 @Composable
 private fun OpenTvApp(isTelevision: Boolean) {
     val navController = rememberNavController()
+    var pendingProgrammeAction by remember {
+        mutableStateOf<Pair<ChannelsViewModel.Row, Programme>?>(null)
+    }
     val sourcesViewModel: SourcesViewModel = viewModel()
     val vodViewModel: VodViewModel = viewModel()
     val profilesViewModel: ProfilesViewModel = viewModel()
@@ -410,6 +415,11 @@ private fun OpenTvApp(isTelevision: Boolean) {
                         navController.navigate(Routes.vodPlayer(key, url, title, ua))
                     },
                     activeProfileName = activeProfileName,
+                    pendingProgrammeAction = pendingProgrammeAction,
+                    onProgrammeActionConsumed = { pendingProgrammeAction = null },
+                    returnToPreviousRoute =
+                        navController.previousBackStackEntry?.destination?.route == Routes.SEARCH,
+                    onBackToPreviousRoute = { navController.popBackStack() },
                 )
             }
 
@@ -437,6 +447,12 @@ private fun OpenTvApp(isTelevision: Boolean) {
                         )
                     },
                     onOpenSeries = { series -> navController.navigate(Routes.seriesDetail(series.id)) },
+                    onOpenProgramme = { row, programme ->
+                        pendingProgrammeAction = row to programme
+                        // Keep Search underneath the normal guide action dialog. Back from the
+                        // dialog returns to the same query/results instead of discarding them.
+                        navController.navigate(Routes.HOME) { launchSingleTop = true }
+                    },
                     onBack = { navController.popBackStack() },
                 )
             }

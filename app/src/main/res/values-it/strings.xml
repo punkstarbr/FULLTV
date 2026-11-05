@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">Sull\'altro dispositivo: Impostazioni → Sincronizzazione → Ricevi, quindi inserisci:</string>
     <string name="sync_address">Indirizzo</string>
     <string name="sync_code">Codice</string>
-    <string name="sync_type_in_one_go">Oppure inseriscilo tutto insieme:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Oppure inseriscilo tutto insieme:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Interrompi condivisione</string>
     <string name="sync_will_share">Questo dispositivo condividerà la sua cronologia di visione per qualche minuto, protetta da un codice.</string>
     <string name="sync_start_sharing">Avvia condivisione</string>

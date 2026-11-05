@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">Trên thiết bị kia: Cài đặt → Đồng bộ → Nhận, và nhập:</string>
     <string name="sync_address">Địa chỉ</string>
     <string name="sync_code">Mã</string>
-    <string name="sync_type_in_one_go">Hoặc nhập một lần:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Hoặc nhập một lần:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Dừng chia sẻ</string>
     <string name="sync_will_share">Thiết bị này sẽ chia sẻ lịch sử xem của nó trong vài phút, được bảo vệ bằng mã.</string>
     <string name="sync_start_sharing">Bắt đầu chia sẻ</string>

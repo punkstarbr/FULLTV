@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">Diğer cihazda: Ayarlar → Senkronizasyon → Al ve şunu girin:</string>
     <string name="sync_address">Adres</string>
     <string name="sync_code">Kod</string>
-    <string name="sync_type_in_one_go">Ya da tek seferde yazın:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Ya da tek seferde yazın:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Paylaşımı durdur</string>
     <string name="sync_will_share">Bu cihaz, bir kodla korunan izleme geçmişini birkaç dakika boyunca paylaşacak.</string>
     <string name="sync_start_sharing">Paylaşımı başlat</string>

@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">På den andra enheten: Inställningar → Synk → Ta emot, och ange:</string>
     <string name="sync_address">Adress</string>
     <string name="sync_code">Kod</string>
-    <string name="sync_type_in_one_go">Eller skriv det i ett svep:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Eller skriv det i ett svep:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Sluta dela</string>
     <string name="sync_will_share">Den här enheten delar sin visningshistorik i några minuter, skyddad av en kod.</string>
     <string name="sync_start_sharing">Börja dela</string>

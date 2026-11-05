@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">दूसरे डिवाइस पर: सेटिंग्स → सिंक → प्राप्त करें, और दर्ज करें:</string>
     <string name="sync_address">पता</string>
     <string name="sync_code">कोड</string>
-    <string name="sync_type_in_one_go">या इसे एक साथ टाइप करें:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">या इसे एक साथ टाइप करें:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">शेयर करना बंद करें</string>
     <string name="sync_will_share">यह डिवाइस कुछ मिनटों के लिए, एक कोड के पीछे, अपना देखने का इतिहास शेयर करेगा।</string>
     <string name="sync_start_sharing">शेयर करना शुरू करें</string>

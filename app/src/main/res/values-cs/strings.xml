@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">Na druhém zařízení: Nastavení → Synchronizace → Přijmout a zadejte:</string>
     <string name="sync_address">Adresa</string>
     <string name="sync_code">Kód</string>
-    <string name="sync_type_in_one_go">Nebo zadejte vše najednou:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Nebo zadejte vše najednou:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Zastavit sdílení</string>
     <string name="sync_will_share">Toto zařízení bude po několik minut sdílet historii sledování, zabezpečenou kódem.</string>
     <string name="sync_start_sharing">Zahájit sdílení</string>

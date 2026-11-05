@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">Op het andere apparaat: Instellingen → Synchroniseren → Ontvangen, en voer in:</string>
     <string name="sync_address">Adres</string>
     <string name="sync_code">Code</string>
-    <string name="sync_type_in_one_go">Of typ het in één keer:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Of typ het in één keer:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Delen stoppen</string>
     <string name="sync_will_share">Dit apparaat deelt zijn kijkgeschiedenis enkele minuten lang, achter een code.</string>
     <string name="sync_start_sharing">Delen starten</string>

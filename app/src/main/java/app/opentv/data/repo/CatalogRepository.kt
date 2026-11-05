@@ -192,6 +192,35 @@ class CatalogRepository(
 
     fun searchSeries(query: String): Flow<List<Series>> = seriesDao.search(query)
 
+    /**
+     * Resolves the channels behind a bounded set of programme EPG ids. The second read restores
+     * visible quality variants for matched logical channels, so programme search returns the same
+     * [Channel] group shape as the guide without loading all channels on every key press.
+     */
+    suspend fun channelsForEpgIds(epgIds: List<String>): List<Channel> = withContext(Dispatchers.IO) {
+        val ids = epgIds.asSequence()
+            .map(String::trim)
+            .filter(String::isNotEmpty)
+            .distinct()
+            .take(MAX_EPG_SEARCH_IDS)
+            .toList()
+        if (ids.isEmpty()) return@withContext emptyList()
+
+        val matches = channelDao.forEpgIds(ids)
+        val groupKeys = matches.asSequence()
+            .map { it.groupKey }
+            .filter(String::isNotEmpty)
+            .distinct()
+            .take(MAX_EPG_SEARCH_IDS)
+            .toList()
+        val variants = if (groupKeys.isEmpty()) {
+            emptyList()
+        } else {
+            channelDao.visibleVariantsInGroups(groupKeys)
+        }
+        (matches + variants).distinctBy { it.id }
+    }
+
     suspend fun channel(id: Long): Channel? = channelDao.byId(id)
 
     suspend fun movie(id: Long): Movie? = movieDao.byId(id)
@@ -1122,3 +1151,5 @@ class CatalogRepository(
         const val NORMALIZER_VERSION = 2
     }
 }
+
+private const val MAX_EPG_SEARCH_IDS = 100

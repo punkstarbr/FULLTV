@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">در دستگاه دیگر: تنظیمات ← همگام‌سازی ← دریافت، و این را وارد کنید:</string>
     <string name="sync_address">نشانی</string>
     <string name="sync_code">کد</string>
-    <string name="sync_type_in_one_go">یا یک‌جا این را وارد کنید:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">یا یک‌جا این را وارد کنید:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">توقف اشتراک‌گذاری</string>
     <string name="sync_will_share">این دستگاه تاریخچه تماشای خود را برای چند دقیقه، پشت یک کد، به اشتراک می‌گذارد.</string>
     <string name="sync_start_sharing">شروع اشتراک‌گذاری</string>

@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">На другом устройстве: Настройки → Синхронизация → Получить, и введите:</string>
     <string name="sync_address">Адрес</string>
     <string name="sync_code">Код</string>
-    <string name="sync_type_in_one_go">Или введите сразу:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Или введите сразу:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Остановить передачу</string>
     <string name="sync_will_share">Это устройство будет передавать историю просмотра в течение нескольких минут, защищённую кодом.</string>
     <string name="sync_start_sharing">Начать передачу</string>

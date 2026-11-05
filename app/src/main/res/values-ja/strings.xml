@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">もう一方の端末で：設定 → 同期 → 受信を選び、以下を入力：</string>
     <string name="sync_address">アドレス</string>
     <string name="sync_code">コード</string>
-    <string name="sync_type_in_one_go">または一度に入力：%1$s#%2$s</string>
+    <string name="sync_type_in_one_go">または一度に入力：%1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">共有を停止</string>
     <string name="sync_will_share">この端末はコードによる保護のもと、数分間だけ視聴履歴を共有します。</string>
     <string name="sync_start_sharing">共有を開始</string>

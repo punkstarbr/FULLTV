@@ -46,6 +46,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -57,6 +60,7 @@ import app.opentv.R
  * a single place to look instead of icons scattered across the guide. Rows that aren't built
  * yet simply aren't shown — no dead ends.
  */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun SettingsHubScreen(
     onOpenProviders: () -> Unit,
@@ -89,6 +93,8 @@ fun SettingsHubScreen(
     Column(
         Modifier
             .fillMaxSize()
+            .focusRestorer()
+            .focusGroup()
             .padding(horizontal = 32.dp, vertical = 24.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -133,7 +139,7 @@ private fun HubRow(entry: HubEntry) {
                 if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp))
                 else Modifier,
             )
-            .clickable(onClick = entry.onClick)
+            .clickable(role = Role.Button, onClick = entry.onClick)
             .padding(horizontal = 18.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

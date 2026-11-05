@@ -163,6 +163,25 @@ interface ChannelDao {
     )
     fun searchIncludingHidden(query: String, limit: Int = 200): Flow<List<Channel>>
 
+    /**
+     * Channels whose provider, matched, or manual EPG id is in a bounded search result set. The
+     * repository caps [epgIds] before calling this query; callers must not turn this into a full
+     * catalogue read or an unbounded SQLite IN expression.
+     */
+    @Query(
+        """
+        SELECT * FROM channels
+        WHERE hidden = 0
+          AND (
+              epgOverrideId IN (:epgIds)
+              OR epgChannelId IN (:epgIds)
+              OR matchedEpgId IN (:epgIds)
+          )
+        ORDER BY sourceId, sortIndex, qualityRank DESC, id
+        """
+    )
+    suspend fun forEpgIds(epgIds: List<String>): List<Channel>
+
     @Query("SELECT * FROM channels WHERE id = :id")
     suspend fun byId(id: Long): Channel?
 
@@ -175,6 +194,16 @@ interface ChannelDao {
         """
     )
     suspend fun variantsInGroup(groupKey: String): List<Channel>
+
+    /** Visible quality variants for a bounded set of logical channels. */
+    @Query(
+        """
+        SELECT * FROM channels
+        WHERE hidden = 0 AND groupKey != '' AND groupKey IN (:groupKeys)
+        ORDER BY sourceId, sortIndex, qualityRank DESC, id
+        """
+    )
+    suspend fun visibleVariantsInGroups(groupKeys: List<String>): List<Channel>
 
     @Query("SELECT COUNT(*) FROM channels WHERE sourceId = :sourceId")
     suspend fun countForSource(sourceId: Long): Int
@@ -398,6 +427,32 @@ interface ProgrammeDao {
         """
     )
     fun observeWindow(fromUtcMillis: Long, toUtcMillis: Long): Flow<List<Programme>>
+
+    /**
+     * One-shot title search for the unified search screen. The caller supplies the retained EPG
+     * window; keeping the overlap predicates here prevents a search from turning into a guide dump.
+     */
+    @Query(
+        """
+        SELECT * FROM programmes
+        WHERE feedId > 0
+          AND endUtcMillis > :fromUtcMillis
+          AND startUtcMillis < :toUtcMillis
+          AND (
+              title LIKE '%' || :query || '%'
+              OR description LIKE '%' || :query || '%'
+              OR category LIKE '%' || :query || '%'
+          )
+        ORDER BY startUtcMillis, title, epgChannelId, id
+        LIMIT :limit
+        """
+    )
+    suspend fun search(
+        query: String,
+        fromUtcMillis: Long,
+        toUtcMillis: Long,
+        limit: Int,
+    ): List<Programme>
 
     /** What is on right now, for the channel list's "now playing" line. */
     @Query(

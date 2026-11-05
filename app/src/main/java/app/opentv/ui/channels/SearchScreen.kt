@@ -9,6 +9,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -35,13 +36,16 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -50,6 +54,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import app.opentv.R
 import app.opentv.data.model.Channel
 import app.opentv.data.model.Movie
+import app.opentv.data.model.Programme
 import app.opentv.data.model.Series
 import app.opentv.data.model.shownName
 import app.opentv.data.parser.displayTitle
@@ -67,20 +72,24 @@ import java.util.Locale
  * isn't to hand. This screen draws its own d-pad keyboard so search works with the remote alone,
  * and shows matching channels live as you type.
  */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun SearchScreen(
     onPlayChannel: (Channel) -> Unit,
     onPlayMovie: (Movie) -> Unit,
     onOpenSeries: (Series) -> Unit,
     onBack: () -> Unit,
+    onOpenProgramme: (ChannelsViewModel.Row, Programme) -> Unit = { _, _ -> },
     viewModel: ChannelsViewModel = viewModel(),
     vodViewModel: VodViewModel = viewModel(),
 ) {
-    var query by remember { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
     val channelResults by viewModel.searchResults.collectAsState()
+    val programmeResults by viewModel.programmeResults.collectAsState()
     val movieResults by vodViewModel.movieResults.collectAsState()
     val seriesResults by vodViewModel.seriesResults.collectAsState()
-    val anyResults = channelResults.isNotEmpty() || movieResults.isNotEmpty() || seriesResults.isNotEmpty()
+    val anyResults = programmeResults.isNotEmpty() || channelResults.isNotEmpty() ||
+        movieResults.isNotEmpty() || seriesResults.isNotEmpty()
 
     LaunchedEffect(query) {
         viewModel.setSearchQuery(query)
@@ -91,6 +100,8 @@ fun SearchScreen(
     Column(
         Modifier
             .fillMaxSize()
+            .focusRestorer()
+            .focusGroup()
             .padding(horizontal = 28.dp, vertical = 20.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -123,7 +134,25 @@ fun SearchScreen(
                     query.isBlank() -> Hint(stringResource(R.string.search_start_hint))
                     query.trim().length < 2 -> Hint(stringResource(R.string.common_keep_typing))
                     !anyResults -> Hint(stringResource(R.string.search_no_results, query))
-                    else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    else -> LazyColumn(
+                        modifier = Modifier.focusRestorer().focusGroup(),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (programmeResults.isNotEmpty()) {
+                            item { SectionHeader(stringResource(R.string.search_programmes)) }
+                            items(
+                                programmeResults,
+                                key = {
+                                    "p${it.row.key}:${it.programme.epgChannelId}:" +
+                                        "${it.programme.startUtcMillis}:${it.programme.id}"
+                                },
+                            ) { result ->
+                                ProgrammeResultRow(
+                                    result = result,
+                                    onClick = { onOpenProgramme(result.row, result.programme) },
+                                )
+                            }
+                        }
                         if (channelResults.isNotEmpty()) {
                             item { SectionHeader(stringResource(R.string.common_channels)) }
                             items(channelResults, key = { "c${it.key}" }) { row ->
@@ -183,7 +212,7 @@ private fun VodResultRow(name: String, posterUrl: String?, subtitle: String?, on
                 if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
                 else Modifier,
             )
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -215,7 +244,7 @@ private fun SearchResultRow(row: ChannelsViewModel.Row, onClick: () -> Unit) {
                 if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
                 else Modifier,
             )
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -234,6 +263,56 @@ private fun SearchResultRow(row: ChannelsViewModel.Row, onClick: () -> Unit) {
             )
             Text(
                 row.now?.let { "${searchTime(it.startUtcMillis)}  ${it.title}" } ?: stringResource(R.string.guide_no_info),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ProgrammeResultRow(
+    result: ChannelsViewModel.ProgrammeResult,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val programme = result.programme
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .onFocusChanged { focused = it.isFocused }
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (focused) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
+            .then(
+                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(10.dp))
+                else Modifier,
+            )
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        AsyncImage(
+            model = result.row.primary.logoUrl ?: programme.iconUrl,
+            contentDescription = null,
+            modifier = Modifier.size(40.dp).clip(RoundedCornerShape(6.dp)),
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                programme.title,
+                style = MaterialTheme.typography.titleMedium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                stringResource(
+                    R.string.search_programme_time,
+                    result.row.primary.shownName,
+                    searchTime(programme.startUtcMillis),
+                    searchTime(programme.endUtcMillis),
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

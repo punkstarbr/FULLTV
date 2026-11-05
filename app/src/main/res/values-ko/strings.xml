@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">다른 기기에서: 설정 → 동기화 → 받기를 선택하고 다음을 입력하세요:</string>
     <string name="sync_address">주소</string>
     <string name="sync_code">코드</string>
-    <string name="sync_type_in_one_go">또는 한 번에 입력: %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">또는 한 번에 입력: %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">공유 중지</string>
     <string name="sync_will_share">이 기기는 코드로 보호된 상태로 몇 분간 시청 기록을 공유합니다.</string>
     <string name="sync_start_sharing">공유 시작</string>

@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">Στην άλλη συσκευή: Ρυθμίσεις → Συγχρονισμός → Λήψη και εισαγάγετε:</string>
     <string name="sync_address">Διεύθυνση</string>
     <string name="sync_code">Κωδικός</string>
-    <string name="sync_type_in_one_go">Ή πληκτρολογήστε το μαζί:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Ή πληκτρολογήστε το μαζί:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Διακοπή κοινής χρήσης</string>
     <string name="sync_will_share">Αυτή η συσκευή θα μοιραστεί το ιστορικό παρακολούθησής της για λίγα λεπτά, προστατευμένο με κωδικό.</string>
     <string name="sync_start_sharing">Έναρξη κοινής χρήσης</string>

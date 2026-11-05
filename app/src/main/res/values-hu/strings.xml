@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">A másik eszközön: Beállítások → Szinkronizálás → Fogadás, majd adja meg:</string>
     <string name="sync_address">Cím</string>
     <string name="sync_code">Kód</string>
-    <string name="sync_type_in_one_go">Vagy írja be egyben:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Vagy írja be egyben:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Megosztás leállítása</string>
     <string name="sync_will_share">Ez az eszköz néhány percig megosztja a megtekintési előzményeit, kód mögé zárva.</string>
     <string name="sync_start_sharing">Megosztás indítása</string>

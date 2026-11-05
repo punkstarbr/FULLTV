@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">Toisella laitteella: Asetukset → Synkronointi → Vastaanota, ja syötä:</string>
     <string name="sync_address">Osoite</string>
     <string name="sync_code">Koodi</string>
-    <string name="sync_type_in_one_go">Tai kirjoita se kerralla:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Tai kirjoita se kerralla:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Lopeta jakaminen</string>
     <string name="sync_will_share">Tämä laite jakaa katseluhistoriaansa muutaman minuutin ajan koodin takana.</string>
     <string name="sync_start_sharing">Aloita jakaminen</string>

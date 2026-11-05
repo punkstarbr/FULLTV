@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">Na drugom uređaju: Postavke → Sinkronizacija → Primi, i unesite:</string>
     <string name="sync_address">Adresa</string>
     <string name="sync_code">Kod</string>
-    <string name="sync_type_in_one_go">Ili upišite odjednom:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">Ili upišite odjednom:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">Zaustavi dijeljenje</string>
     <string name="sync_will_share">Ovaj uređaj dijelit će svoju povijest gledanja nekoliko minuta, uz zaštitu kodom.</string>
     <string name="sync_start_sharing">Započni dijeljenje</string>

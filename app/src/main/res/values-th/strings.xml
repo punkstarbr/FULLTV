@@ -275,7 +275,7 @@
     <string name="sync_on_other_device">บนอุปกรณ์อีกเครื่อง: การตั้งค่า → ซิงค์ → รับ แล้วป้อน:</string>
     <string name="sync_address">ที่อยู่</string>
     <string name="sync_code">รหัส</string>
-    <string name="sync_type_in_one_go">หรือพิมพ์ครั้งเดียว:  %1$s#%2$s</string>
+    <string name="sync_type_in_one_go">หรือพิมพ์ครั้งเดียว:  %1$s#%2$s#%3$s</string>
     <string name="sync_stop_sharing">หยุดแชร์</string>
     <string name="sync_will_share">อุปกรณ์นี้จะแชร์ประวัติการรับชมเป็นเวลาสองสามนาที โดยมีรหัสป้องกันไว้</string>
     <string name="sync_start_sharing">เริ่มแชร์</string>

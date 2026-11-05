@@ -58,6 +58,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -120,6 +121,7 @@ import kotlinx.coroutines.launch
  * permanent, glanceable health indicator for the guide: when the EPG stops updating, these
  * lines say so honestly instead of going quietly stale.
  */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun HomeScreen(
     isTelevision: Boolean,
@@ -130,6 +132,8 @@ fun HomeScreen(
     onAddSource: () -> Unit,
     onRefresh: () -> Unit,
     onPlayCatchup: (mediaKey: String, url: String, title: String, ua: String) -> Unit = { _, _, _, _ -> },
+    pendingProgrammeAction: Pair<ChannelsViewModel.Row, Programme>? = null,
+    onProgrammeActionConsumed: () -> Unit = {},
     viewModel: ChannelsViewModel = viewModel(),
     interfaceStyle: AppSettings.InterfaceStyle = AppSettings.InterfaceStyle.CURRENT,
     modifier: Modifier = Modifier,
@@ -169,12 +173,9 @@ fun HomeScreen(
     // empty. Drives the choice between the loading spinner and a recoverable error below.
     val channelsPresent by viewModel.channelsPresent.collectAsState()
 
-    // Two separate ideas, on purpose:
-    //  - highlightedRow: where the d-pad is in the grid. Moves freely with up/down.
-    //  - selectedRow: what the preview pane plays. Only changes when you press OK, so scrolling
-    //    the list is calm and silent instead of re-tuning a stream on every keypress.
+    // D-pad focus highlights a channel and updates the preview; OK opens that channel/programme's
+    // action menu. The focus highlight is intentionally not a separate committed selection.
     var highlightedRow by remember { mutableStateOf<ChannelsViewModel.Row?>(null) }
-    var selectedRow by remember { mutableStateOf<ChannelsViewModel.Row?>(null) }
     val previewSound by settings.guidePreviewSound.collectAsState()
     var nowMillis by remember { mutableLongStateOf(System.currentTimeMillis()) }
 
@@ -186,6 +187,13 @@ fun HomeScreen(
     // The channel whose OK menu (Watch / Record / Schedule) is open.
     var channelMenu by remember { mutableStateOf<ChannelsViewModel.Row?>(null) }
     var externalChannelToConfirm by remember { mutableStateOf<Channel?>(null) }
+
+    LaunchedEffect(pendingProgrammeAction) {
+        val pending = pendingProgrammeAction ?: return@LaunchedEffect
+        highlightedRow = pending.first
+        recordTarget = pending
+        onProgrammeActionConsumed()
+    }
 
     fun openExternalChannel(channel: Channel) {
         recordScope.launch {
@@ -267,11 +275,10 @@ fun HomeScreen(
         }
     }
 
-    // Keep both valid as the list changes (e.g. switching category): stay on the same channel if
-    // it's still present, otherwise fall back to the top of the new list.
+    // Keep the highlighted row valid as the list changes (e.g. switching category): stay on the
+    // same channel if present, otherwise fall back to the top of the new list.
     LaunchedEffect(rows) {
         highlightedRow = rows.firstOrNull { it.key == highlightedRow?.key } ?: rows.firstOrNull()
-        selectedRow = rows.firstOrNull { it.key == selectedRow?.key } ?: rows.firstOrNull()
     }
 
     // ---- Live preview player -----------------------------------------------------------------
@@ -563,7 +570,7 @@ fun HomeScreen(
                 if (useList) {
                     ChannelList(
                         rows = rows,
-                        selectedKey = highlightedRow?.key,
+                        highlightedKey = highlightedRow?.key,
                         onSelectRow = { row -> channelMenu = row },
                         onFocusRow = onFocusChannel,
                         onToggleFavourite = { viewModel.toggleFavourite(it) },
@@ -578,7 +585,7 @@ fun HomeScreen(
                         dayOffset = guideDayOffset,
                         nowMillis = nowMillis,
                         density = guideDensity,
-                        selectedKey = highlightedRow?.key,
+                        highlightedKey = highlightedRow?.key,
                         // OK on a channel opens its menu: Watch, Record now, Schedule a later show,
                         // Record series. The preview already follows the highlight as you browse.
                         onSelectRow = { row -> channelMenu = row },
@@ -632,11 +639,25 @@ fun HomeScreen(
             }
         }
         val liveNow = nowMillis in programme.startUtcMillis until programme.endUtcMillis
+        val isPast = programme.endUtcMillis <= nowMillis
         val recordingThis = activeRecordings.firstOrNull { it.channelId == channel.id }
+        val firstActionFocusRequester = remember(channel.id, programme.startUtcMillis) { FocusRequester() }
+        val firstActionKey = when {
+            liveNow -> "live"
+            isPast && channel.tvArchive -> "catchup"
+            !isPast -> "schedule"
+            else -> "series"
+        }
+        LaunchedEffect(channel.id, programme.startUtcMillis) {
+            withFrameNanos { }
+            runCatching { firstActionFocusRequester.requestFocus() }
+        }
         Dialog(onDismissRequest = { recordTarget = null }) {
             Column(
                 Modifier
                     .width(440.dp)
+                    .focusRestorer()
+                    .focusGroup()
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(24.dp),
@@ -694,21 +715,32 @@ fun HomeScreen(
                     Spacer(Modifier.height(16.dp))
                 }
 
-                val isPast = programme.endUtcMillis <= nowMillis
                 when {
-                    liveNow && recordingThis != null -> RecordActionRow(stringResource(R.string.rec_stop_recording), primary = true) {
+                    liveNow && recordingThis != null -> RecordActionRow(
+                        stringResource(R.string.rec_stop_recording),
+                        primary = true,
+                        focusRequester = firstActionFocusRequester,
+                    ) {
                         graph.recordingEngine.stop(recordingThis.id)
                         Toast.makeText(context, context.getString(R.string.rec_recording_stopped), Toast.LENGTH_SHORT).show()
                         recordTarget = null
                     }
-                    liveNow -> RecordActionRow(stringResource(R.string.rec_record_now), primary = true) {
+                    liveNow -> RecordActionRow(
+                        stringResource(R.string.rec_record_now),
+                        primary = true,
+                        focusRequester = firstActionFocusRequester,
+                    ) {
                         recordScope.launch { graph.recordingEngine.startChannel(chosenVariant, programme) }
                         Toast.makeText(context, context.getString(R.string.rec_recording_channel, channel.shownName), Toast.LENGTH_LONG).show()
                         promptBackgroundIfNeeded()
                         recordTarget = null
                     }
                     // A finished programme on a catch-up channel plays back from the archive.
-                    isPast && channel.tvArchive -> RecordActionRow(stringResource(R.string.guide_watch_from_start), primary = true) {
+                    isPast && channel.tvArchive -> RecordActionRow(
+                        stringResource(R.string.guide_watch_from_start),
+                        primary = true,
+                        focusRequester = firstActionFocusRequester,
+                    ) {
                         recordScope.launch {
                             val source = graph.sourceRepository.byId(channel.sourceId)
                             if (source == null) {
@@ -726,7 +758,11 @@ fun HomeScreen(
                         }
                         recordTarget = null
                     }
-                    !isPast -> RecordActionRow(stringResource(R.string.rec_schedule_recording), primary = true) {
+                    !isPast -> RecordActionRow(
+                        stringResource(R.string.rec_schedule_recording),
+                        primary = true,
+                        focusRequester = firstActionFocusRequester,
+                    ) {
                         recordScope.launch { graph.recordingEngine.scheduleProgramme(chosenVariant, programme) }
                         Toast.makeText(context, context.getString(R.string.rec_scheduled_title, programme.title), Toast.LENGTH_LONG).show()
                         promptBackgroundIfNeeded()
@@ -767,7 +803,10 @@ fun HomeScreen(
                         }
                     }
                 }
-                RecordActionRow(stringResource(R.string.rec_record_series)) {
+                RecordActionRow(
+                    stringResource(R.string.rec_record_series),
+                    focusRequester = firstActionFocusRequester.takeIf { firstActionKey == "series" },
+                ) {
                     recordScope.launch {
                         graph.recordingEngine.recordSeries(channel, programme, targetRow.programmes)
                     }
@@ -791,6 +830,8 @@ fun HomeScreen(
             Column(
                 Modifier
                     .width(480.dp)
+                    .focusRestorer()
+                    .focusGroup()
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(20.dp),
@@ -825,10 +866,17 @@ fun HomeScreen(
         val nowProg = menuRow.now
         val recordingThis = activeRecordings.firstOrNull { it.channelId == channel.id }
         val upcoming = menuRow.programmes.filter { it.startUtcMillis > nowMillis }.take(8)
+        val firstMenuActionRequester = remember(channel.id) { FocusRequester() }
+        LaunchedEffect(channel.id) {
+            withFrameNanos { }
+            runCatching { firstMenuActionRequester.requestFocus() }
+        }
         Dialog(onDismissRequest = { channelMenu = null }) {
             Column(
                 Modifier
                     .width(480.dp)
+                    .focusRestorer()
+                    .focusGroup()
                     .clip(RoundedCornerShape(16.dp))
                     .background(MaterialTheme.colorScheme.surface)
                     .padding(20.dp),
@@ -868,6 +916,7 @@ fun HomeScreen(
                             if (recordingThis != null) R.string.guide_watch_recording
                             else R.string.guide_watch,
                         ),
+                        focusRequester = firstMenuActionRequester,
                     ) {
                         channelMenu = null
                         if (recordingThis != null) {
@@ -986,7 +1035,12 @@ private suspend fun setReminder(
 }
 
 @Composable
-private fun RecordActionRow(label: String, primary: Boolean = false, onClick: () -> Unit) {
+private fun RecordActionRow(
+    label: String,
+    primary: Boolean = false,
+    focusRequester: FocusRequester? = null,
+    onClick: () -> Unit,
+) {
     var focused by remember { mutableStateOf(false) }
     val bg = when {
         focused -> MaterialTheme.colorScheme.primary
@@ -1006,10 +1060,15 @@ private fun RecordActionRow(label: String, primary: Boolean = false, onClick: ()
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 3.dp)
+            .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(10.dp))
             .background(bg)
-            .clickable(onClick = onClick)
+            .then(
+                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(10.dp))
+                else Modifier,
+            )
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
     )
 }
@@ -1037,7 +1096,11 @@ private fun QualityChip(label: String, selected: Boolean, onClick: () -> Unit) {
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(8.dp))
             .background(bg)
-            .clickable(onClick = onClick)
+            .then(
+                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(8.dp))
+                else Modifier,
+            )
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
     )
 }

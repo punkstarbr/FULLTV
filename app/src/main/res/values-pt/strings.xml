@@ -459,6 +459,13 @@
     <string name="search_type_name">Escreva um nome</string>
     <string name="search_start_hint">Comece a escrever para pesquisar canais, filmes e séries.</string>
     <string name="search_no_results">Sem resultados para “%1$s”.</string>
+    <string name="search_programmes">Programas</string>
+    <string name="search_programme_time">%1$s · %2$s–%3$s</string>
+    <string name="guide_channel_accessibility">Canal %1$s. Agora: %2$s</string>
+    <string name="guide_channel_preview_state">Canal em destaque para pré-visualização</string>
+    <string name="guide_programme_accessibility">%1$s no canal %2$s, das %3$s às %4$s</string>
+    <string name="guide_programme_current_state">No ar agora</string>
+    <string name="guide_programme_upcoming_state">Próximo programa</string>
     <string name="kbd_space">Espaço</string>
     <string name="kbd_del">Apagar</string>
     <string name="kbd_clear">Limpar</string>

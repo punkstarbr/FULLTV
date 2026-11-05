@@ -28,6 +28,7 @@ import app.opentv.data.parser.ChannelNameNormalizer
 import app.opentv.data.remote.HttpsRequiredException
 import app.opentv.data.remote.HttpsUrlPolicy
 import app.opentv.data.repo.CatalogRepository
+import app.opentv.data.repo.EpgRepository
 import app.opentv.data.repo.GenreGroup
 import app.opentv.data.repo.MovieVariantGroup
 import app.opentv.data.repo.PersonTitle
@@ -68,6 +69,59 @@ import kotlinx.coroutines.sync.withLock
  * Grouped in one file on purpose: they are small, they share the same dependency graph, and
  * a contributor tracking down "where does the channel list come from" finds it in one place.
  */
+
+/** One programme hit paired with all visible quality variants of its logical channel. */
+internal data class ProgrammeSearchMatch(
+    val programme: Programme,
+    val variants: List<Channel>,
+)
+
+/**
+ * Pure programme-search policy. It deliberately starts from the bounded programme result set,
+ * then resolves EPG ids through every [Channel.epgCandidates] entry while retaining logical
+ * channel variants. Directly hidden channels and parental category ids are excluded before any UI
+ * row is built; the returned list is never larger than [limit].
+ */
+internal fun selectProgrammeSearchMatches(
+    programmes: List<Programme>,
+    channels: List<Channel>,
+    hiddenCategoryIds: Set<String>,
+    limit: Int = EpgRepository.MAX_SEARCH_RESULTS,
+): List<ProgrammeSearchMatch> {
+    val cap = limit.coerceIn(0, EpgRepository.MAX_SEARCH_RESULTS)
+    if (cap == 0) return emptyList()
+
+    val groups = LinkedHashMap<String, MutableList<Channel>>()
+    channels.asSequence()
+        .filter { !it.hidden && (it.categoryId == null || it.categoryId !in hiddenCategoryIds) }
+        .forEach { channel ->
+            val key = channel.groupKey.ifEmpty { "channel:${channel.id}" }
+            groups.getOrPut(key) { mutableListOf() } += channel
+        }
+
+    val groupsByEpgId = LinkedHashMap<String, MutableList<List<Channel>>>()
+    groups.values.forEach { variants ->
+        variants.asSequence()
+            .flatMap { it.epgCandidates.asSequence() }
+            .distinct()
+            .forEach { epgId -> groupsByEpgId.getOrPut(epgId) { mutableListOf() } += variants }
+    }
+
+    val orderedProgrammes = programmes.sortedWith(
+        compareBy<Programme> { it.startUtcMillis }
+            .thenBy { it.title }
+            .thenBy { it.epgChannelId }
+            .thenBy { it.id },
+    )
+    return buildList(cap) {
+        for (programme in orderedProgrammes) {
+            for (variants in groupsByEpgId[programme.epgChannelId].orEmpty()) {
+                add(ProgrammeSearchMatch(programme, variants.toList()))
+                if (size == cap) return@buildList
+            }
+        }
+    }
+}
 
 class SourcesViewModel(app: Application) : AndroidViewModel(app) {
     private val graph = ServiceLocator.get(app)
@@ -275,15 +329,28 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
         return groups.map { (key, value) -> CategoryGroup(key, value.first, value.second) }
     }
 
+    private data class HiddenCategorySnapshot(val ids: Set<String>, val ready: Boolean)
+
     /**
-     * The category ids to hide from the guide *right now*: the ids behind every group the user
-     * marked adult — unless the session is unlocked, in which case nothing is hidden.
+     * A single, fail-closed snapshot for the guide and search. Do not expose channel/programme
+     * results while Room has not emitted its category list: an initial empty StateFlow value must
+     * never briefly reveal a parental category before the persisted category IDs are known.
      */
-    private val hiddenCategoryIds: StateFlow<Set<String>> =
-        combine(categoryGroups, settings.hiddenCategories, settings.hiddenUnlocked) { groups, hidden, unlocked ->
-            if (unlocked) emptySet()
-            else groups.filter { it.key in hidden }.flatMap { it.ids }.toSet()
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptySet())
+    private val hiddenCategorySnapshot: StateFlow<HiddenCategorySnapshot> =
+        combine(
+            graph.catalogRepository.observeCategories(StreamKind.LIVE),
+            settings.hiddenCategories,
+            settings.hiddenUnlocked,
+        ) { categories, hidden, unlocked ->
+            val groups = foldCategories(categories)
+            val ids = if (unlocked) emptySet() else
+                groups.filter { it.key in hidden }.flatMap { it.ids }.toSet()
+            HiddenCategorySnapshot(ids = ids, ready = true)
+        }.stateIn(
+            viewModelScope,
+            SharingStarted.WhileSubscribed(5_000),
+            HiddenCategorySnapshot(ids = emptySet(), ready = false),
+        )
 
     /** The rail's view of categories: hidden ones drop out until the session is unlocked. */
     val visibleCategoryGroups: StateFlow<List<CategoryGroup>> =
@@ -309,6 +376,10 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
     ) {
         val key: Any get() = if (primary.groupKey.isEmpty()) primary.id else primary.groupKey
     }
+
+    /** A unified-search hit shaped for the existing guide programme dialog contract. */
+    @androidx.compose.runtime.Immutable
+    data class ProgrammeResult(val row: Row, val programme: Programme)
 
     /**
      * The guide's left edge: the current half-hour, rounded down. Programme block positions
@@ -351,6 +422,7 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
         val favs: Boolean,
         val query: String,
         val hiddenIds: Set<String>,
+        val parentalReady: Boolean,
     )
 
     /**
@@ -383,14 +455,14 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
 
     @OptIn(ExperimentalCoroutinesApi::class)
     val rows: StateFlow<List<Row>> =
-        combine(selectedCategory, favouritesOnly, query, categoryGroups, hiddenCategoryIds) {
+        combine(selectedCategory, favouritesOnly, query, categoryGroups, hiddenCategorySnapshot) {
                 category, favs, q, groups, hidden ->
             val ids = category?.let { key -> groups.firstOrNull { it.key == key }?.ids }
-            RowsKey(ids, favs, q, hidden)
+            RowsKey(ids, favs, q, hidden.ids, hidden.ready)
         }
             .combine(selectedSource) { key, source -> key to source }
             .flatMapLatest { (key, source) ->
-                val channelFlow = when {
+                val channelFlow = if (!key.parentalReady) flowOf(emptyList()) else when {
                     key.query.isNotBlank() -> graph.catalogRepository.searchChannels(key.query)
                     key.favs -> graph.catalogRepository.observeFavouriteChannels()
                     key.categoryIds != null -> graph.catalogRepository.observeChannelsIn(key.categoryIds)
@@ -485,6 +557,41 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun buildProgrammeResults(
+        programmes: List<Programme>,
+        channels: List<Channel>,
+        hiddenCategoryIds: Set<String>,
+    ): List<ProgrammeResult> {
+        val matches = selectProgrammeSearchMatches(
+            programmes = programmes,
+            channels = channels,
+            hiddenCategoryIds = hiddenCategoryIds,
+        )
+        if (matches.isEmpty()) return emptyList()
+
+        val programmesByEpgId = programmes.groupBy { it.epgChannelId }
+        val now = System.currentTimeMillis()
+        return matches.map { match ->
+            val byEpgChannel = match.variants
+                .flatMap { it.epgCandidates }
+                .distinct()
+                .associateWith { programmesByEpgId[it].orEmpty() }
+            val base = buildRows(match.variants, byEpgChannel, now).single()
+            val rowProgrammes = byEpgChannel.values
+                .flatten()
+                .distinct()
+                .sortedWith(compareBy<Programme> { it.startUtcMillis }.thenBy { it.title })
+            ProgrammeResult(
+                row = base.copy(
+                    now = rowProgrammes.firstOrNull { it.isLiveAt(now) },
+                    next = rowProgrammes.firstOrNull { it.startUtcMillis > now },
+                    programmes = rowProgrammes,
+                ),
+                programme = match.programme,
+            )
+        }
+    }
+
     /** A friendly, size-aware line for the load — a small provider gets a quick word, a huge one
      * gets a "bear with me". Used at start-up so the wait always says what it's doing. */
     private fun sizeMessage(count: Int): String = when {
@@ -533,24 +640,62 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
     // ---- Dedicated channel search --------------------------------------------------------------
     // Kept separate from the guide's `rows` on purpose: `rows` loads the entire 12-hour EPG
     // window, which is far too heavy to run on every keystroke (that was the ~30s search lag).
-    // This path is channel-only — no programme window — debounced, and capped by the DAO's LIMIT.
+    // This path is channel-only — no programme window — debounced, capped by SQL, and subject to
+    // the same fail-closed parental category snapshot as the guide.
     private val searchInput = MutableStateFlow("")
 
     fun setSearchQuery(text: String) { searchInput.value = text }
 
     @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
     val searchResults: StateFlow<List<Row>> =
-        searchInput
-            .map { it.trim() }
+        combine(searchInput, hiddenCategorySnapshot) { text, hidden -> text.trim() to hidden }
             .debounce(200)
             .distinctUntilChanged()
-            .flatMapLatest { q ->
-                if (q.length < 2) flowOf(emptyList())
+            .flatMapLatest { (q, hidden) ->
+                if (q.length < 2 || !hidden.ready) flowOf(emptyList())
                 else graph.catalogRepository.searchChannels(q)
                     // No EPG here — group channels into rows with no now/next. Finding and
                     // playing the channel is the job; guide detail would cost the slow query.
-                    .map { channels -> buildRows(channels, emptyMap(), System.currentTimeMillis()) }
+                    .map { channels ->
+                        val visible = channels.filter {
+                            it.categoryId == null || it.categoryId !in hidden.ids
+                        }
+                        buildRows(visible, emptyMap(), System.currentTimeMillis())
+                    }
             }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /**
+     * EPG-only search path. Unlike [rows], this performs one bounded Room query and resolves only
+     * the channels behind those results; typing never starts the full guide window/index.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class, FlowPreview::class)
+    val programmeResults: StateFlow<List<ProgrammeResult>> =
+        combine(searchInput, hiddenCategorySnapshot) { text, hidden -> text.trim() to hidden }
+            .debounce(200)
+            .distinctUntilChanged()
+            .flatMapLatest { (q, hidden) ->
+                if (q.length < 2 || !hidden.ready) {
+                    flowOf(emptyList())
+                } else {
+                    kotlinx.coroutines.flow.flow {
+                        val programmes = graph.epgRepository.searchProgrammes(
+                            query = q,
+                            nowUtcMillis = System.currentTimeMillis(),
+                            limit = EpgRepository.MAX_SEARCH_RESULTS,
+                        )
+                        if (programmes.isEmpty()) {
+                            emit(emptyList())
+                        } else {
+                            val channels = graph.catalogRepository.channelsForEpgIds(
+                                programmes.map { it.epgChannelId },
+                            )
+                            emit(buildProgrammeResults(programmes, channels, hidden.ids))
+                        }
+                    }
+                }
+            }
+            .flowOn(Dispatchers.Default)
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun tick() { nowTick.value = System.currentTimeMillis() }

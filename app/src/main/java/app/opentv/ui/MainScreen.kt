@@ -12,6 +12,7 @@ import app.opentv.core.findActivity
 import app.opentv.core.StatusBus
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
@@ -59,6 +60,11 @@ import androidx.compose.ui.res.stringResource
 import app.opentv.core.AppSettings
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -68,6 +74,7 @@ import app.opentv.data.model.Channel
 import app.opentv.data.model.Movie
 import app.opentv.data.model.Recording
 import app.opentv.data.model.Series
+import app.opentv.data.model.Programme
 import app.opentv.ui.channels.HomeScreen
 import app.opentv.ui.channels.CategoryPortalScreen
 import app.opentv.ui.channels.MosaicScreen
@@ -109,6 +116,10 @@ fun MainScreen(
     onPlayRecording: (Recording) -> Unit,
     onPlayCatchup: (mediaKey: String, url: String, title: String, ua: String) -> Unit,
     activeProfileName: String,
+    pendingProgrammeAction: Pair<app.opentv.ui.ChannelsViewModel.Row, Programme>? = null,
+    onProgrammeActionConsumed: () -> Unit = {},
+    returnToPreviousRoute: Boolean = false,
+    onBackToPreviousRoute: () -> Unit = {},
 ) {
     // Content-type toggles: a switched-off type has its tab hidden here (and its sync skipped in
     // CatalogRepository). Recordings is never a content type, so it always stays — which also means
@@ -135,6 +146,19 @@ fun MainScreen(
     var tab by remember { mutableStateOf(homeTab) }
     var mosaicSelection by remember { mutableStateOf(emptyList<String>()) }
     var portalGuideOpen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(pendingProgrammeAction, interfaceStyle) {
+        if (pendingProgrammeAction != null) {
+            tab = Tab.LIVE
+            if (interfaceStyle in setOf(
+                    AppSettings.InterfaceStyle.CATEGORY_PORTAL,
+                    AppSettings.InterfaceStyle.OI_HYBRID,
+                )
+            ) {
+                portalGuideOpen = true
+            }
+        }
+    }
 
     LaunchedEffect(tab, interfaceStyle) {
         if (tab != Tab.LIVE || interfaceStyle !in setOf(
@@ -167,6 +191,9 @@ fun MainScreen(
                 AppSettings.InterfaceStyle.OI_HYBRID,
             ) && portalGuideOpen,
     ) { portalGuideOpen = false }
+    // Search remains underneath a HOME instance opened for an EPG result. Once its programme
+    // dialog is dismissed, Back must return to that query rather than trigger the app-exit dialog.
+    BackHandler(enabled = returnToPreviousRoute) { onBackToPreviousRoute() }
     if (showExit) {
         AlertDialog(
             onDismissRequest = { showExit = false },
@@ -226,6 +253,8 @@ fun MainScreen(
                                 onAddSource = onAddSource,
                                 onRefresh = onRefresh,
                                 onPlayCatchup = onPlayCatchup,
+                                pendingProgrammeAction = pendingProgrammeAction,
+                                onProgrammeActionConsumed = onProgrammeActionConsumed,
                                 interfaceStyle = interfaceStyle,
                                 modifier = Modifier.fillMaxHeight().aspectRatio(4f / 3f),
                             )
@@ -240,6 +269,8 @@ fun MainScreen(
                         onAddSource = onAddSource,
                         onRefresh = onRefresh,
                         onPlayCatchup = onPlayCatchup,
+                        pendingProgrammeAction = pendingProgrammeAction,
+                        onProgrammeActionConsumed = onProgrammeActionConsumed,
                         interfaceStyle = if (
                             portalGuideOpen && interfaceStyle == AppSettings.InterfaceStyle.CATEGORY_PORTAL
                         ) AppSettings.InterfaceStyle.CURRENT else interfaceStyle,
@@ -321,6 +352,7 @@ private fun StatusBar() {
     }
 }
 
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 private fun NavRail(
     tabs: List<Tab>,
@@ -344,6 +376,7 @@ private fun NavRail(
             .width(width)
             .fillMaxHeight()
             .background(MaterialTheme.colorScheme.surface)
+            .focusRestorer()
             .focusGroup()
             .onFocusChanged { expanded = it.hasFocus }
             .padding(vertical = 16.dp),
@@ -410,12 +443,20 @@ private fun RailItem(
             .padding(horizontal = 12.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(bg)
+            .then(
+                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(10.dp))
+                else Modifier,
+            )
+            .semantics {
+                contentDescription = label
+                this.selected = selected
+            }
             .onFocusChanged { focused = it.isFocused }
-            .clickable(onClick = onClick)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = label, tint = tint)
+        Icon(icon, contentDescription = null, tint = tint)
         if (expanded) {
             Spacer(Modifier.width(14.dp))
             Text(

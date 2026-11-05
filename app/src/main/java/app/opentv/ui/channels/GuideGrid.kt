@@ -8,6 +8,7 @@ package app.opentv.ui.channels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,6 +25,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -44,6 +47,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
@@ -51,6 +56,10 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -63,6 +72,7 @@ import app.opentv.ui.ChannelsViewModel
 import app.opentv.ui.InterfacePalette
 import app.opentv.ui.interfacePalette
 import coil.compose.AsyncImage
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -82,11 +92,12 @@ import java.util.Locale
  * positioning, no measuring pass — just widths, which is cheap enough for a lazy list of
  * hundreds of channels on a weak TV box.
  */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun GuideGrid(
     rows: List<ChannelsViewModel.Row>,
     windowStartMillis: Long,
-    selectedKey: Any?,
+    highlightedKey: Any?,
     onSelectRow: (ChannelsViewModel.Row) -> Unit,
     onFocusRow: (ChannelsViewModel.Row) -> Unit,
     onProgramme: (ChannelsViewModel.Row, Programme) -> Unit = { _, _ -> },
@@ -102,6 +113,21 @@ fun GuideGrid(
 ) {
     val palette = interfacePalette(interfaceStyle, MaterialTheme.colorScheme)
     val scroll = rememberScrollState()
+    val rowListState = rememberLazyListState()
+    var pendingProgrammeFocusKey by remember { mutableStateOf<String?>(null) }
+    val navigationScope = rememberCoroutineScope()
+    var programmeNavigationJob by remember { mutableStateOf<Job?>(null) }
+    val programmeSlots = remember(rows) {
+        rows.map { row ->
+            row.programmes.map { programme ->
+                GuideProgrammeSlot(
+                    key = programmeFocusIdentity(programme),
+                    startUtcMillis = programme.startUtcMillis,
+                    endUtcMillis = programme.endUtcMillis,
+                )
+            }
+        }
+    }
     val now = nowMillis
     val metrics = remember(density) { guideMetrics(density) }
     // Jumping to another day resets the horizontal scroll to that day's start; a within-day time
@@ -111,6 +137,7 @@ fun GuideGrid(
     BoxWithConstraints(modifier.fillMaxSize()) {
         val viewport = (maxWidth - metrics.channelColumn - 3.dp).coerceAtLeast(120.dp)
         val unit = LocalDensity.current
+        val viewportPx = with(unit) { viewport.toPx() }
         val bucketWidth = metrics.halfHourWidth.value
         // Reading scroll.value directly would recompose every row on every scrolled pixel. Snap it
         // to half-hour buckets instead: the timeline only re-lays out when a new bucket comes into
@@ -126,10 +153,12 @@ fun GuideGrid(
             TimeHeader(windowStartMillis, scroll, metrics, palette)
 
             LazyColumn(
+                state = rowListState,
+                modifier = Modifier.focusRestorer().focusGroup(),
                 contentPadding = PaddingValues(bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(3.dp),
             ) {
-                items(rows, key = { it.key }, contentType = { "guide-row" }) { row ->
+                itemsIndexed(rows, key = { _, row -> row.key }, contentType = { _, _ -> "guide-row" }) { rowIndex, row ->
                     GuideRow(
                         row = row,
                         windowStartMillis = windowStartMillis,
@@ -138,10 +167,48 @@ fun GuideGrid(
                         metrics = metrics,
                         visibleStart = visibleStart,
                         viewport = viewport,
-                        isSelected = row.key == selectedKey,
+                        isHighlighted = row.key == highlightedKey,
                         onSelect = { onSelectRow(row) },
                         onFocus = { onFocusRow(row) },
                         onProgramme = { programme -> onProgramme(row, programme) },
+                        pendingFocusKey = pendingProgrammeFocusKey,
+                        onPendingFocusConsumed = { key ->
+                            if (pendingProgrammeFocusKey == key) pendingProgrammeFocusKey = null
+                        },
+                        onMoveProgramme = { programme, direction ->
+                            val currentIndex = row.programmes.indexOfFirst {
+                                programmeFocusIdentity(it) == programmeFocusIdentity(programme)
+                            }
+                            val target = guideProgrammeTarget(programmeSlots, rowIndex, currentIndex, direction)
+                                ?: return@GuideRow false
+                            val targetRow = rows.getOrNull(target.rowIndex) ?: return@GuideRow false
+                            val targetProgramme = targetRow.programmes.getOrNull(target.programmeIndex)
+                                ?: return@GuideRow false
+                            val targetPlacement = placementsFor(
+                                targetRow.programmes,
+                                windowStartMillis,
+                                metrics,
+                            ).getOrNull(target.programmeIndex) ?: return@GuideRow false
+                            val targetKey = guideProgrammeFocusKey(
+                                targetRow.key.toString(),
+                                programmeFocusIdentity(targetProgramme),
+                            )
+                            pendingProgrammeFocusKey = targetKey
+                            programmeNavigationJob?.cancel()
+                            programmeNavigationJob = navigationScope.launch {
+                                rowListState.animateScrollToItem(target.rowIndex)
+                                val leftPx = with(unit) { targetPlacement.left.dp.toPx() }
+                                val rightPx = with(unit) { (targetPlacement.left + targetPlacement.width).dp.toPx() }
+                                val pad = with(unit) { 24.dp.toPx() }
+                                val desired = when {
+                                    leftPx < scroll.value + pad -> leftPx - pad
+                                    rightPx > scroll.value + viewportPx - pad -> rightPx - viewportPx + pad
+                                    else -> scroll.value.toFloat()
+                                }
+                                scroll.animateScrollTo(desired.toInt().coerceIn(0, scroll.maxValue))
+                            }
+                            true
+                        },
                         onToggleFavourite = { onToggleFavourite(row) },
                         onExitLeft = onExitLeftFromChannel,
                         palette = palette,
@@ -159,10 +226,11 @@ fun GuideGrid(
  * swap between the two with nothing else changing: focus follows the d-pad (updating the preview),
  * OK opens the channel menu, and LEFT from a row asks the host to reopen the category rail.
  */
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun ChannelList(
     rows: List<ChannelsViewModel.Row>,
-    selectedKey: Any?,
+    highlightedKey: Any?,
     onSelectRow: (ChannelsViewModel.Row) -> Unit,
     onFocusRow: (ChannelsViewModel.Row) -> Unit,
     onToggleFavourite: (ChannelsViewModel.Row) -> Unit = {},
@@ -173,7 +241,7 @@ fun ChannelList(
     val palette = interfacePalette(interfaceStyle, MaterialTheme.colorScheme)
     val now = System.currentTimeMillis()
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier.fillMaxSize().focusRestorer().focusGroup(),
         contentPadding = PaddingValues(vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
@@ -181,7 +249,7 @@ fun ChannelList(
             ChannelListRow(
                 row = row,
                 nowMillis = now,
-                isSelected = row.key == selectedKey,
+                isHighlighted = row.key == highlightedKey,
                 onSelect = { onSelectRow(row) },
                 onFocus = { onFocusRow(row) },
                 onToggleFavourite = { onToggleFavourite(row) },
@@ -196,7 +264,7 @@ fun ChannelList(
 private fun ChannelListRow(
     row: ChannelsViewModel.Row,
     nowMillis: Long,
-    isSelected: Boolean,
+    isHighlighted: Boolean,
     onSelect: () -> Unit,
     onFocus: () -> Unit,
     onToggleFavourite: () -> Unit,
@@ -204,28 +272,43 @@ private fun ChannelListRow(
     palette: InterfacePalette,
 ) {
     var focused by remember { mutableStateOf(false) }
+    var channelCellDirectlyFocused by remember { mutableStateOf(false) }
+    val nowProg = row.now
+    val channelAccessibility = stringResource(
+        R.string.guide_channel_accessibility,
+        row.primary.shownName,
+        nowProg?.title ?: stringResource(R.string.guide_no_info),
+    )
+    val previewState = stringResource(R.string.guide_channel_preview_state)
     Row(
         Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
             .background(
-                if (isSelected) palette.selectedChannel else palette.surface,
+                if (isHighlighted) palette.selectedChannel else palette.surface,
             )
             .then(
                 if (focused) Modifier.border(2.dp, palette.accent, RoundedCornerShape(8.dp))
                 else Modifier,
             )
+            .semantics(mergeDescendants = true) {
+                contentDescription = channelAccessibility
+                if (isHighlighted) stateDescription = previewState
+            }
             // LEFT from a row reopens the collapsed rail, exactly like the grid's channel column.
             .onPreviewKeyEvent { e ->
-                if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionLeft) onExitLeft() else false
+                if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionLeft &&
+                    channelCellDirectlyFocused
+                ) onExitLeft() else false
             }
             .onFocusChanged {
                 // The nested favourite button is a separate focus target. Track focus anywhere
                 // inside the channel cell so the highlighted row and preview do not go stale.
+                channelCellDirectlyFocused = it.isFocused
                 focused = it.hasFocus
                 if (it.hasFocus) onFocus()
             }
-            .clickable(onClick = onSelect)
+            .clickable(role = Role.Button, onClick = onSelect)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -264,7 +347,6 @@ private fun ChannelListRow(
                 }
             }
             Spacer(Modifier.height(2.dp))
-            val nowProg = row.now
             Text(
                 text = nowProg?.let { "${clockFormat.format(Date(it.startUtcMillis))}  ${it.title}" }
                     ?: stringResource(R.string.guide_no_info),
@@ -355,17 +437,26 @@ private fun GuideRow(
     metrics: GuideMetrics,
     visibleStart: Float,
     viewport: Dp,
-    isSelected: Boolean,
+    isHighlighted: Boolean,
     onSelect: () -> Unit,
     onFocus: () -> Unit,
     onProgramme: (Programme) -> Unit,
+    pendingFocusKey: String?,
+    onPendingFocusConsumed: (String) -> Unit,
+    onMoveProgramme: (Programme, GuideProgrammeDirection) -> Boolean,
     onToggleFavourite: () -> Unit = {},
     onExitLeft: () -> Boolean = { false },
     palette: InterfacePalette,
 ) {
-    // Focus (the d-pad border) just moves the highlight. Selection (the filled cell) is the
-    // channel the preview is playing — it only changes when you press OK.
+    // The highlighted row drives the live preview; OK opens its action menu.
     var focused by remember { mutableStateOf(false) }
+    var channelCellDirectlyFocused by remember { mutableStateOf(false) }
+    val channelAccessibility = stringResource(
+        R.string.guide_channel_accessibility,
+        row.primary.shownName,
+        row.now?.title ?: stringResource(R.string.guide_no_info),
+    )
+    val previewState = stringResource(R.string.guide_channel_preview_state)
     val scope = rememberCoroutineScope()
     val unit = LocalDensity.current
     val viewportPx = with(unit) { viewport.toPx() }
@@ -379,27 +470,34 @@ private fun GuideRow(
                 .fillMaxSize()
                 .clip(RoundedCornerShape(8.dp))
                 .background(
-                    if (isSelected) palette.selectedChannel else palette.surface,
+                    if (isHighlighted) palette.selectedChannel else palette.surface,
                 )
                 .then(
                     if (focused) Modifier.border(
                         2.dp, palette.accent, RoundedCornerShape(8.dp),
                     ) else Modifier,
                 )
+                .semantics(mergeDescendants = true) {
+                    contentDescription = channelAccessibility
+                    if (isHighlighted) stateDescription = previewState
+                }
                 // LEFT from this leftmost column asks the host to reopen the collapsed category
                 // rail; onExitLeft consumes the key only when it handled it (rail was hidden), so
                 // moving left onto programme blocks and into an already-visible rail still works.
                 .onPreviewKeyEvent { e ->
-                    if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionLeft) onExitLeft()
+                    if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionLeft &&
+                        channelCellDirectlyFocused
+                    ) onExitLeft()
                     else false
                 }
                 .onFocusChanged {
                     // A favourite IconButton is nested in this cell; its focus must still update
                     // the row highlight and the live preview.
+                    channelCellDirectlyFocused = it.isFocused
                     focused = it.hasFocus
                     if (it.hasFocus) onFocus()
                 }
-                .clickable(onClick = onSelect)
+                .clickable(role = Role.Button, onClick = onSelect)
                 .padding(horizontal = 10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -495,13 +593,35 @@ private fun GuideRow(
                     }
                     val programme = placement.programme
                     val isNow = nowMillis in programme.startUtcMillis until programme.endUtcMillis
+                    val programmeAccessibility = stringResource(
+                        R.string.guide_programme_accessibility,
+                        programme.title,
+                        row.primary.shownName,
+                        clockFormat.format(Date(programme.startUtcMillis)),
+                        clockFormat.format(Date(programme.endUtcMillis)),
+                    )
+                    val programmeState = stringResource(
+                        if (isNow) R.string.guide_programme_current_state
+                        else R.string.guide_programme_upcoming_state,
+                    )
+                    val focusKey = guideProgrammeFocusKey(
+                        row.key.toString(),
+                        programmeFocusIdentity(programme),
+                    )
                     ProgrammeBlock(
                         title = programme.title,
                         width = placement.width.dp,
                         isNow = isNow,
                         progress = if (isNow) programme.progressAt(nowMillis) else 0f,
+                        focusKey = focusKey,
+                        requestFocus = pendingFocusKey == focusKey,
+                        onFocusRequestConsumed = onPendingFocusConsumed,
+                        onMove = { direction -> onMoveProgramme(programme, direction) },
+                        accessibilityDescription = programmeAccessibility,
+                        accessibilityState = programmeState,
                         palette = palette,
                         onFocus = {
+                            onFocus()
                             // D-pad focus does not scroll a plain Row on its own. Nudge the shared
                             // timeline so the newly focused block is never left off-screen.
                             val leftPx = with(unit) { placement.left.dp.toPx() }
@@ -537,11 +657,25 @@ private fun ProgrammeBlock(
     width: Dp,
     isNow: Boolean,
     progress: Float,
+    focusKey: String,
+    requestFocus: Boolean,
+    onFocusRequestConsumed: (String) -> Unit,
+    onMove: (GuideProgrammeDirection) -> Boolean,
+    accessibilityDescription: String,
+    accessibilityState: String,
     palette: InterfacePalette,
     onFocus: () -> Unit,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val focusRequester = remember(focusKey) { androidx.compose.ui.focus.FocusRequester() }
+    androidx.compose.runtime.LaunchedEffect(requestFocus) {
+        if (requestFocus) {
+            androidx.compose.runtime.withFrameNanos { }
+            runCatching { focusRequester.requestFocus() }
+            onFocusRequestConsumed(focusKey)
+        }
+    }
     Box(
         Modifier
             .width(width)
@@ -562,11 +696,27 @@ private fun ProgrammeBlock(
                     RoundedCornerShape(6.dp),
                 ) else Modifier,
             )
+            .focusRequester(focusRequester)
+            .onPreviewKeyEvent { event ->
+                if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                val direction = when (event.key) {
+                    Key.DirectionLeft -> GuideProgrammeDirection.LEFT
+                    Key.DirectionRight -> GuideProgrammeDirection.RIGHT
+                    Key.DirectionUp -> GuideProgrammeDirection.UP
+                    Key.DirectionDown -> GuideProgrammeDirection.DOWN
+                    else -> null
+                }
+                direction?.let(onMove) ?: false
+            }
             .onFocusChanged {
                 focused = it.isFocused
                 if (it.isFocused) onFocus()
             }
-            .clickable(onClick = onClick),
+            .semantics {
+                contentDescription = accessibilityDescription
+                stateDescription = accessibilityState
+            }
+            .clickable(role = Role.Button, onClick = onClick),
     ) {
         Text(
             title,
@@ -594,6 +744,10 @@ private fun ProgrammeBlock(
 
 /** One programme's laid-out position along a row, in guide dp from the window's left edge. */
 private data class Placement(val programme: Programme, val left: Float, val width: Float)
+
+/** Stable within the EPG row even when the same channel/programme appears in several providers. */
+private fun programmeFocusIdentity(programme: Programme): String =
+    "${programme.feedId}:${programme.epgChannelId}:${programme.startUtcMillis}:${programme.endUtcMillis}"
 
 /**
  * Position every programme in a row. A short show would otherwise be a sliver too thin to read,
