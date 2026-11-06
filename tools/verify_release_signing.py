@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Validate explicit release-signing inputs without silently falling back to debug signing.
 
-The only compatibility exceptions are the owner-approved v0.11.25 through v0.11.30 bridge releases,
+The only compatibility exceptions are the owner-approved v0.11.25 through v0.11.31 bridge releases,
 signed with the exact legacy certificate already used by public FullTV installations. They are opt-in,
 version-scoped, and remain a non-production signing identity. This script never creates or reads a private key.
 """
@@ -29,6 +29,7 @@ LEGACY_COMPAT_RELEASES = {
     ("0.11.28", 40),
     ("0.11.29", 41),
     ("0.11.30", 42),
+    ("0.11.31", 43),
 }
 LEGACY_ANDROID_DEBUG_CERT_SHA256 = "01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91"
 LEGACY_COMPAT_OPT_IN = "FULLTV_ALLOW_LEGACY_COMPAT_SIGNING"
@@ -69,7 +70,7 @@ def main() -> int:
             fail(
                 "The legacy Android Debug certificate is blocked by default; it is allowed only "
                 "for explicitly approved compatibility releases v0.11.25/code37, v0.11.26/code38, "
-                "v0.11.27/code39, v0.11.28/code40, v0.11.29/code41, and v0.11.30/code42."
+                "v0.11.27/code39, v0.11.28/code40, v0.11.29/code41, v0.11.30/code42, and v0.11.31/code43."
             )
         print(
             f"WARNING: v{args.version} (code {args.version_code}) is using the legacy Android Debug certificate for upgrade "
@@ -80,7 +81,7 @@ def main() -> int:
     if allow_legacy:
         fail(
             f"{LEGACY_COMPAT_OPT_IN} is limited to v0.11.25/code37, v0.11.26/code38, "
-            "v0.11.27/code39, v0.11.28/code40, v0.11.29/code41, or v0.11.30/code42 and the exact "
+            "v0.11.27/code39, v0.11.28/code40, v0.11.29/code41, v0.11.30/code42, or v0.11.31/code43 and the exact "
             "legacy Android Debug certificate."
         )
 

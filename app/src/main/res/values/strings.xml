@@ -669,11 +669,14 @@
     <string name="rec_switch_soon_text">Starts on %1$s in 30s — this screen will switch to it</string>
     <string name="rec_switch_banner">“%1$s” records on %2$s — this screen will switch</string>
     <string name="rec_switch_keep_watching">Keep watching</string>
-    <!-- Guard before opening live TV while a recording runs (single connection) -->
+    <!-- Provider-specific warning before opening another live stream while recording. -->
     <string name="rec_live_warn_title">Recording in progress</string>
-    <string name="rec_live_warn_body">You\'re on a single connection, so watching live now will stop your recording of “%1$s”.</string>
-    <string name="rec_live_warn_watch">Watch live (stop recording)</string>
-    <string name="rec_live_warn_keep">Keep recording</string>
+    <string name="rec_live_warn_body">Recording “%1$s” is active. Opening this live channel uses another connection. The limit depends on your provider. You can try both; if your plan does not allow it, the provider may interrupt a stream.</string>
+    <string name="rec_live_warn_body_many">%1$d recordings are active. Opening this live channel uses another connection. The limit depends on your provider. You can try all streams; if your plan does not allow them, the provider may interrupt one or more.</string>
+    <string name="rec_live_warn_try_watch">Try watching and keep recording</string>
+    <string name="rec_live_warn_watch">Watch live and stop recording</string>
+    <string name="rec_live_warn_watch_many">Watch live and stop all recordings</string>
+    <string name="rec_live_warn_keep">Keep recording only</string>
     <string name="rec_switch_channel_name">Recording auto-switch</string>
     <string name="rec_switch_channel_desc">Warns before switching the screen to a scheduled recording</string>
 

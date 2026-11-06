@@ -529,6 +529,13 @@
     <string name="rec_switch_soon_text">Começa em %1$s dentro de 30s — este ecrã vai mudar para lá</string>
     <string name="rec_switch_banner">“%1$s” grava em %2$s — este ecrã vai mudar</string>
     <string name="rec_switch_keep_watching">Continuar a ver</string>
+    <string name="rec_live_warn_title">Gravação em curso</string>
+    <string name="rec_live_warn_body">A gravação de “%1$s” está em curso. Ver este canal abre outra ligação. O limite depende do seu fornecedor. Pode tentar manter os dois fluxos; se o seu plano não permitir, o fornecedor poderá interromper uma transmissão.</string>
+    <string name="rec_live_warn_body_many">Há %1$d gravações em curso. Ver este canal abre outra ligação. O limite depende do seu fornecedor. Pode tentar manter todos os fluxos; se o seu plano não permitir, o fornecedor poderá interromper uma ou mais transmissões.</string>
+    <string name="rec_live_warn_try_watch">Tentar ver e manter a gravação</string>
+    <string name="rec_live_warn_watch">Ver ao vivo e parar a gravação</string>
+    <string name="rec_live_warn_watch_many">Ver ao vivo e parar todas as gravações</string>
+    <string name="rec_live_warn_keep">Continuar apenas a gravar</string>
     <string name="rec_switch_channel_name">Mudança automática de gravação</string>
     <string name="rec_switch_channel_desc">Avisa antes de mudar o ecrã para uma gravação agendada</string>
     <string name="settings_section_metadata">Metadados</string>

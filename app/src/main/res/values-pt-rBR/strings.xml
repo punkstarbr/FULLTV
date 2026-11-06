@@ -132,9 +132,12 @@
     <string name="rec_error_nothing">Nada foi gravado</string>
     <string name="rec_error_stalker_unavailable">Não foi possível resolver a URL do canal Stalker. Verifique a conexão com o provedor.</string>
     <string name="rec_live_warn_title">Gravação em andamento</string>
-    <string name="rec_live_warn_body">Sua conta permite apenas uma conexão simultânea. Assistir ao vivo agora interromperá a gravação de “%1$s”.</string>
-    <string name="rec_live_warn_watch">Assistir ao vivo (parar gravação)</string>
-    <string name="rec_live_warn_keep">Continuar gravando</string>
+    <string name="rec_live_warn_body">A gravação de “%1$s” está em andamento. Assistir a este canal abre outra conexão. O limite depende do seu provedor. Você pode tentar manter os dois fluxos; se seu plano não permitir, o provedor poderá interromper uma transmissão.</string>
+    <string name="rec_live_warn_body_many">Há %1$d gravações em andamento. Assistir a este canal abre outra conexão. O limite depende do seu provedor. Você pode tentar manter todos os fluxos; se seu plano não permitir, o provedor poderá interromper uma ou mais transmissões.</string>
+    <string name="rec_live_warn_try_watch">Tentar assistir e manter a gravação</string>
+    <string name="rec_live_warn_watch">Assistir ao vivo e parar a gravação</string>
+    <string name="rec_live_warn_watch_many">Assistir ao vivo e parar todas as gravações</string>
+    <string name="rec_live_warn_keep">Continuar apenas gravando</string>
     <string name="rec_error_usb_no_folder">Nenhuma pasta USB escolhida. Abra as configurações de Gravação e escolha uma pasta na sua unidade.</string>
     <string name="rec_error_usb_unavailable">Pendrive indisponível. Reconecte-o e selecione a pasta novamente em Configurações &gt; Gravação.</string>
     <string name="rec_background_prompt_title">Continuar a gravar ao sair?</string>

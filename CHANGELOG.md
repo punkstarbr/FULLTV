@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.31 (atualização estável) — 2026-11-06
+
+- **Gravações simultâneas:** iniciar capturas selecionadas de forma independente e sem fila artificial no app; é possível assistir a outro canal enquanto grava. Para IPTV da mesma fonte, o aviso informa que o limite depende do provedor e permite tentar assistir sem parar as gravações. Se preferir parar gravações, a ação afeta somente a mesma fonte. YouTube Live não é tratado como se consumisse uma conexão da conta IPTV. Os limites físicos do aparelho, rede e serviço continuam valendo.
+- **Testes e build:** 200/200 testes Kotlin e 13 testes Python passaram; `lintVitalRelease` e `assembleRelease` concluíram com sucesso. Recursos XML validados em 32 locales; pt-BR está completo (662/662 chaves).
+- **APK universal:** `app.fulltv`, versionCode 43, minSdk 24, targetSdk 35 e quatro ABIs; tamanho 165.301.147 bytes; SHA-256 `ecc1ddb84c62f9589443a4173c20d35257ab13ed13177e10bed479513bc1289c`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91` (certificado legado Android Debug autorizado; não é assinatura de produção).
+- **Validação física:** não houve Fire TV/Android TV conectado; gravação e reprodução simultâneas devem ser confirmadas no dispositivo.
+
 ## 0.11.30 (atualização estável) — 2026-11-05
 
 - **Foco e retorno por D-pad:** restaurar a rail principal e o hub de configurações ao filho focado; marcar seleção e foco com estados visuais/semânticos distintos; dar foco inicial previsível aos diálogos de programa/canal.

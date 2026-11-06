@@ -297,9 +297,9 @@ fun HomeScreen(
         }
     }
 
-    // Watching a live channel while a recording runs opens a second stream on the same line — which
-    // cuts the recording and can get a single-connection account banned. So every jump to full-screen
-    // live is funnelled through [requestLive]: with a recording active it asks first.
+    // IPTV providers may limit concurrent streams, but the limit is provider-specific. Only warn
+    // when this live channel uses the same configured IPTV source as an active recording; a YouTube
+    // live does not consume that IPTV account's connection quota.
     var pendingLiveChannel by remember { mutableStateOf<Channel?>(null) }
     fun startLive(channel: Channel) {
         PlaybackQueue.publish(channel.id, rows.map {
@@ -309,7 +309,13 @@ fun HomeScreen(
         onPlayChannel(channel)
     }
     fun requestLive(channel: Channel) {
-        if (activeRecordings.isNotEmpty()) pendingLiveChannel = channel else startLive(channel)
+        val isYouTubeLive = YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl) != null
+        val needsProviderWarning = LivePlaybackConflictPolicy.needsProviderWarning(
+            isYouTubeLive = isYouTubeLive,
+            playbackSourceId = channel.sourceId,
+            activeRecordingSourceIds = activeRecordings.map { it.sourceId },
+        )
+        if (needsProviderWarning) pendingLiveChannel = channel else startLive(channel)
     }
 
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -823,9 +829,19 @@ fun HomeScreen(
         }
     }
 
-    // Single-connection guard: confirm before opening a live stream that would fight a recording.
+    // Provider-specific warning: the user may still try both streams if their subscription allows it.
     pendingLiveChannel?.let { liveChannel ->
-        val recTitle = activeRecordings.firstOrNull()?.title.orEmpty()
+        val conflictingRecordings = activeRecordings.filter { it.sourceId == liveChannel.sourceId }
+        val tryWatchFocusRequester = remember(liveChannel.id) { FocusRequester() }
+        LaunchedEffect(liveChannel.id) {
+            withFrameNanos { }
+            runCatching { tryWatchFocusRequester.requestFocus() }
+        }
+        val warningBody = if (conflictingRecordings.size == 1) {
+            stringResource(R.string.rec_live_warn_body, conflictingRecordings.single().title)
+        } else {
+            stringResource(R.string.rec_live_warn_body_many, conflictingRecordings.size)
+        }
         Dialog(onDismissRequest = { pendingLiveChannel = null }) {
             Column(
                 Modifier
@@ -843,17 +859,32 @@ fun HomeScreen(
                 )
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    stringResource(R.string.rec_live_warn_body, recTitle),
+                    warningBody,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(16.dp))
-                RecordActionRow(stringResource(R.string.rec_live_warn_watch)) {
+                RecordActionRow(
+                    stringResource(R.string.rec_live_warn_try_watch),
+                    focusRequester = tryWatchFocusRequester,
+                ) {
                     pendingLiveChannel = null
-                    activeRecordings.forEach { graph.recordingEngine.stop(it.id) }
                     startLive(liveChannel)
                 }
                 RecordActionRow(stringResource(R.string.rec_live_warn_keep)) { pendingLiveChannel = null }
+                RecordActionRow(
+                    stringResource(
+                        if (conflictingRecordings.size > 1) {
+                            R.string.rec_live_warn_watch_many
+                        } else {
+                            R.string.rec_live_warn_watch
+                        },
+                    ),
+                ) {
+                    pendingLiveChannel = null
+                    conflictingRecordings.forEach { graph.recordingEngine.stop(it.id) }
+                    startLive(liveChannel)
+                }
             }
         }
     }
