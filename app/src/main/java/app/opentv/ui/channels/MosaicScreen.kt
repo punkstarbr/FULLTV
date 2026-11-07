@@ -72,7 +72,6 @@ import app.opentv.R
 import app.opentv.core.ServiceLocator
 import app.opentv.data.model.Channel
 import app.opentv.data.model.shownName
-import app.opentv.player.GloboplayPageUrl
 import app.opentv.player.PlayerController
 import app.opentv.player.YouTubeChannelUrl
 import app.opentv.ui.ChannelsViewModel
@@ -504,21 +503,8 @@ private fun MosaicVideo(
     LaunchedEffect(channel.id) {
         try {
             val source = graph.sourceRepository.byId(channel.sourceId)
-            val globoplayPageUrl = GloboplayPageUrl.canonicalize(channel.streamUrl)
             val youtubeLiveUrl = YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl)
-            if (globoplayPageUrl != null) {
-                controller.beginExternalResolution(channel.shownName)
-                val resolved = graph.globoplayResolver.resolve(context, globoplayPageUrl)
-                controller.play(
-                    PlayerController.Request(
-                        url = resolved.url,
-                        title = channel.shownName,
-                        userAgent = resolved.userAgent,
-                        isLive = true,
-                    ),
-                    debounce = false,
-                )
-            } else if (youtubeLiveUrl != null) {
+            if (youtubeLiveUrl != null) {
                 controller.beginExternalResolution(channel.shownName)
                 val resolved = graph.streamlinkResolver.resolveBest(youtubeLiveUrl)
                 controller.play(

@@ -122,7 +122,6 @@
     <string name="player_aspect_stretch">Esticar</string>
     <string name="player_aspect_ratio_title">Proporção do ecrã</string>
     <string name="player_none_available">Nenhuma disponível</string>
-    <string name="player_globoplay_unavailable">Não foi possível carregar esta transmissão do Globoplay. Verifique a ligação e tente novamente.</string>
     <string name="player_subtitles_off">Desligado</string>
     <string name="settings_providers_title">Fornecedores</string>
     <string name="settings_providers_subtitle">Adicione, remova e volte a testar as suas fontes IPTV</string>

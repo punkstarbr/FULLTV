@@ -171,7 +171,6 @@
     <string name="player_aspect_ratio_title">Aspect ratio</string>
     <string name="player_none_available">None available</string>
     <string name="player_youtube_unavailable">Couldn’t find a playable live stream for this YouTube channel. Check that it is live and try again.</string>
-    <string name="player_globoplay_unavailable" tools:ignore="MissingTranslation">Couldn’t load this Globoplay stream. Check your connection and try again.</string>
     <string name="player_subtitles_off">Off</string>
     <string name="player_ai_subtitles_waiting">Waiting for text subtitles from this channel. Select a track if one is available.</string>
     <string name="player_ai_subtitles_processing">Translating the channel subtitles…</string>

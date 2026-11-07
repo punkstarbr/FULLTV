@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.35 (atualização estável) — 2026-11-07
+
+- **Build de diagnóstico sem Globoplay:** remover o resolver WebView, os ramos de integração no player, preview e mosaico, o serviço compartilhado, mensagens específicas e testes do resolver. Links de páginas Globoplay deixam de ser convertidos em manifests HLS; YouTube/Streamlink e as demais fontes permanecem no fluxo existente.
+- **Objetivo:** comparar a inicialização no aparelho sem os componentes de integração Globoplay. Isso não confirma antecipadamente a causa do encerramento automático; o resultado precisa ser observado no dispositivo.
+- **Compatibilidade:** pacote normal `app.fulltv`, versionCode 47, certificado legado Android Debug autorizado especificamente para esta release; não é assinatura de produção.
+- **Testes e build:** 206/206 testes Kotlin e 13/13 testes Python passaram; `assembleDebug`, `lintVitalRelease` e `assembleRelease` concluíram com sucesso.
+- **APK universal:** minSdk 24, targetSdk 35, quatro ABIs; tamanho 165.284.015 bytes; SHA-256 `0bec91bf624c1f5dd5e177cad1911c6e82e1239290c155f8c03129401eab4d7e`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. As 52 bibliotecas nativas passaram verificação manual de alinhamento ZIP 16 KiB; Conscrypt não foi empacotado.
+- **Validação física:** sem aparelho/ADB/logcat nesta etapa; a ausência de Globoplay e a abertura da tela inicial precisam ser conferidas no dispositivo.
+
 ## 0.11.34 (atualização estável) — 2026-11-07
 
 - **Prévia do guia:** usar o mesmo cliente de streaming HTTPS do player em tela cheia, para não bloquear redirects públicos de CDN ao reproduzir M3U8 no preview.

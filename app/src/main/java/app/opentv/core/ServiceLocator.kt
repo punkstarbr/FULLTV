@@ -18,7 +18,6 @@ import app.opentv.data.repo.EpgRepository
 import app.opentv.data.repo.RecordingRepository
 import app.opentv.data.repo.ReminderRepository
 import app.opentv.data.repo.SourceRepository
-import app.opentv.player.GloboplayResolver
 import app.opentv.player.StreamlinkResolver
 import app.opentv.player.YouTubeLiveSearchResolver
 import app.opentv.recording.RecordingEngine
@@ -93,8 +92,6 @@ object ServiceLocator {
         val youtubeLiveSearchResolver: YouTubeLiveSearchResolver by lazy {
             YouTubeLiveSearchResolver(appContext)
         }
-        /** Resolves only the four explicitly supported public Globoplay page IDs. */
-        val globoplayResolver: GloboplayResolver by lazy { GloboplayResolver() }
 
         val xtreamApi: XtreamApi by lazy { XtreamApi(httpClient) }
 

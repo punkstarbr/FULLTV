@@ -93,7 +93,6 @@ import app.opentv.data.model.shownName
 import app.opentv.reminders.ReminderScheduler
 import app.opentv.player.PlaybackQueue
 import app.opentv.player.PlayerController
-import app.opentv.player.GloboplayPageUrl
 import app.opentv.player.YouTubeChannelUrl
 import app.opentv.ui.ChannelsViewModel
 import app.opentv.ui.RecordingBackgroundDialog
@@ -365,14 +364,8 @@ fun HomeScreen(
             return@LaunchedEffect
         }
         val channel = row.primary
-        val globoplayPageUrl = GloboplayPageUrl.canonicalize(channel.streamUrl)
         val youtubeLiveUrl = YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl)
-        if (globoplayPageUrl != null) {
-            // Do not create a WebView as an automatic side effect of opening Live TV: the first
-            // highlighted channel can be Globoplay. Resolve it only after the user explicitly
-            // starts full-screen playback, so an incompatible device WebView cannot block startup.
-            previewController.stop()
-        } else if (youtubeLiveUrl != null) {
+        if (youtubeLiveUrl != null) {
             previewController.beginExternalResolution(channel.shownName)
             try {
                 val resolved = graph.streamlinkResolver.resolveBest(youtubeLiveUrl)
