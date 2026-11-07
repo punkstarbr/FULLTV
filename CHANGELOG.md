@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.34 (atualização estável) — 2026-11-07
+
+- **Prévia do guia:** usar o mesmo cliente de streaming HTTPS do player em tela cheia, para não bloquear redirects públicos de CDN ao reproduzir M3U8 no preview.
+- **Inicialização Globoplay:** não iniciar automaticamente o resolver WebView no preview do guia quando o primeiro canal for Globoplay; manter a resolução para a seleção deliberada em tela cheia.
+- **Compatibilidade:** atualização do pacote normal `app.fulltv`, versionCode 46, assinada com o certificado legado já usado nas instalações existentes, conforme autorização específica do proprietário. O certificado é Android Debug compartilhado, não é assinatura de produção.
+- **Testes e build:** 213/213 testes Kotlin e 13/13 testes Python passaram; `assembleDebug`, `lintVitalRelease` e `assembleRelease` concluíram com sucesso.
+- **APK universal:** minSdk 24, targetSdk 35, quatro ABIs; tamanho 165.304.531 bytes; SHA-256 `0a56bb6a7e2f44bcd56ebcd356e85836ff81895b3ce68ad3b59d8acdf3b594de`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. As 52 bibliotecas nativas passaram verificação manual de alinhamento ZIP 16 KiB; Conscrypt não foi empacotado.
+- **Validação física/diagnóstico:** não houve aparelho conectado nem logcat. A falha de inicialização não foi reproduzida; a mitigação evita uma resolução WebView automática plausível no preview, mas não confirma definitivamente a causa.
+
 ## 0.11.33 (atualização estável) — 2026-11-07
 
 - **Reprodução Globoplay:** resolver no player nativo somente os quatro links públicos informados, com WebView temporário, allowlist de IDs e hosts Globo, HTTPS e validação de destino público. Não encaminha cookies/credenciais ao Media3; gravação não foi ampliada.

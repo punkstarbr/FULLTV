@@ -288,7 +288,7 @@ fun HomeScreen(
     // once — the thing that used to lock up cheap sticks.
     val previewScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
     val previewController = remember {
-        PlayerController(context, previewScope, graph.httpClient, subtitlesEnabled = false, preview = true)
+        PlayerController(context, previewScope, graph.streamingHttpClient, subtitlesEnabled = false, preview = true)
             .also { it.player.volume = 0f }
     }
     DisposableEffect(Unit) {
@@ -368,23 +368,10 @@ fun HomeScreen(
         val globoplayPageUrl = GloboplayPageUrl.canonicalize(channel.streamUrl)
         val youtubeLiveUrl = YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl)
         if (globoplayPageUrl != null) {
-            previewController.beginExternalResolution(channel.shownName)
-            try {
-                val resolved = graph.globoplayResolver.resolve(context, globoplayPageUrl)
-                previewController.play(
-                    PlayerController.Request(
-                        url = resolved.url,
-                        title = channel.shownName,
-                        userAgent = resolved.userAgent,
-                        isLive = true,
-                    ),
-                    debounce = true,
-                )
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                previewController.stop()
-            }
+            // Do not create a WebView as an automatic side effect of opening Live TV: the first
+            // highlighted channel can be Globoplay. Resolve it only after the user explicitly
+            // starts full-screen playback, so an incompatible device WebView cannot block startup.
+            previewController.stop()
         } else if (youtubeLiveUrl != null) {
             previewController.beginExternalResolution(channel.shownName)
             try {
