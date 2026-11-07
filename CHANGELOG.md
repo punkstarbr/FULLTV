@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.36 (rollback de comportamento) — 2026-11-07
+
+- **Prévia Live TV:** voltar ao cliente HTTP usado na v0.11.32 (`httpClient`), revertendo a troca feita antes do relato de encerramento. Player principal, Streamlink/YouTube e demais fontes permanecem nos fluxos anteriores.
+- **Sem Globoplay e sem transcrição Whisper:** o código de reprodução Globoplay já está removido desde a v0.11.35. A transcrição de áudio Whisper havia sido removida na v0.11.23; esta versão também elimina a referência da dependência obsoleta nos metadados Gradle. A limpeza de modelo/WAV legado continua para liberar resíduos antigos.
+- **Objetivo e limite:** rollback do comportamento de prévia da base .32 para teste comparativo; não é uma causa de crash confirmada. Não houve teste físico/logcat.
+- **Compatibilidade:** pacote `app.fulltv`, versionCode 48, certificado legado Android Debug autorizado especificamente para esta atualização; não é assinatura de produção.
+- **Testes e build:** 206/206 testes Kotlin e 13/13 testes Python passaram; `assembleDebug`, `lintVitalRelease` e `assembleRelease` concluíram com sucesso.
+- **APK universal:** minSdk 24, targetSdk 35, quatro ABIs; tamanho 165.286.027 bytes; SHA-256 `8bcbd448fbaa98871f064281eee5c926dc36982b836164022a686fd8f5a243d3`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. As 52 bibliotecas nativas passaram verificação manual de alinhamento ZIP 16 KiB; sem permissão `RECORD_AUDIO` e Conscrypt não empacotado.
+- **Validação física:** não havia aparelho conectado; o rollback do preview precisa ser conferido no dispositivo.
+
 ## 0.11.35 (atualização estável) — 2026-11-07
 
 - **Build de diagnóstico sem Globoplay:** remover o resolver WebView, os ramos de integração no player, preview e mosaico, o serviço compartilhado, mensagens específicas e testes do resolver. Links de páginas Globoplay deixam de ser convertidos em manifests HLS; YouTube/Streamlink e as demais fontes permanecem no fluxo existente.

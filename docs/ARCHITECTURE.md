@@ -190,18 +190,14 @@ file size periodically, reconnects when a segment reader ends, and closes its re
 stops or the scheduled end is reached. This behavior is specific to recognized YouTube URLs;
 ordinary IPTV recordings keep their HTTP capture path.
 
-### Automatic Portuguese captions
+### Portuguese translation of provider subtitles
 
-Automatic captions are opt-in and are wired only into the full-screen player. A Media3
-`TeeAudioProcessor` copies decoded 16-bit PCM into a bounded, drop-oldest worker queue; five-second
-mono 16 kHz Whisper windows overlap by two seconds. The playback thread never waits for inference,
-and stale windows are dropped if the device cannot keep up. Whisper runs locally with the
-multilingual `tiny` model, downloaded on first use with a pinned SHA-256 check. ML Kit identifies
-the recognized text language and downloads the translation model for Portuguese; subsequent
-translation is on-device. The audio itself is never uploaded. The current prebuilt Whisper AAR is
-arm64-v8a only, the feature declines devices reporting less than 512 MB app memory, and the tap
-requires decoded PCM (encoded passthrough streams may not yield captions). The feature is disabled
-by default because it adds model storage, CPU and memory pressure.
+FullTV does not capture, transcribe, or upload playback audio. In the full-screen player, the
+optional translation feature processes only readable text cues from a subtitle track supplied by
+the channel and selected by the user. It uses on-device Google ML Kit language identification and
+translation; the translation model is downloaded only when a supported non-Portuguese cue needs it.
+If no readable text track is present (including bitmap-only captions), FullTV does not generate
+subtitles. Original provider subtitles remain available if translation cannot be performed.
 
 ### Retries are tuned for IPTV, not for CDNs
 

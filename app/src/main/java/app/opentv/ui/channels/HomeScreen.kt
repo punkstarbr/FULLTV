@@ -287,7 +287,7 @@ fun HomeScreen(
     // once — the thing that used to lock up cheap sticks.
     val previewScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
     val previewController = remember {
-        PlayerController(context, previewScope, graph.streamingHttpClient, subtitlesEnabled = false, preview = true)
+        PlayerController(context, previewScope, graph.httpClient, subtitlesEnabled = false, preview = true)
             .also { it.player.volume = 0f }
     }
     DisposableEffect(Unit) {
