@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.33 (atualização estável) — 2026-11-07
+
+- **Reprodução Globoplay:** resolver no player nativo somente os quatro links públicos informados, com WebView temporário, allowlist de IDs e hosts Globo, HTTPS e validação de destino público. Não encaminha cookies/credenciais ao Media3; gravação não foi ampliada.
+- **Testes e build:** 213/213 testes Kotlin (incluindo 7 de regressão Globoplay) e 13/13 testes Python passaram; `lintVitalRelease` e `assembleRelease` concluíram com sucesso.
+- **APK universal:** `app.fulltv`, versionCode 45, minSdk 24, targetSdk 35 e quatro ABIs; 165.302.571 bytes; SHA-256 `3b6018abb6ace97b3f4b79099394204837e9cff7c758117c6ab1016c0f7e5f89`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91` (certificado legado Android Debug, não é assinatura de produção). As 52 bibliotecas nativas armazenadas passaram a verificação manual de alinhamento 16 KiB; Conscrypt não foi empacotado.
+- **Validação física:** não houve Fire TV/Android TV conectado; a reprodução Globoplay deve ser confirmada no aparelho após instalar a atualização.
+
 ## 0.11.32 (atualização estável) — 2026-11-07
 
 - **Correção de atualização de M3U no GitHub:** converter URLs públicas de playlist `/raw/` ou `/blob/` do GitHub para o host Raw direto antes do download, evitando a falha do redirect entre domínios que mantinha a lista anterior. O app pede revalidação HTTP e continua bloqueando redirects genéricos entre origens.

@@ -93,6 +93,7 @@ import app.opentv.data.model.shownName
 import app.opentv.reminders.ReminderScheduler
 import app.opentv.player.PlaybackQueue
 import app.opentv.player.PlayerController
+import app.opentv.player.GloboplayPageUrl
 import app.opentv.player.YouTubeChannelUrl
 import app.opentv.ui.ChannelsViewModel
 import app.opentv.ui.RecordingBackgroundDialog
@@ -364,8 +365,27 @@ fun HomeScreen(
             return@LaunchedEffect
         }
         val channel = row.primary
+        val globoplayPageUrl = GloboplayPageUrl.canonicalize(channel.streamUrl)
         val youtubeLiveUrl = YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl)
-        if (youtubeLiveUrl != null) {
+        if (globoplayPageUrl != null) {
+            previewController.beginExternalResolution(channel.shownName)
+            try {
+                val resolved = graph.globoplayResolver.resolve(context, globoplayPageUrl)
+                previewController.play(
+                    PlayerController.Request(
+                        url = resolved.url,
+                        title = channel.shownName,
+                        userAgent = resolved.userAgent,
+                        isLive = true,
+                    ),
+                    debounce = true,
+                )
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                previewController.stop()
+            }
+        } else if (youtubeLiveUrl != null) {
             previewController.beginExternalResolution(channel.shownName)
             try {
                 val resolved = graph.streamlinkResolver.resolveBest(youtubeLiveUrl)

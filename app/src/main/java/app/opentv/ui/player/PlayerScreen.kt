@@ -115,6 +115,7 @@ import app.opentv.player.PlayerController
 import app.opentv.player.ProvidedSubtitleTranslationEngine
 import app.opentv.player.ProvidedSubtitleTranslationPhase
 import app.opentv.player.ProvidedSubtitleTranslationState
+import app.opentv.player.GloboplayPageUrl
 import app.opentv.player.YouTubeChannelUrl
 import app.opentv.security.ParentalAuthorization
 import app.opentv.ui.RecordingBackgroundDialog
@@ -349,8 +350,30 @@ fun PlayerScreen(
             paused = false
             settings.lastChannelId = channel.id
             val source = graph.sourceRepository.byId(channel.sourceId)
+            val globoplayPageUrl = GloboplayPageUrl.canonicalize(channel.streamUrl)
             val youtubeLiveUrl = YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl)
-            if (youtubeLiveUrl != null) {
+            if (globoplayPageUrl != null) {
+                controller.beginExternalResolution(channel.shownName)
+                try {
+                    val resolved = graph.globoplayResolver.resolve(context, globoplayPageUrl)
+                    controller.play(
+                        PlayerController.Request(
+                            url = resolved.url,
+                            title = channel.shownName,
+                            userAgent = resolved.userAgent,
+                            isLive = true,
+                        ),
+                        debounce = false,
+                    )
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    controller.failExternalResolution(
+                        channel.shownName,
+                        context.getString(R.string.player_globoplay_unavailable),
+                    )
+                }
+            } else if (youtubeLiveUrl != null) {
                 controller.beginExternalResolution(channel.shownName)
                 try {
                     val resolved = graph.streamlinkResolver.resolveBest(youtubeLiveUrl)
@@ -372,7 +395,7 @@ fun PlayerScreen(
                     )
                 }
             } else {
-                // Xtream/M3U carry a ready URL; a Stalker channel's URL is minted here from its cmd.
+                // Xtream/M3U carry ready media URLs; a Stalker URL is minted here from its cmd.
                 val url = graph.catalogRepository.resolvePlaybackUrl(channel, source)
                 controller.play(
                     PlayerController.Request(

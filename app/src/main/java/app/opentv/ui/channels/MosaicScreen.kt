@@ -63,6 +63,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.annotation.OptIn
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
@@ -70,6 +72,7 @@ import app.opentv.R
 import app.opentv.core.ServiceLocator
 import app.opentv.data.model.Channel
 import app.opentv.data.model.shownName
+import app.opentv.player.GloboplayPageUrl
 import app.opentv.player.PlayerController
 import app.opentv.player.YouTubeChannelUrl
 import app.opentv.ui.ChannelsViewModel
@@ -469,6 +472,7 @@ private fun MosaicTile(
     }
 }
 
+@OptIn(UnstableApi::class)
 @Composable
 private fun MosaicVideo(
     channel: Channel,
@@ -500,8 +504,21 @@ private fun MosaicVideo(
     LaunchedEffect(channel.id) {
         try {
             val source = graph.sourceRepository.byId(channel.sourceId)
+            val globoplayPageUrl = GloboplayPageUrl.canonicalize(channel.streamUrl)
             val youtubeLiveUrl = YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl)
-            if (youtubeLiveUrl != null) {
+            if (globoplayPageUrl != null) {
+                controller.beginExternalResolution(channel.shownName)
+                val resolved = graph.globoplayResolver.resolve(context, globoplayPageUrl)
+                controller.play(
+                    PlayerController.Request(
+                        url = resolved.url,
+                        title = channel.shownName,
+                        userAgent = resolved.userAgent,
+                        isLive = true,
+                    ),
+                    debounce = false,
+                )
+            } else if (youtubeLiveUrl != null) {
                 controller.beginExternalResolution(channel.shownName)
                 val resolved = graph.streamlinkResolver.resolveBest(youtubeLiveUrl)
                 controller.play(

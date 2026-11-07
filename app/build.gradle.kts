@@ -16,8 +16,8 @@ val releaseKeyPassword = providers.environmentVariable("KEY_PASSWORD").orNull
 val releaseCertificateSha256 = providers.environmentVariable("RELEASE_CERT_SHA256").orNull
     ?.trim()
     ?.lowercase()
-val fullTvVersionName = "0.11.32"
-val fullTvVersionCode = 44
+val fullTvVersionName = "0.11.33"
+val fullTvVersionCode = 45
 val hasReleaseSigning = releaseKeystorePath?.let { it.isNotBlank() && file(it).isFile } == true &&
     !releaseKeystorePassword.isNullOrBlank() &&
     !releaseKeyAlias.isNullOrBlank() &&

@@ -167,6 +167,7 @@
     <string name="player_aspect_ratio_title">Proporção da tela</string>
     <string name="player_none_available">Nenhuma disponível</string>
     <string name="player_youtube_unavailable">Não foi possível encontrar uma transmissão ao vivo reproduzível para este canal do YouTube. Verifique se o canal está ao vivo e tente novamente.</string>
+    <string name="player_globoplay_unavailable">Não foi possível carregar esta transmissão do Globoplay. Verifique a conexão e tente novamente.</string>
     <string name="player_subtitles_off">Desativadas</string>
     <string name="player_ai_subtitles_waiting">Aguardando legendas em texto deste canal. Selecione uma faixa, se houver.</string>
     <string name="player_ai_subtitles_processing">Traduzindo as legendas do canal…</string>
