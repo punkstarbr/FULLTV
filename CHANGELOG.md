@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.32 (atualização estável) — 2026-11-07
+
+- **Correção de atualização de M3U no GitHub:** converter URLs públicas de playlist `/raw/` ou `/blob/` do GitHub para o host Raw direto antes do download, evitando a falha do redirect entre domínios que mantinha a lista anterior. O app pede revalidação HTTP e continua bloqueando redirects genéricos entre origens.
+- **Testes e build:** 206/206 testes Kotlin e 13/13 testes Python passaram; `lintVitalRelease` e `assembleRelease` concluíram com sucesso.
+- **APK universal:** `app.fulltv`, versionCode 44, minSdk 24, targetSdk 35 e quatro ABIs; 165.285.559 bytes; SHA-256 `36b2c006a075799f3d5f608abe5c134920cc57ff239a6022f5292143c43b63ab`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91` (certificado legado Android Debug, não é assinatura de produção).
+- **Validação física:** não houve Fire TV/Android TV conectado; a atualização da playlist precisa ser confirmada no aparelho após instalar a versão.
+
 ## 0.11.31 (atualização estável) — 2026-11-06
 
 - **Gravações simultâneas:** iniciar capturas selecionadas de forma independente e sem fila artificial no app; é possível assistir a outro canal enquanto grava. Para IPTV da mesma fonte, o aviso informa que o limite depende do provedor e permite tentar assistir sem parar as gravações. Se preferir parar gravações, a ação afeta somente a mesma fonte. YouTube Live não é tratado como se consumisse uma conexão da conta IPTV. Os limites físicos do aparelho, rede e serviço continuam valendo.

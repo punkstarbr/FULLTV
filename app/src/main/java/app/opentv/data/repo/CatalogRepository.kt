@@ -24,6 +24,7 @@ import app.opentv.data.model.Source
 import app.opentv.data.model.SourceKind
 import app.opentv.data.model.StreamKind
 import app.opentv.data.parser.ChannelNameNormalizer
+import app.opentv.data.parser.GitHubM3uUrl
 import app.opentv.data.parser.M3uParser
 import app.opentv.data.parser.YouTubeLiveSearchUrl
 import app.opentv.data.parser.VodTitleCleaner
@@ -794,12 +795,20 @@ class CatalogRepository(
     }
 
     private suspend fun syncM3u(source: Source, nowUtcMillis: Long): SyncResult {
-        NetworkDestinationPolicy.registerTrustedOrigin(source.url)
-        val requestScope = NetworkDestinationPolicy.scopeFor(source.url, source.url)
+        // GitHub's browser URL redirects from github.com to raw.githubusercontent.com. Convert
+        // known M3U file routes before the request so the generic network policy can continue to
+        // reject arbitrary cross-origin redirects.
+        val playlistUrl = GitHubM3uUrl.toDirectRawUrl(source.url)
+        NetworkDestinationPolicy.registerTrustedOrigin(playlistUrl)
+        val requestScope = NetworkDestinationPolicy.scopeFor(playlistUrl, playlistUrl)
             ?: return SyncResult.Failed("The playlist URL is not allowed.", null)
         val request = Request.Builder()
-            .url(source.url)
+            .url(playlistUrl)
             .header("User-Agent", source.userAgent)
+            // Do not let a CDN's freshness window make a branch URL appear unchanged after the
+            // user commits a new playlist. OkHttp itself has no response cache configured.
+            .header("Cache-Control", "no-cache")
+            .header("Pragma", "no-cache")
             .tag(NetworkDestinationPolicy.RequestScope::class.java, requestScope)
             .build()
 
@@ -812,7 +821,7 @@ class CatalogRepository(
             M3uParser.parse(stream, source.id)
         }
 
-        val trustedOrigin = NetworkDestinationPolicy.originOf(source.url)
+        val trustedOrigin = NetworkDestinationPolicy.originOf(playlistUrl)
         val candidateUrls = buildList {
             downloaded.channels.forEach { channel ->
                 add(channel.streamUrl)
@@ -826,7 +835,7 @@ class CatalogRepository(
             candidateUrls.asSequence()
                 .filterNot { it == trustedOrigin }
                 .take(MAX_SAFE_REMOTE_HOSTS)
-                .filter { url -> NetworkDestinationPolicy.isAllowedHttps(url, trustedOriginUrl = source.url) }
+                .filter { url -> NetworkDestinationPolicy.isAllowedHttps(url, trustedOriginUrl = playlistUrl) }
                 .forEach(::add)
         }
         val safeChannels = downloaded.channels.mapNotNull { channel ->
@@ -872,7 +881,7 @@ class CatalogRepository(
                 videos = videos,
                 firstSortIndex = expandedChannels.size,
                 isSafeThumbnail = { url ->
-                    NetworkDestinationPolicy.isAllowedHttps(url, trustedOriginUrl = source.url)
+                    NetworkDestinationPolicy.isAllowedHttps(url, trustedOriginUrl = playlistUrl)
                 },
             )
             for (generated in generatedChannels) {
