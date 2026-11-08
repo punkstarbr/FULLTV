@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.37 (híbrida .31 + M3U GitHub .32) — 2026-11-08
+
+- **Comportamento base:** preserva o player/preview da v0.11.31 (prévia usa `graph.httpClient`) e não inclui Globoplay nem transcrição Whisper.
+- **Playlists GitHub:** integra o canonicalizador da .32 para converter URLs públicas GitHub `/raw/` e `/blob/` de arquivos M3U para o host Raw antes da request, com revalidação de CDN e sem liberar redirects cross-origin genéricos. Inclui teste específico para `MUNDO.m3u`.
+- **Segurança de streams:** playlist usa HTTPS; URLs de streams em HTTP continuam bloqueadas. Na leitura de 2026-11-08 da MUNDO.m3u, 271 entradas de stream estavam em HTTP e não serão importadas pelo app; não foi removida a política HTTPS-only.
+- **Objetivo e limite:** build para teste de inicialização no aparelho com o comportamento da .31 e suporte ao link M3U da .32; não é causa de crash confirmada. Ainda não houve teste físico/logcat.
+- **Compatibilidade:** pacote `app.fulltv`, versionCode 49, certificado legado Android Debug autorizado especificamente para esta atualização; não é assinatura de produção.
+- **Testes e build:** 207/207 testes Kotlin e 13/13 testes Python passaram; `assembleDebug`, `lintVitalRelease` e `assembleRelease` concluíram com sucesso.
+- **APK universal:** minSdk 24, targetSdk 35, quatro ABIs; tamanho 165.286.103 bytes; SHA-256 `cf353ba38789ad5f75df4f72e73087f733ba561fb1064522316f01874132221f`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. As 52 bibliotecas nativas passaram verificação manual de alinhamento ZIP 16 KiB; sem permissão `RECORD_AUDIO` e Conscrypt não empacotado.
+
 ## 0.11.36 (rollback de comportamento) — 2026-11-07
 
 - **Prévia Live TV:** voltar ao cliente HTTP usado na v0.11.32 (`httpClient`), revertendo a troca feita antes do relato de encerramento. Player principal, Streamlink/YouTube e demais fontes permanecem nos fluxos anteriores.

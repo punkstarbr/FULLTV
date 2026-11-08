@@ -22,6 +22,17 @@ class GitHubM3uUrlTest {
     }
 
     @Test
+    fun `rewrites the user MUNDO m3u GitHub URL to the direct raw host`() {
+        assertThat(
+            GitHubM3uUrl.toDirectRawUrl(
+                "https://github.com/gratinomaster/will/raw/refs/heads/main/MUNDO.m3u",
+            ),
+        ).isEqualTo(
+            "https://raw.githubusercontent.com/gratinomaster/will/refs/heads/main/MUNDO.m3u",
+        )
+    }
+
+    @Test
     fun `rewrites a github blob page to its raw file`() {
         assertThat(
             GitHubM3uUrl.toDirectRawUrl("https://github.com/acme/iptv/blob/main/lists/live.m3u8"),
