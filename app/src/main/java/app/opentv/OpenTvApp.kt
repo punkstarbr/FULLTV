@@ -192,11 +192,9 @@ class OpenTvApp : Application(), ImageLoaderFactory {
         }
 
         appScope.launch {
-            // Runs off the UI thread. An EPG/network/database error is logged and must never
-            // terminate the foreground app process.
+            // Do not start a network-backed EPG sync during cold start. Manual refreshes and the
+            // delayed periodic SyncWorker still update the guide after the app has opened.
             val now = System.currentTimeMillis()
-            runCatching { graph.epgRepository.syncAll(now, force = false) }
-                .onFailure { Log.w(TAG, "EPG startup refresh will retry later (${it.javaClass.simpleName})") }
             runCatching {
                 graph.database.programmes().deleteOutsideWindow(
                     now - app.opentv.data.repo.EpgRepository.RETENTION_PAST_MILLIS,

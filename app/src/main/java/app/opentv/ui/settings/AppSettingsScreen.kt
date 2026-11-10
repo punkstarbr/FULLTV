@@ -157,7 +157,7 @@ fun AppSettingsScreen(onBack: () -> Unit) {
                 checked = catalogAutoRefresh,
                 onToggle = {
                     settings.setCatalogAutoRefresh(it)
-                    SyncWorker.schedule(context)
+                    SyncWorker.schedule(context, forceReschedule = true)
                 },
             )
             if (catalogAutoRefresh) {
@@ -171,7 +171,7 @@ fun AppSettingsScreen(onBack: () -> Unit) {
                         catalogRefreshHours == hours,
                     ) {
                         settings.setCatalogRefreshIntervalHours(hours)
-                        SyncWorker.schedule(context)
+                        SyncWorker.schedule(context, forceReschedule = true)
                     }
                 }
             }

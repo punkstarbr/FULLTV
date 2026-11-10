@@ -12,6 +12,7 @@ tvCompose = "1.0.0"
 media3 = "1.5.0"
 mlKitTranslate = "17.0.3"
 mlKitLanguageId = "17.0.6"
+vosk = "0.3.75"
 room = "2.8.5"
 okhttp = "4.12.0"
 serialization = "1.7.3"
@@ -63,6 +64,7 @@ media3-datasource-okhttp = { group = "androidx.media3", name = "media3-datasourc
 media3-transformer = { group = "androidx.media3", name = "media3-transformer", version.ref = "media3" }
 mlkit-translation = { group = "com.google.mlkit", name = "translate", version.ref = "mlKitTranslate" }
 mlkit-language-id = { group = "com.google.mlkit", name = "language-id", version.ref = "mlKitLanguageId" }
+vosk-android = { group = "com.alphacephei", name = "vosk-android", version.ref = "vosk" }
 
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }

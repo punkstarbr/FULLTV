@@ -91,7 +91,8 @@ class SyncWorker(
 
     companion object {
         private const val TAG = "SyncWorker"
-        private const val WORK_NAME = "opentv-periodic-sync"
+        private const val WORK_NAME = "opentv-periodic-sync-v2"
+        private const val LEGACY_WORK_NAME = "opentv-periodic-sync"
         private const val ONE_SHOT_WORK_NAME = "opentv-manual-sync"
 
         /**
@@ -116,17 +117,20 @@ class SyncWorker(
             )
         }
 
-        fun schedule(context: Context) {
+        fun schedule(context: Context, forceReschedule: Boolean = false) {
             val settings = app.opentv.core.AppSettings.get(context)
             val workManager = WorkManager.getInstance(context)
             if (!settings.catalogAutoRefresh.value) {
                 workManager.cancelUniqueWork(WORK_NAME)
+                workManager.cancelUniqueWork(LEGACY_WORK_NAME)
                 return
             }
+            val intervalHours = settings.catalogRefreshIntervalHours.value.toLong()
             val request = PeriodicWorkRequestBuilder<SyncWorker>(
-                settings.catalogRefreshIntervalHours.value.toLong(),
+                intervalHours,
                 TimeUnit.HOURS,
             )
+                .setInitialDelay(intervalHours, TimeUnit.HOURS)
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -139,9 +143,10 @@ class SyncWorker(
                 )
                 .build()
 
-            // WorkManager 2.9 has no UPDATE policy. Cancelling first ensures an already-installed
-            // app does not keep the old six-hour schedule after this hourly policy ships.
-            workManager.cancelUniqueWork(WORK_NAME)
+            // Migrate old requests once, and don't reset the new periodic timer on every app start.
+            // The initial delay prevents an automatic catalogue download from competing with startup.
+            workManager.cancelUniqueWork(LEGACY_WORK_NAME)
+            if (forceReschedule) workManager.cancelUniqueWork(WORK_NAME)
             workManager.enqueueUniquePeriodicWork(
                 WORK_NAME,
                 ExistingPeriodicWorkPolicy.KEEP,

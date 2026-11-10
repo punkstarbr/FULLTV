@@ -28,8 +28,17 @@ below.
 When an M3U contains `url-tvg` or `x-tvg-url` attributes, FullTV discovers each unique XMLTV URL
 across the playlist and requests all of them automatically when refreshing the guide. Those guide
 hosts can see the device network request and any query parameters included in the URL. Do not post
-or share a playlist containing credentials or private tokens. Plain HTTP guide URLs are blocked;
-HTTPS is required.
+or share a playlist containing credentials or private tokens. For the provider/discovered feeds tied
+to that M3U, FullTV stores programme rows only when their XMLTV channel ID is present in the playlist
+or its channel name has one unambiguous match. It still downloads and parses each accepted full guide;
+this saves steady-state programme-database space, not network data or temporary staging space. The
+previous guide snapshot is kept until a non-empty filtered replacement succeeds. A URL shared by
+different playlists gets a separate filtered feed for each list; manually configured and built-in
+feeds remain global. If both scopes use the same URL, the URL may be downloaded more than once.
+When the playlist's channels or first guide URL changes, its feeds are marked for
+the next EPG refresh, so later channel additions and guide URL changes are considered without hardcoded
+IDs, even when the M3U address stays the same.
+Plain HTTP guide URLs are blocked; HTTPS is required.
 
 If you open a playlist channel whose URL is a YouTube `@handle` (or a live YouTube watch URL), the
 bundled Streamlink resolver contacts YouTube and its video CDN directly to find the current live
@@ -45,11 +54,19 @@ store those bytes on a FullTV server.
 
 If you enable Portuguese subtitle translation, FullTV translates only readable text cues emitted
 by a subtitle track supplied by the channel and selected in the player. If the stream has no text
-subtitle track (or supplies bitmap-only captions), FullTV does not create captions and does not
-capture, transcribe or upload audio. Google ML Kit identifies the cue language and translates it
-on-device; the applicable translation model is downloaded only when a supported non-Portuguese
-subtitle cue needs it. Translation model files are managed by Google Play services and may not be
-included in FullTV's app-private storage measurement.
+subtitle track (or supplies bitmap-only captions), this feature does not create captions.
+
+The separate **Live captions** option is off by default and starts only after an explicit choice in
+the fullscreen player. You may select a spoken language manually or try **Automatic**, which reads
+the language declared by the selected audio track when the provider supplies a supported tag. It
+does not acoustically classify audio; if that metadata is absent, the app asks you to select a
+language. The mode transcribes PCM audio already decoded for that player with a Vosk model stored in
+the app-private directory, then translates recognized text to Portuguese with on-device Google ML
+Kit. It does not request microphone permission, save audio, or send audio or transcripts to a FullTV
+server. Speech and translation models are downloaded on demand over HTTPS; Google Play services
+manages ML Kit translation models, which may not be included in FullTV's app-private storage
+measurement. Small Vosk models can use roughly 300 MB of memory while loaded, so FullTV does not
+offer this mode on Android low-RAM devices or devices reporting an app memory class below 256 MB.
 
 ## Cleartext HTTP
 

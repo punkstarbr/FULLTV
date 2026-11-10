@@ -364,8 +364,11 @@ interface EpgFeedDao {
     @Query("SELECT * FROM epg_feeds WHERE providerSourceId = :sourceId")
     suspend fun forProvider(sourceId: Long): EpgFeed?
 
-    @Query("SELECT * FROM epg_feeds WHERE url = :url")
-    suspend fun byUrl(url: String): EpgFeed?
+    @Query("SELECT * FROM epg_feeds WHERE url = :url AND playlistSourceId = :sourceId LIMIT 1")
+    suspend fun byUrlForPlaylist(url: String, sourceId: Long): EpgFeed?
+
+    @Query("SELECT * FROM epg_feeds WHERE url = :url AND playlistSourceId IS NULL LIMIT 1")
+    suspend fun byGlobalUrl(url: String): EpgFeed?
 
     @Query("SELECT * FROM epg_feeds WHERE playlistSourceId = :sourceId")
     suspend fun discoveredForPlaylist(sourceId: Long): List<EpgFeed>
@@ -393,6 +396,9 @@ interface EpgChannelAliasDao {
 
     @Query("SELECT COUNT(*) FROM epg_channels WHERE feedId > 0")
     suspend fun count(): Int
+
+    @Query("SELECT * FROM epg_channels WHERE feedId = :feedId")
+    suspend fun forFeed(feedId: Long): List<EpgChannelAlias>
 
     @Upsert
     suspend fun upsertAll(aliases: List<EpgChannelAlias>)
@@ -478,6 +484,12 @@ interface ProgrammeDao {
     /** Distinct guide channels that actually have programmes — the match report's baseline. */
     @Query("SELECT DISTINCT epgChannelId FROM programmes WHERE feedId > 0")
     suspend fun channelIdsWithProgrammes(): List<String>
+
+    @Query("SELECT DISTINCT epgChannelId FROM programmes WHERE feedId = :feedId")
+    suspend fun channelIdsForFeed(feedId: Long): List<String>
+
+    @Query("DELETE FROM programmes WHERE feedId = :feedId AND epgChannelId IN (:epgChannelIds)")
+    suspend fun deleteChannelsForFeed(feedId: Long, epgChannelIds: List<String>)
 
     @Upsert
     suspend fun upsertAll(programmes: List<Programme>)

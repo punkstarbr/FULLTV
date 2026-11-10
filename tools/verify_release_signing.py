@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Validate explicit release-signing inputs without silently falling back to debug signing.
 
-The only compatibility exceptions are the owner-approved v0.11.25 through v0.11.37 bridge releases,
+The compatibility exceptions are the owner-approved v0.11.25 through v0.11.37 bridge releases, the
+local test build v0.11.38/code50, and the one-time owner-authorized public v0.11.39/code51 release,
 signed with the exact legacy certificate already used by public FullTV installations. They are opt-in,
 version-scoped, and remain a non-production signing identity. This script never creates or reads a private key.
 """
@@ -36,6 +37,8 @@ LEGACY_COMPAT_RELEASES = {
     ("0.11.35", 47),
     ("0.11.36", 48),
     ("0.11.37", 49),
+    ("0.11.38", 50),
+    ("0.11.39", 51),
 }
 LEGACY_ANDROID_DEBUG_CERT_SHA256 = "01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91"
 LEGACY_COMPAT_OPT_IN = "FULLTV_ALLOW_LEGACY_COMPAT_SIGNING"
@@ -78,7 +81,8 @@ def main() -> int:
                 "for explicitly approved compatibility releases v0.11.25/code37, v0.11.26/code38, "
                 "v0.11.27/code39, v0.11.28/code40, v0.11.29/code41, v0.11.30/code42, "
                 "v0.11.31/code43, v0.11.32/code44, v0.11.33/code45, v0.11.34/code46, "
-                "v0.11.35/code47, v0.11.36/code48, and v0.11.37/code49."
+                "v0.11.35/code47, v0.11.36/code48, v0.11.37/code49, the local test build "
+                "v0.11.38/code50, and the one-time explicitly authorized public v0.11.39/code51 release."
             )
         print(
             f"WARNING: v{args.version} (code {args.version_code}) is using the legacy Android Debug certificate for upgrade "
@@ -91,7 +95,8 @@ def main() -> int:
             f"{LEGACY_COMPAT_OPT_IN} is limited to v0.11.25/code37, v0.11.26/code38, "
             "v0.11.27/code39, v0.11.28/code40, v0.11.29/code41, v0.11.30/code42, "
             "v0.11.31/code43, v0.11.32/code44, v0.11.33/code45, v0.11.34/code46, "
-            "v0.11.35/code47, v0.11.36/code48, or v0.11.37/code49 and the exact "
+            "v0.11.35/code47, v0.11.36/code48, v0.11.37/code49, the local test build "
+            "v0.11.38/code50, or the one-time authorized public v0.11.39/code51 release, and the exact "
             "legacy Android Debug certificate."
         )
 

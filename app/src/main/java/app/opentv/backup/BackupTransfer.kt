@@ -155,10 +155,10 @@ class BackupTransfer(
         val feedDao = graph.database.epgFeeds()
         var feedsImported = 0
         for (saved in backup.epgFeeds) {
-            var feed = feedDao.byUrl(saved.url)
+            var feed = feedDao.byGlobalUrl(saved.url)
             if (feed == null && !saved.builtIn) {
                 graph.epgRepository.addCustomFeed(saved.name, saved.url)
-                feed = feedDao.byUrl(saved.url)
+                feed = feedDao.byGlobalUrl(saved.url)
             }
             if (feed != null) {
                 feedDao.setEnabled(feed.id, saved.enabled)

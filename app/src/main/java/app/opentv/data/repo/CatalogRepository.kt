@@ -25,6 +25,7 @@ import app.opentv.data.model.SourceKind
 import app.opentv.data.model.StreamKind
 import app.opentv.data.parser.ChannelNameNormalizer
 import app.opentv.data.parser.GitHubM3uUrl
+import app.opentv.data.parser.GitHubRawResourceUrl
 import app.opentv.data.parser.M3uParser
 import app.opentv.data.parser.YouTubeLiveSearchUrl
 import app.opentv.data.parser.VodTitleCleaner
@@ -42,8 +43,10 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
-private const val MAX_SAFE_REMOTE_HOSTS = 128
-private const val MAX_YOUTUBE_SEARCH_ENTRIES_PER_M3U = 5
+internal const val MAX_YOUTUBE_SEARCH_ENTRIES_PER_M3U = 10
+
+internal fun exceedsYoutubeSearchEntryLimit(entryCount: Int): Boolean =
+    entryCount > MAX_YOUTUBE_SEARCH_ENTRIES_PER_M3U
 
 /**
  * Keeps one channel per distinct quality signature, preserving order (so "best first" is
@@ -822,22 +825,27 @@ class CatalogRepository(
         }
 
         val trustedOrigin = NetworkDestinationPolicy.originOf(playlistUrl)
-        val candidateUrls = buildList {
+        val mediaUrls = buildList {
             downloaded.channels.forEach { channel ->
                 add(channel.streamUrl)
                 channel.logoUrl?.let(::add)
             }
-            downloaded.declaredEpgUrls.forEach(::add)
-            downloaded.declaredEpgUrl?.let(::add)
-        }.mapNotNull(NetworkDestinationPolicy::originOf).distinct()
-        val allowedOrigins = buildSet {
-            trustedOrigin?.let(::add)
-            candidateUrls.asSequence()
-                .filterNot { it == trustedOrigin }
-                .take(MAX_SAFE_REMOTE_HOSTS)
-                .filter { url -> NetworkDestinationPolicy.isAllowedHttps(url, trustedOriginUrl = playlistUrl) }
-                .forEach(::add)
         }
+        // GitHub's browser-facing /raw and /blob guide links are converted to direct raw HTTPS
+        // URLs; arbitrary cross-origin redirects remain blocked by the shared network policy.
+        val declaredGuideUrls = (downloaded.declaredEpgUrls + listOfNotNull(downloaded.declaredEpgUrl))
+            .asSequence()
+            .map(GitHubRawResourceUrl::toDirectRawUrl)
+            .distinct()
+            .toList()
+        val allowedOrigins = M3uOriginPolicy.selectAllowedOrigins(
+            trustedOrigin = trustedOrigin,
+            mediaUrls = mediaUrls,
+            guideUrls = declaredGuideUrls,
+            isAllowedHttpsOrigin = { origin ->
+                NetworkDestinationPolicy.isAllowedHttps(origin, trustedOriginUrl = playlistUrl)
+            },
+        )
         val safeChannels = downloaded.channels.mapNotNull { channel ->
             val streamOrigin = NetworkDestinationPolicy.originOf(channel.streamUrl) ?: return@mapNotNull null
             if (streamOrigin !in allowedOrigins) return@mapNotNull null
@@ -863,7 +871,7 @@ class CatalogRepository(
             }
 
             youtubeSearchEntries++
-            if (youtubeSearchEntries > MAX_YOUTUBE_SEARCH_ENTRIES_PER_M3U) {
+            if (exceedsYoutubeSearchEntryLimit(youtubeSearchEntries)) {
                 return SyncResult.Failed(
                     "The playlist contains more YouTube searches than FullTV can refresh safely.",
                     null,
@@ -890,7 +898,7 @@ class CatalogRepository(
                 }
             }
         }
-        val safeGuideUrls = downloaded.declaredEpgUrls.filter { url ->
+        val safeGuideUrls = declaredGuideUrls.filter { url ->
             NetworkDestinationPolicy.originOf(url) in allowedOrigins
         }
         val parsed = downloaded.copy(
@@ -923,7 +931,15 @@ class CatalogRepository(
 
         categoryDao.upsertAll(categories)
         val categoryNames = categories.associate { it.id to it.name }
-        channelDao.replaceCatalogue(source.id, normalized(parsed.channels, categoryNames), nowUtcMillis)
+        val incomingChannels = normalized(parsed.channels, categoryNames)
+        val previousGuideScope = channelDao.forSource(source.id)
+            .map { it.epgChannelId to it.groupKey }
+            .toSet()
+        val incomingGuideScope = incomingChannels
+            .map { it.epgChannelId to it.groupKey }
+            .toSet()
+        val guideScopeChanged = previousGuideScope != incomingGuideScope
+        channelDao.replaceCatalogue(source.id, incomingChannels, nowUtcMillis)
 
         // A playlist can advertise dozens of guides (one url-tvg per country). Adopt the first
         // as the provider guide so it keeps working; every other unique URL is imported and
@@ -931,15 +947,19 @@ class CatalogRepository(
         val discovered = parsed.declaredEpgUrls.ifEmpty {
             listOfNotNull(parsed.declaredEpgUrl)
         }
-        if (discovered.isNotEmpty()) {
-            // For M3U sources the playlist header is authoritative. If its first declared guide
-            // changes while the playlist URL stays the same, move the provider feed with it
-            // instead of retaining yesterday's EPG forever.
-            val updated = if (source.epgUrl != discovered.first()) {
-                source.copy(epgUrl = discovered.first()).also { sourceDao.update(it) }
-            } else source
-            epgRepository.importDiscoveredFeeds(updated, discovered, skipUrl = updated.epgUrl)
-        }
+        // For M3U sources the playlist header is authoritative when present. If it has no guide
+        // declaration, preserve an XMLTV URL the user configured explicitly for this source.
+        val firstGuide = discovered.firstOrNull() ?: source.epgUrl
+        val firstGuideChanged = source.epgUrl != firstGuide
+        val updated = if (source.epgUrl != firstGuide) {
+            source.copy(epgUrl = firstGuide).also { sourceDao.update(it) }
+        } else source
+        epgRepository.importDiscoveredFeeds(
+            updated,
+            discovered,
+            skipUrl = updated.epgUrl,
+            playlistInputsChanged = guideScopeChanged || firstGuideChanged,
+        )
 
         sourceDao.markCatalogSynced(source.id, nowUtcMillis)
         return SyncResult.Success(parsed.channels.size, 0, 0)

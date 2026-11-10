@@ -17,8 +17,10 @@ import app.opentv.data.model.EpgChannelAlias
 import app.opentv.data.model.EpgFeed
 import app.opentv.data.model.Programme
 import app.opentv.data.model.Source
+import app.opentv.data.model.SourceKind
 import app.opentv.data.parser.BoundedInputStream
 import app.opentv.data.parser.ChannelNameNormalizer
+import app.opentv.data.parser.GitHubRawResourceUrl
 import app.opentv.data.parser.XmltvParser
 import app.opentv.data.remote.XtreamApi
 import app.opentv.data.remote.HttpsUrlPolicy
@@ -38,6 +40,8 @@ import kotlinx.coroutines.withContext
 import androidx.room.withTransaction
 import okhttp3.OkHttpClient
 import okhttp3.Request
+
+private const val M3U_FILTER_STATUS_SUFFIX = " (M3U channels only)"
 
 /**
  * Owns the electronic programme guide, end to end: feeds in, matched channels out.
@@ -133,7 +137,7 @@ class EpgRepository(
 
     suspend fun addCustomFeed(name: String, url: String) {
         val trimmed = HttpsUrlPolicy.withDefaultHttps(url)
-        if (trimmed.isEmpty() || feedDao.byUrl(trimmed) != null) return
+        if (trimmed.isEmpty() || feedDao.byGlobalUrl(trimmed) != null) return
         HttpsUrlPolicy.requireHttps(trimmed)
         feedDao.insert(
             EpgFeed(name = name.trim().ifBlank { trimmed }, url = trimmed, enabled = true),
@@ -145,7 +149,8 @@ class EpgRepository(
      *
      * Real lists advertise one guide per country — often dozens — and repeating the attribute is
      * the only signal they give. Every additional unique guide URL is added and enabled automatically,
-     * as requested; large multi-country playlists can therefore use substantial network and storage.
+     * as requested; large multi-country playlists still use network and XMLTV parsing time, while
+     * each playlist-owned feed keeps a separate, filtered snapshot for that playlist.
      * [skipUrl] is the one already adopted as the provider guide, so it is not duplicated.
      * On every playlist refresh, feeds previously discovered by that same playlist but no longer
      * declared are removed together with their aliases/programmes. Manual and built-in feeds are
@@ -155,6 +160,7 @@ class EpgRepository(
         source: Source,
         urls: List<String>,
         skipUrl: String? = null,
+        playlistInputsChanged: Boolean = false,
     ) {
         // The first URL remains the source's provider guide; all other unique declared URLs are
         // imported and enabled automatically. Existing feed rows retain their explicit user choice.
@@ -167,14 +173,14 @@ class EpgRepository(
         owned.filter { it.url !in discoveredUrls }.forEach { removeFeed(it) }
         for (raw in discoveredUrls) {
             val url = raw.trim()
-            val existing = feedDao.byUrl(url)
-            if (existing != null) {
-                if (existing.playlistSourceId == source.id) {
-                    // Keep the user's enabled/disabled choice, but refresh the display name.
-                    feedDao.update(existing.copy(name = feedName(source, url)))
-                }
+            val existingForPlaylist = feedDao.byUrlForPlaylist(url, source.id)
+            if (existingForPlaylist != null) {
+                // Keep this playlist's enabled/disabled choice, but refresh its display name.
+                feedDao.update(existingForPlaylist.copy(name = feedName(source, url)))
                 continue
             }
+            // A URL shared by M3Us gets a separate feed row for each source. A manual/built-in
+            // global feed with the same URL also remains untouched; both scopes may download it.
             feedDao.insert(
                 EpgFeed(
                     name = feedName(source, url),
@@ -184,6 +190,9 @@ class EpgRepository(
                     playlistSourceId = source.id,
                 ),
             )
+        }
+        if (source.kind == SourceKind.M3U) {
+            markPlaylistFeedsForRefresh(source.id, playlistInputsChanged)
         }
     }
 
@@ -232,7 +241,7 @@ class EpgRepository(
             }
         }
         for ((name, url) in BUILT_IN_FEEDS) {
-            if (feedDao.byUrl(url) == null) {
+            if (feedDao.byGlobalUrl(url) == null) {
                 // Off by default: shipping a switched-on 20 MB download for a country the
                 // user may not live in would be rude. The EPG settings screen makes
                 // enabling one a single click.
@@ -273,7 +282,8 @@ class EpgRepository(
                         feedDao.markSynced(
                             feed.id,
                             nowUtcMillis,
-                            "${result.programmes} programmes, ${result.channels} channels",
+                            "${result.programmes} programmes, ${result.channels} channels" +
+                                if (result.playlistScoped) M3U_FILTER_STATUS_SUFFIX else "",
                         )
                     }
                     is FeedResult.Failed -> {
@@ -300,7 +310,11 @@ class EpgRepository(
         }
 
     private sealed interface FeedResult {
-        data class Success(val programmes: Int, val channels: Int) : FeedResult
+        data class Success(
+            val programmes: Int,
+            val channels: Int,
+            val playlistScoped: Boolean,
+        ) : FeedResult
         data class Failed(val reason: String) : FeedResult
     }
 
@@ -310,6 +324,11 @@ class EpgRepository(
         futureCutoffMillis: Long,
     ): FeedResult {
         val stagingFeedId = -feed.id
+        val playlistSourceId = m3uSourceIdFor(feed)
+        val playlistChannels = playlistSourceId?.let { channelDao.forSource(it) }
+        if (playlistSourceId != null && playlistChannels.isNullOrEmpty()) {
+            return FeedResult.Failed("Playlist channels are not loaded; the previous guide was kept.")
+        }
         val batch = ArrayList<Programme>(BATCH_SIZE)
         val aliases = ArrayList<EpgChannelAlias>(256)
         var written = 0
@@ -347,12 +366,38 @@ class EpgRepository(
                     programmeDao.upsertAll(batch)
                     written += batch.size
                 }
-                if (aliases.isNotEmpty()) {
-                    aliases.chunked(BATCH_SIZE).forEach { aliasDao.upsertAll(it) }
+                val retainedIds = playlistChannels?.let {
+                    EpgProgrammeChannelFilter.matchingEpgIds(it, aliases)
+                }
+                val aliasesToKeep = if (retainedIds == null) {
+                    aliases
+                } else {
+                    aliases.filter { it.epgId in retainedIds }
+                }
+                if (aliasesToKeep.isNotEmpty()) {
+                    aliasesToKeep.chunked(BATCH_SIZE).forEach { aliasDao.upsertAll(it) }
+                }
+
+                if (retainedIds != null) {
+                    written = EpgProgrammeChannelFilter.retainOnly(
+                        programmeDao = programmeDao,
+                        feedId = stagingFeedId,
+                        retainedEpgIds = retainedIds,
+                    )
                 }
 
                 if (written == 0) {
-                    return FeedResult.Failed("Downloaded, but contained no programmes in the configured guide window.")
+                    val reason = if (playlistChannels == null) {
+                        "Downloaded, but contained no programmes in the configured guide window."
+                    } else {
+                        "No programmes matched the current M3U channels; the previous guide was kept."
+                    }
+                    return FeedResult.Failed(reason)
+                }
+                val channelCount = if (playlistChannels == null) {
+                    stats.channelCount
+                } else {
+                    programmeDao.channelIdsForFeed(stagingFeedId).size
                 }
                 // The old guide is authoritative until the replacement is complete. This swap
                 // covers programmes and aliases atomically, so readers never observe an empty or
@@ -364,7 +409,11 @@ class EpgRepository(
                     aliasDao.moveFromFeed(stagingFeedId, feed.id)
                 }
                 committed = true
-                return FeedResult.Success(written, stats.channelCount)
+                return FeedResult.Success(
+                    programmes = written,
+                    channels = channelCount,
+                    playlistScoped = playlistChannels != null,
+                )
             }
         } catch (e: CancellationException) {
             throw e
@@ -387,6 +436,37 @@ class EpgRepository(
         }
     }
 
+    /** Only M3U provider/discovered feeds are scoped; manual and built-in feeds stay global. */
+    private suspend fun m3uSourceIdFor(feed: EpgFeed): Long? {
+        feed.playlistSourceId?.let { return it }
+        val providerSourceId = feed.providerSourceId ?: return null
+        return sourceDao.byId(providerSourceId)
+            ?.takeIf { it.kind == SourceKind.M3U }
+            ?.id
+    }
+
+    /** Marks M3U feeds due without deleting the old snapshot before a replacement succeeds. */
+    private suspend fun markPlaylistFeedsForRefresh(
+        sourceId: Long,
+        playlistInputsChanged: Boolean,
+    ) {
+        val feeds = buildList {
+            feedDao.forProvider(sourceId)?.let { add(it) }
+            addAll(feedDao.discoveredForPlaylist(sourceId))
+        }.distinctBy { it.id }
+
+        for (feed in feeds) {
+            val previouslyFiltered = feed.lastResult.endsWith(M3U_FILTER_STATUS_SUFFIX)
+            if (playlistInputsChanged || !previouslyFiltered) {
+                feedDao.markSynced(
+                    feed.id,
+                    0L,
+                    "M3U channels or guide URLs changed; refresh pending.",
+                )
+            }
+        }
+    }
+
     /**
      * Opens a feed as a decompressed XML stream.
      *
@@ -400,15 +480,31 @@ class EpgRepository(
             feed.providerSourceId != null -> {
                 val stored: Source = sourceDao.byId(feed.providerSourceId)
                     ?: throw IllegalStateException("Provider for this guide no longer exists.")
-                val source = stored.copy(
-                    url = HttpsUrlPolicy.withDefaultHttps(stored.url),
-                    epgUrl = stored.epgUrl?.let(HttpsUrlPolicy::withDefaultHttps),
-                )
-                HttpsUrlPolicy.requireHttps(source.epgUrl?.takeIf { it.isNotBlank() } ?: source.url)
-                api.openEpgStream(source)
+                if (stored.kind == SourceKind.M3U) {
+                    val rawGuideUrl = stored.epgUrl?.takeIf { it.isNotBlank() }
+                        ?: throw IllegalStateException("This M3U playlist does not declare an XMLTV guide URL.")
+                    val secureUrl = GitHubRawResourceUrl.toDirectRawUrl(
+                        HttpsUrlPolicy.withDefaultHttps(rawGuideUrl),
+                    )
+                    val trustedOriginUrl = stored.url.takeIf {
+                        NetworkDestinationPolicy.originOf(it) == NetworkDestinationPolicy.originOf(secureUrl)
+                    }
+                    openHttpGuideStream(secureUrl, stored.userAgent, trustedOriginUrl)
+                } else {
+                    val source = stored.copy(
+                        url = HttpsUrlPolicy.withDefaultHttps(stored.url),
+                        epgUrl = stored.epgUrl
+                            ?.let(HttpsUrlPolicy::withDefaultHttps)
+                            ?.let(GitHubRawResourceUrl::toDirectRawUrl),
+                    )
+                    HttpsUrlPolicy.requireHttps(source.epgUrl?.takeIf { it.isNotBlank() } ?: source.url)
+                    api.openEpgStream(source)
+                }
             }
             feed.url != null -> {
-                val secureUrl = HttpsUrlPolicy.withDefaultHttps(feed.url)
+                val secureUrl = GitHubRawResourceUrl.toDirectRawUrl(
+                    HttpsUrlPolicy.withDefaultHttps(feed.url),
+                )
                 try {
                     HttpsUrlPolicy.requireHttps(secureUrl)
                 } catch (_: app.opentv.data.remote.HttpsRequiredException) {
@@ -421,24 +517,7 @@ class EpgRepository(
                     }?.url
                     else -> secureUrl // A manually entered feed is an explicit user choice.
                 }
-                val scope = NetworkDestinationPolicy.scopeFor(secureUrl, trustedOriginUrl)
-                    ?: throw IllegalStateException("Guide destination is not allowed.")
-                val response = http.newCall(
-                    Request.Builder()
-                        .url(secureUrl)
-                        .tag(NetworkDestinationPolicy.RequestScope::class.java, scope)
-                        .build(),
-                ).execute()
-                if (!response.isSuccessful) {
-                    response.close()
-                    throw IllegalStateException("Guide download failed (HTTP ${response.code}).")
-                }
-                val body = response.body ?: throw IllegalStateException("The server returned an empty guide.")
-                if (body.contentLength() > MAX_COMPRESSED_BYTES) {
-                    response.close()
-                    throw IllegalStateException("Guide download exceeds the safety limit.")
-                }
-                body.byteStream()
+                openHttpGuideStream(secureUrl, null, trustedOriginUrl)
             }
             else -> throw IllegalStateException("Feed has no URL and no provider.")
         }
@@ -463,6 +542,37 @@ class EpgRepository(
             else -> buffered
         }
         return BoundedInputStream(expanded, MAX_XML_BYTES, "Expanded XMLTV guide")
+    }
+
+    /** Fetches one HTTPS guide URL with DNS/redirect guards and the common compressed-size limit. */
+    private fun openHttpGuideStream(
+        secureUrl: String,
+        userAgent: String?,
+        trustedOriginUrl: String?,
+    ): InputStream {
+        try {
+            HttpsUrlPolicy.requireHttps(secureUrl)
+        } catch (_: app.opentv.data.remote.HttpsRequiredException) {
+            throw IllegalStateException(HTTPS_REQUIRED_RESULT)
+        }
+        val scope = NetworkDestinationPolicy.scopeFor(secureUrl, trustedOriginUrl)
+            ?: throw IllegalStateException("Guide destination is not allowed.")
+        val request = Request.Builder()
+            .url(secureUrl)
+            .apply { userAgent?.takeIf(String::isNotBlank)?.let { header("User-Agent", it) } }
+            .tag(NetworkDestinationPolicy.RequestScope::class.java, scope)
+            .build()
+        val response = http.newCall(request).execute()
+        if (!response.isSuccessful) {
+            response.close()
+            throw IllegalStateException("Guide download failed (HTTP ${response.code}).")
+        }
+        val body = response.body ?: throw IllegalStateException("The server returned an empty guide.")
+        if (body.contentLength() > MAX_COMPRESSED_BYTES) {
+            response.close()
+            throw IllegalStateException("Guide download exceeds the safety limit.")
+        }
+        return body.byteStream()
     }
 
     // ---- Matching --------------------------------------------------------------------------

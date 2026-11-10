@@ -59,6 +59,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Subtitles
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
@@ -110,11 +111,17 @@ import app.opentv.core.requestIgnoreBatteryOptimizations
 import app.opentv.data.model.Channel
 import app.opentv.data.model.Programme
 import app.opentv.data.model.shownName
+import app.opentv.player.LiveAudioTap
+import app.opentv.player.LiveCaptionEngine
+import app.opentv.player.LiveCaptionError
+import app.opentv.player.LiveCaptionPhase
+import app.opentv.player.LiveCaptionState
 import app.opentv.player.PlaybackQueue
 import app.opentv.player.PlayerController
 import app.opentv.player.ProvidedSubtitleTranslationEngine
 import app.opentv.player.ProvidedSubtitleTranslationPhase
 import app.opentv.player.ProvidedSubtitleTranslationState
+import app.opentv.player.SpeechLanguage
 import app.opentv.player.YouTubeChannelUrl
 import app.opentv.security.ParentalAuthorization
 import app.opentv.ui.RecordingBackgroundDialog
@@ -178,19 +185,33 @@ fun PlayerScreen(
         subtitleTranslationEngine?.state ?: MutableStateFlow(ProvidedSubtitleTranslationState())
     }
     val subtitleTranslationState by subtitleTranslationStateFlow.collectAsState()
-    val controller = remember {
+    val liveAudioTap = remember { LiveAudioTap() }
+    val liveCaptionEngine = remember(liveAudioTap) {
+        LiveCaptionEngine(context, graph.streamingHttpClient, liveAudioTap)
+    }
+    val liveCaptionState by liveCaptionEngine.state.collectAsState()
+    val controller = remember(liveAudioTap) {
         PlayerController(
             context, scope, graph.streamingHttpClient,
             subtitlesEnabled = settings.subtitlesEnabled.value,
             // Opt-in shallow DVR so the transport's pause/rewind actually holds on a live stream.
             dvr = settings.livePauseEnabled.value,
+            liveAudioTap = liveAudioTap,
         )
     }
     val state by controller.state.collectAsState()
     val tracks by controller.tracks.collectAsState()
+    val detectedAudioLanguage = remember(tracks) { selectedAudioTrackSpeechLanguage(tracks) }
     val sourceSubtitleCueTexts by controller.subtitleCueTexts.collectAsState()
     LaunchedEffect(subtitleTranslationEngine, sourceSubtitleCueTexts) {
         subtitleTranslationEngine?.submitCues(sourceSubtitleCueTexts)
+    }
+    LaunchedEffect(detectedAudioLanguage, liveCaptionState.automaticLanguageSelection, liveCaptionState.language) {
+        if (liveCaptionState.isActive && liveCaptionState.automaticLanguageSelection &&
+            detectedAudioLanguage != null && detectedAudioLanguage != liveCaptionState.language
+        ) {
+            liveCaptionEngine.startAutomatically(detectedAudioLanguage)
+        }
     }
     // What's recording right now, so the Record button can show as armed for this channel.
     val activeRecordings by graph.recordingRepository.observeActive().collectAsState(initial = emptyList())
@@ -208,7 +229,12 @@ fun PlayerScreen(
             view.keepScreenOn = false
         }
     }
-    DisposableEffect(controller) { onDispose { controller.release() } }
+    DisposableEffect(controller, liveCaptionEngine) {
+        onDispose {
+            liveCaptionEngine.close()
+            controller.release()
+        }
+    }
     DisposableEffect(subtitleTranslationEngine) { onDispose { subtitleTranslationEngine?.close() } }
     DisposableEffect(scope) { onDispose { scope.cancel() } }
 
@@ -252,6 +278,9 @@ fun PlayerScreen(
         }
     }
     LaunchedEffect(paused) { app.opentv.core.PipState.isPlaying = !paused }
+    LaunchedEffect(inPip) {
+        if (inPip) liveCaptionEngine.stop()
+    }
     val barFocus = remember { FocusRequester() }
     val panelFocus = remember { FocusRequester() }
     val rootFocus = remember { FocusRequester() }
@@ -321,6 +350,7 @@ fun PlayerScreen(
     }
 
     fun tuneTo(channel: Channel) {
+        liveCaptionEngine.stop()
         tuneJob?.cancel()
         tuneJob = scope.launch {
             val hiddenCategoryIds = ParentalAuthorization.hiddenCategoryIds(
@@ -583,17 +613,24 @@ fun PlayerScreen(
                 detectTapGestures { if (controlsVisible) controlsVisible = false else reveal() }
             },
     ) {
+        val hideOriginalSubtitles = !inPip && (
+            (liveCaptionState.isActive && liveCaptionState.caption.isNotBlank()) ||
+                (liveCaptionState.phase == LiveCaptionPhase.OFF &&
+                    translateProvidedSubtitles && subtitleTranslationState.caption.isNotBlank())
+            )
+        // Snapshot the primitive during composition so AndroidView receives an updated callback
+        // when the user changes the mode and the options panel closes.
+        val viewResizeMode = resizeMode
         AndroidView(
             modifier = Modifier.fillMaxSize(),
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     player = controller.player
                     useController = false
+                    resizeMode = viewResizeMode
                     subtitleView?.setUserDefaultStyle()
                     subtitleView?.setUserDefaultTextSize()
-                    subtitleView?.visibility = if (
-                        translateProvidedSubtitles && subtitleTranslationState.caption.isNotBlank() && !inPip
-                    ) View.INVISIBLE else View.VISIBLE
+                    subtitleView?.visibility = if (hideOriginalSubtitles) View.INVISIBLE else View.VISIBLE
                     layoutParams = ViewGroup.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
                         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -601,10 +638,8 @@ fun PlayerScreen(
                 }
             },
             update = {
-                it.resizeMode = resizeMode
-                it.subtitleView?.visibility = if (
-                    translateProvidedSubtitles && subtitleTranslationState.caption.isNotBlank() && !inPip
-                ) View.INVISIBLE else View.VISIBLE
+                it.resizeMode = viewResizeMode
+                it.subtitleView?.visibility = if (hideOriginalSubtitles) View.INVISIBLE else View.VISIBLE
             },
         )
 
@@ -626,7 +661,50 @@ fun PlayerScreen(
             )
         }
 
-        if (subtitleTranslationEngine != null && !inPip) {
+        if (liveCaptionState.phase != LiveCaptionPhase.OFF && !inPip) {
+            val liveCaptionText = liveCaptionState.caption.ifBlank {
+                liveCaptionStatusText(liveCaptionState)
+            }
+            if (liveCaptionText.isNotBlank()) {
+                Box(
+                    Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(
+                            start = 28.dp,
+                            end = 28.dp,
+                            bottom = when {
+                                controlsVisible && interfaceStyle in setOf(
+                                    app.opentv.core.AppSettings.InterfaceStyle.LINEAR_AUTOHIDE,
+                                    app.opentv.core.AppSettings.InterfaceStyle.BOTTOM_INFO_DRAWER,
+                                ) -> 330.dp
+                                controlsVisible -> 182.dp
+                                else -> 56.dp
+                            },
+                        )
+                        .widthIn(max = 1_080.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black.copy(alpha = 0.82f))
+                        .padding(horizontal = 22.dp, vertical = 14.dp),
+                ) {
+                    Text(
+                        liveCaptionText,
+                        color = Color.White,
+                        style = if (liveCaptionState.caption.isNotBlank()) {
+                            MaterialTheme.typography.headlineSmall
+                        } else {
+                            MaterialTheme.typography.labelLarge
+                        },
+                        textAlign = TextAlign.Center,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+
+        if (subtitleTranslationEngine != null && !inPip &&
+            (!liveCaptionState.isActive || liveCaptionState.caption.isBlank())
+        ) {
             val subtitleStatus = when (subtitleTranslationState.phase) {
                 ProvidedSubtitleTranslationPhase.WAITING_FOR_SOURCE_SUBTITLES ->
                     stringResource(R.string.player_ai_subtitles_waiting)
@@ -786,6 +864,9 @@ fun PlayerScreen(
                         panel = panel,
                         controller = controller,
                         settings = settings,
+                        liveCaptionEngine = liveCaptionEngine,
+                        liveCaptionState = liveCaptionState,
+                        detectedAudioLanguage = detectedAudioLanguage,
                         tracks = tracks,
                         variants = variants,
                         currentId = currentId,
@@ -856,6 +937,17 @@ fun PlayerScreen(
                         onAccentColor = controlOnAccent,
                     ) {
                         panel = if (panel == Panel.SUBTITLES) Panel.NONE else Panel.SUBTITLES; interaction++
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    BarChip(
+                        icon = Icons.Filled.Translate,
+                        label = stringResource(R.string.player_live_captions),
+                        selected = panel == Panel.LIVE_CAPTIONS || liveCaptionState.isActive,
+                        accentColor = controlAccent,
+                        onAccentColor = controlOnAccent,
+                    ) {
+                        panel = if (panel == Panel.LIVE_CAPTIONS) Panel.NONE else Panel.LIVE_CAPTIONS
+                        interaction++
                     }
                     Spacer(Modifier.width(10.dp))
                     BarChip(
@@ -1071,7 +1163,7 @@ private fun ChannelListRow(
     }
 }
 
-private enum class Panel { NONE, SUBTITLES, AUDIO, QUALITY, ASPECT }
+private enum class Panel { NONE, SUBTITLES, LIVE_CAPTIONS, AUDIO, QUALITY, ASPECT }
 
 @OptIn(UnstableApi::class)
 @Composable
@@ -1079,6 +1171,9 @@ private fun OptionPanel(
     panel: Panel,
     controller: PlayerController,
     settings: app.opentv.core.AppSettings,
+    liveCaptionEngine: LiveCaptionEngine,
+    liveCaptionState: LiveCaptionState,
+    detectedAudioLanguage: SpeechLanguage?,
     tracks: Tracks,
     variants: List<Channel>,
     currentId: Long?,
@@ -1089,12 +1184,22 @@ private fun OptionPanel(
     onDone: () -> Unit,
 ) {
     val offLabel = stringResource(R.string.player_subtitles_off)
+    val liveCaptionOffLabel = stringResource(R.string.player_live_captions_off)
+    val liveCaptionAutoLabel = stringResource(R.string.player_live_captions_auto)
     val standardLabel = stringResource(R.string.player_quality_standard)
     val fitLabel = stringResource(R.string.player_aspect_fit)
     val fillLabel = stringResource(R.string.player_aspect_fill)
     val stretchLabel = stringResource(R.string.player_aspect_stretch)
     val options: List<Option> = when (panel) {
         Panel.SUBTITLES -> buildSubtitleOptions(controller, settings, tracks, offLabel, onDone)
+        Panel.LIVE_CAPTIONS -> buildLiveCaptionOptions(
+            liveCaptionEngine,
+            liveCaptionState,
+            liveCaptionOffLabel,
+            liveCaptionAutoLabel,
+            detectedAudioLanguage,
+            onDone,
+        )
         Panel.AUDIO -> buildAudioOptions(controller, tracks, onDone)
         Panel.QUALITY -> variants.map { v ->
             Option(v.qualityLabel.ifEmpty { standardLabel }, v.id == currentId) { onTune(v); onDone() }
@@ -1115,6 +1220,7 @@ private fun OptionPanel(
 
     val title = when (panel) {
         Panel.SUBTITLES -> stringResource(R.string.player_subtitles)
+        Panel.LIVE_CAPTIONS -> stringResource(R.string.player_live_captions_title)
         Panel.AUDIO -> stringResource(R.string.player_audio)
         Panel.QUALITY -> stringResource(R.string.player_quality)
         Panel.ASPECT -> stringResource(R.string.player_aspect_ratio_title)
@@ -1129,6 +1235,20 @@ private fun OptionPanel(
             .padding(16.dp),
     ) {
         Text(title, style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = 0.7f))
+        if (panel == Panel.LIVE_CAPTIONS) {
+            Text(
+                liveCaptionStatusText(liveCaptionState),
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.72f),
+                modifier = Modifier.padding(top = 4.dp, bottom = 4.dp),
+            )
+            Text(
+                stringResource(R.string.player_live_captions_privacy),
+                style = MaterialTheme.typography.bodySmall,
+                color = Color.White.copy(alpha = 0.55f),
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+        }
         Spacer(Modifier.height(8.dp))
         Column(
             Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()),
@@ -1150,6 +1270,81 @@ private fun OptionPanel(
 }
 
 private data class Option(val label: String, val selected: Boolean, val onClick: () -> Unit)
+
+private fun buildLiveCaptionOptions(
+    engine: LiveCaptionEngine,
+    state: LiveCaptionState,
+    offLabel: String,
+    autoLabel: String,
+    detectedAudioLanguage: SpeechLanguage?,
+    onDone: () -> Unit,
+): List<Option> = buildList {
+    add(Option(offLabel, !state.isActive) {
+        engine.stop()
+        onDone()
+    })
+    add(Option(autoLabel, state.isActive && state.automaticLanguageSelection) {
+        engine.startAutomatically(detectedAudioLanguage)
+        onDone()
+    })
+    SpeechLanguage.entries.forEach { language ->
+        add(Option(
+            language.displayName,
+            state.isActive && !state.automaticLanguageSelection && state.language == language,
+        ) {
+            engine.start(language)
+            onDone()
+        })
+    }
+}
+
+@Composable
+private fun liveCaptionStatusText(state: LiveCaptionState): String {
+    val status = when (state.phase) {
+        LiveCaptionPhase.OFF -> stringResource(R.string.player_live_captions_inactive)
+        LiveCaptionPhase.PREPARING_SPEECH_MODEL ->
+            stringResource(R.string.player_live_captions_preparing_speech)
+        LiveCaptionPhase.DOWNLOADING_SPEECH_MODEL -> state.progressPercent?.let { progress ->
+            stringResource(R.string.player_live_captions_downloading_speech_progress, progress)
+        } ?: stringResource(R.string.player_live_captions_downloading_speech)
+        LiveCaptionPhase.LOADING_SPEECH_MODEL ->
+            stringResource(R.string.player_live_captions_loading_speech)
+        LiveCaptionPhase.DOWNLOADING_TRANSLATION_MODEL ->
+            stringResource(R.string.player_live_captions_downloading_translation)
+        LiveCaptionPhase.WAITING_FOR_AUDIO ->
+            stringResource(R.string.player_live_captions_waiting_audio)
+        LiveCaptionPhase.LISTENING -> when (state.error) {
+            LiveCaptionError.TRANSLATION_MODEL ->
+                stringResource(R.string.player_live_captions_translation_fallback)
+            else -> stringResource(R.string.player_live_captions_listening)
+        }
+        LiveCaptionPhase.TRANSCRIBING ->
+            stringResource(R.string.player_live_captions_transcribing)
+        LiveCaptionPhase.TRANSLATING ->
+            stringResource(R.string.player_live_captions_translating)
+        LiveCaptionPhase.ERROR -> when (state.error) {
+            LiveCaptionError.LOW_MEMORY ->
+                stringResource(R.string.player_live_captions_error_memory)
+            LiveCaptionError.SPEECH_MODEL ->
+                stringResource(R.string.player_live_captions_error_speech_model)
+            LiveCaptionError.TRANSLATION_MODEL ->
+                stringResource(R.string.player_live_captions_error_translation_model)
+            LiveCaptionError.LANGUAGE_METADATA_MISSING ->
+                stringResource(R.string.player_live_captions_error_language_unknown)
+            else -> stringResource(R.string.player_live_captions_error_recognition)
+        }
+    }
+
+    return if (state.automaticLanguageSelection && state.phase != LiveCaptionPhase.ERROR) {
+        stringResource(
+            R.string.player_live_captions_auto_status,
+            state.language.displayName,
+            status,
+        )
+    } else {
+        status
+    }
+}
 
 @OptIn(UnstableApi::class)
 private fun buildSubtitleOptions(
@@ -1200,6 +1395,19 @@ private fun buildAudioOptions(
         }
     }
     return list
+}
+
+@OptIn(UnstableApi::class)
+private fun selectedAudioTrackSpeechLanguage(tracks: Tracks): SpeechLanguage? {
+    for (group in tracks.groups) {
+        if (group.type != C.TRACK_TYPE_AUDIO) continue
+        for (index in 0 until group.length) {
+            if (!group.isTrackSelected(index)) continue
+            SpeechLanguage.fromAudioTrackLanguageTag(group.getTrackFormat(index).language)
+                ?.let { return it }
+        }
+    }
+    return null
 }
 
 private fun trackLabel(label: String?, language: String?, index: Int): String {

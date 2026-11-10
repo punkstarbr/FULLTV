@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.11.39 (release pública manual) — 2026-11-10
+
+- **Legendas ao vivo (experimental):** transcrição local e opcional do áudio já decodificado pelo player usando Vosk, com tradução para português pelo ML Kit. Começa desligada, não usa microfone, não grava nem envia áudio/transcrições e baixa modelos sob demanda. A seleção Automático usa somente o idioma declarado na faixa, não identificação acústica. A tradução de legendas textuais fornecidas pelo canal permanece separada.
+- **Estabilidade/memória das legendas:** PCM mono 16 kHz, gate de fala/silêncio e fila limitada; fecha reconhecedor ao trocar de canal, sair ou entrar em PiP e bloqueia aparelhos com pouca memória. Códigos-base de idioma aceitos pelo ML Kit são usados para a tradução.
+- **EPG por M3U:** guarda somente programas/aliases de `tvg-id`/override presentes na lista ou de nomes com correspondência inequívoca. Preserva o snapshot anterior se a sincronização falhar ou não encontrar programas compatíveis. Detecta mudanças de canais e URLs de guia na mesma URL M3U; feeds de listas diferentes têm escopos filtrados separados. Feeds globais/manuais permanecem globais e podem fazer download paralelo da mesma URL. Mantém HTTPS/SSRF, canonicalização GitHub e cota EPG separada de origens de mídia.
+- **M3U/YouTube e player:** aumenta de 5 para 10 o limite de buscas `/results` por playlist; corrige a aplicação do modo de proporção escolhido no PlayerView.
+- **Inicialização diagnóstica:** não agenda a sincronização automática de EPG no cold start; atualização manual e sincronização periódica continuam. Esta alteração investiga o fechamento observado somente com internet, mas não confirma a causa nem comprova a correção no Moto G84.
+- **Validação:** 236/236 testes Android e 13/13 Python passaram; `assembleDebug`, `lintVitalRelease` e `assembleRelease` concluíram com sucesso. Não houve teste físico no Moto G84 nem verificação de download dos guias XMLTV remotos.
+- **APK universal:** `app.fulltv`, versionCode 51, minSdk 24, targetSdk 35, quatro ABIs; 205.718.925 bytes; SHA-256 `5f37c1b1f1624bc444b11fe7fa8bc7b9eef1a0cebe7f3e6f339a10f7245f0394`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. A publicação desta versão com o certificado legado foi autorizada especificamente em 2026-11-10; não é assinatura de produção nem autorização para reutilizá-lo em versões futuras.
+
+## 0.11.38 (APK local para teste no Moto G84) — 2026-11-08
+
+- **Inicialização:** adia a primeira atualização periódica do catálogo e evita reagendar o trabalho periódico a cada abertura; a prévia Live TV aguarda foco em um canal. O refresh manual continua disponível.
+- **Status:** build local de diagnóstico; nunca publicada. A v0.11.39 é a release pública atual.
+- **Compatibilidade:** `app.fulltv`, versionCode 50, minSdk 24, targetSdk 35, quatro ABIs. Certificado legado Android Debug autorizado especificamente para gerar este APK local; não é assinatura de produção.
+- **Testes/build:** 207/207 testes Kotlin e 13/13 testes Python; `assembleDebug`, `lintVitalRelease` e `assembleRelease` passaram. Build Gradle limpo concluído.
+- **APK universal:** 165.282.451 bytes; SHA-256 `8f34428fea0d6c938b4fa606cc7a0227c0b9e006dd918e06002f0fd8c23921b6`; fingerprint do certificado `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. As 100 bibliotecas nativas passaram verificação de alinhamento ZIP 16 KiB.
+- **Limite:** não foi testado fisicamente no Moto G84; este APK serve para validar se as mitigações ajudam no aparelho.
+
 ## 0.11.37 (híbrida .31 + M3U GitHub .32) — 2026-11-08
 
 - **Comportamento base:** preserva o player/preview da v0.11.31 (prévia usa `graph.httpClient`) e não inclui Globoplay nem transcrição Whisper.

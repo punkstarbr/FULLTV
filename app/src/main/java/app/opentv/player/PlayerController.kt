@@ -90,6 +90,8 @@ class PlayerController(
      * is a network round-trip — rides over the gaps instead of stalling on every one.
      */
     private val liveRecording: Boolean = false,
+    /** Optional fullscreen-only PCM tee for user-activated on-device speech captions. */
+    private val liveAudioTap: LiveAudioTap? = null,
 ) {
 
     private val appContext = context.applicationContext
@@ -195,7 +197,11 @@ class PlayerController(
             .build()
     }
 
-    val player: ExoPlayer = ExoPlayer.Builder(context)
+    private val exoPlayerBuilder = liveAudioTap?.let {
+        ExoPlayer.Builder(context, LiveCaptionRenderersFactory(context, it))
+    } ?: ExoPlayer.Builder(context)
+
+    val player: ExoPlayer = exoPlayerBuilder
         .setSeekBackIncrementMs(SEEK_INCREMENT_MILLIS)
         .setSeekForwardIncrementMs(SEEK_INCREMENT_MILLIS)
         .setMediaSourceFactory(
@@ -282,6 +288,7 @@ class PlayerController(
     fun play(request: Request, debounce: Boolean = true) {
         // Cancelling here is what makes fast channel-changing safe: the previous switch never
         // reaches the player, so we never stack prepares.
+        liveAudioTap?.clearBufferedAudio()
         switchJob?.cancel()
         current = request
         _subtitleCueTexts.value = emptyList()
@@ -463,6 +470,7 @@ class PlayerController(
     fun release() {
         switchJob?.cancel()
         player.release()
+        liveAudioTap?.close()
     }
 
     private companion object {

@@ -74,7 +74,7 @@ class ReleaseSigningVerifierTest(unittest.TestCase):
 
     def test_legacy_debug_certificate_is_rejected_without_explicit_opt_in(self):
         with tempfile.NamedTemporaryFile() as keystore:
-            result = self.run_verifier(self.base_values(keystore.name, LEGACY_CERT), "0.11.26", 38)
+            result = self.run_verifier(self.base_values(keystore.name, LEGACY_CERT), "0.11.39", 51)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("blocked by default", result.stderr)
 
@@ -94,6 +94,8 @@ class ReleaseSigningVerifierTest(unittest.TestCase):
                 ("0.11.35", 47),
                 ("0.11.36", 48),
                 ("0.11.37", 49),
+                ("0.11.38", 50),
+                ("0.11.39", 51),
             ):
                 values = self.base_values(keystore.name, LEGACY_CERT)
                 values[LEGACY_OPT_IN] = "1"
@@ -113,7 +115,7 @@ class ReleaseSigningVerifierTest(unittest.TestCase):
         with tempfile.NamedTemporaryFile() as keystore:
             values = self.base_values(keystore.name, LEGACY_CERT)
             values[LEGACY_OPT_IN] = "1"
-            result = self.run_verifier(values, "0.11.38", 50)
+            result = self.run_verifier(values, "0.11.40", 52)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("blocked by default", result.stderr)
 
@@ -124,7 +126,7 @@ class ReleaseSigningVerifierTest(unittest.TestCase):
             result = self.run_verifier(values, "0.11.25", 37)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn(
-            "limited to v0.11.25/code37, v0.11.26/code38, v0.11.27/code39, v0.11.28/code40, v0.11.29/code41, v0.11.30/code42, v0.11.31/code43, v0.11.32/code44, v0.11.33/code45, v0.11.34/code46, v0.11.35/code47, v0.11.36/code48, or v0.11.37/code49",
+            "limited to v0.11.25/code37, v0.11.26/code38, v0.11.27/code39, v0.11.28/code40, v0.11.29/code41, v0.11.30/code42, v0.11.31/code43, v0.11.32/code44, v0.11.33/code45, v0.11.34/code46, v0.11.35/code47, v0.11.36/code48, v0.11.37/code49, the local test build v0.11.38/code50, or the one-time authorized public v0.11.39/code51 release",
             result.stderr,
         )
 

@@ -152,6 +152,7 @@
     <string name="player_pause">Pause</string>
     <string name="player_forward">Forward</string>
     <string name="player_subtitles">Subtitles</string>
+    <string name="player_live_captions" tools:ignore="MissingTranslation">Live captions</string>
     <string name="player_audio">Audio</string>
     <string name="player_quality">Quality</string>
     <string name="player_aspect">Aspect</string>
@@ -176,6 +177,27 @@
     <string name="player_ai_subtitles_processing">Translating the channel subtitles…</string>
     <string name="player_ai_subtitles_translating">Downloading the translation model…</string>
     <string name="player_ai_subtitles_error">Translation unavailable. The channel’s original subtitles remain visible.</string>
+    <string name="player_live_captions_title" tools:ignore="MissingTranslation">Live speech captions</string>
+    <string name="player_live_captions_off" tools:ignore="MissingTranslation">Turn off live captions</string>
+    <string name="player_live_captions_inactive" tools:ignore="MissingTranslation">Off. Choose the spoken language or try automatic track-language selection.</string>
+    <string name="player_live_captions_auto" tools:ignore="MissingTranslation">Automatic (audio-track language, if provided)</string>
+    <string name="player_live_captions_auto_status" tools:ignore="MissingTranslation">Language declared by audio track: %1$s. %2$s</string>
+    <string name="player_live_captions_preparing_speech" tools:ignore="MissingTranslation">Preparing the speech model…</string>
+    <string name="player_live_captions_downloading_speech" tools:ignore="MissingTranslation">Downloading the speech model…</string>
+    <string name="player_live_captions_downloading_speech_progress" tools:ignore="MissingTranslation">Downloading the speech model: %1$d%%</string>
+    <string name="player_live_captions_loading_speech" tools:ignore="MissingTranslation">Loading the speech model… This may take a moment.</string>
+    <string name="player_live_captions_downloading_translation" tools:ignore="MissingTranslation">Downloading the Portuguese translation model…</string>
+    <string name="player_live_captions_waiting_audio" tools:ignore="MissingTranslation">Live captions are on; waiting for channel audio…</string>
+    <string name="player_live_captions_listening" tools:ignore="MissingTranslation">Listening for speech…</string>
+    <string name="player_live_captions_transcribing" tools:ignore="MissingTranslation">Recognizing speech…</string>
+    <string name="player_live_captions_translating" tools:ignore="MissingTranslation">Translating to Portuguese…</string>
+    <string name="player_live_captions_translation_fallback" tools:ignore="MissingTranslation">Translation unavailable; showing recognized speech.</string>
+    <string name="player_live_captions_error_memory" tools:ignore="MissingTranslation">This device may not have enough memory for live speech captions.</string>
+    <string name="player_live_captions_error_speech_model" tools:ignore="MissingTranslation">Could not download or load the speech model. Check storage and connection, then retry.</string>
+    <string name="player_live_captions_error_translation_model" tools:ignore="MissingTranslation">Could not prepare the Portuguese translation model. Try again while online.</string>
+    <string name="player_live_captions_error_language_unknown" tools:ignore="MissingTranslation">This channel does not declare an audio language. Choose the spoken language manually.</string>
+    <string name="player_live_captions_error_recognition" tools:ignore="MissingTranslation">Speech recognition stopped. Try enabling live captions again.</string>
+    <string name="player_live_captions_privacy" tools:ignore="MissingTranslation">Uses only audio decoded by the player. Does not use the microphone.</string>
 
     <!-- ============================ Settings hub ============================ -->
     <string name="settings_providers_title">Providers</string>

@@ -16,8 +16,8 @@ val releaseKeyPassword = providers.environmentVariable("KEY_PASSWORD").orNull
 val releaseCertificateSha256 = providers.environmentVariable("RELEASE_CERT_SHA256").orNull
     ?.trim()
     ?.lowercase()
-val fullTvVersionName = "0.11.37"
-val fullTvVersionCode = 49
+val fullTvVersionName = "0.11.39"
+val fullTvVersionCode = 51
 val hasReleaseSigning = releaseKeystorePath?.let { it.isNotBlank() && file(it).isFile } == true &&
     !releaseKeystorePassword.isNullOrBlank() &&
     !releaseKeyAlias.isNullOrBlank() &&
@@ -263,6 +263,7 @@ dependencies {
     implementation(libs.media3.transformer)
     implementation(libs.mlkit.translation)
     implementation(libs.mlkit.language.id)
+    implementation(libs.vosk.android)
 
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)

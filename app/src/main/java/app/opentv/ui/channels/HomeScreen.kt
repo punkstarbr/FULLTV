@@ -285,6 +285,8 @@ fun HomeScreen(
     // One muted player, reused. It only ever decodes while the guide is the foreground screen,
     // and is stopped before any hand-off to full-screen, so the box never runs two decoders at
     // once — the thing that used to lock up cheap sticks.
+    // Do not autoplay the first item after a background catalogue refresh; arm preview on real focus.
+    var previewArmed by remember { mutableStateOf(false) }
     val previewScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate) }
     val previewController = remember {
         PlayerController(context, previewScope, graph.httpClient, subtitlesEnabled = false, preview = true)
@@ -357,9 +359,9 @@ fun HomeScreen(
     // While a recording is running the preview is silenced entirely: on a single-connection line a
     // muted preview is still a second stream, which fights the recording and risks a provider ban.
     val recordingActive = activeRecordings.isNotEmpty()
-    LaunchedEffect(highlightedRow?.key, previewEnabledForLayout, screenResumed, recordingActive) {
+    LaunchedEffect(highlightedRow?.key, previewEnabledForLayout, screenResumed, recordingActive, previewArmed) {
         val row = highlightedRow
-        if (!previewEnabledForLayout || !screenResumed || recordingActive || row == null) {
+        if (!previewEnabledForLayout || !previewArmed || !screenResumed || recordingActive || row == null) {
             previewController.stop()
             return@LaunchedEffect
         }
@@ -558,6 +560,7 @@ fun HomeScreen(
                 // from the leftmost element reopens the rail (consumed only when it was hidden).
                 val onFocusChannel: (ChannelsViewModel.Row) -> Unit = {
                     highlightedRow = it
+                    previewArmed = true
                     pendingRailFocus = false
                     railExpanded = false
                 }

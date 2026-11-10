@@ -95,9 +95,25 @@ a cheap TV stick, and `String`-based parsing is an OOM waiting to happen.
 `x-tvg-url` attributes, splits multiple URLs in one value, and de-duplicates in first-seen order.
 The first URL remains the source guide; every other unique URL is imported and enabled
 automatically. Existing feed toggles are preserved, and a URL removed from the playlist also loses
-its stored guide rows. This can generate large network and storage use for multi-region lists;
+its stored guide rows. A guide URL declared by different M3Us gets a playlist-owned feed row per
+source, so each source retains its own channel-filtered snapshot. Manually configured and built-in
+feeds remain global; if the same URL is also declared by an M3U, both feed scopes exist and may
+download that URL separately. For provider/discovered feeds associated with an M3U, FullTV keeps programme
+rows and XMLTV aliases only for IDs supplied by that playlist or an unambiguous name match against
+its current channels. It still downloads, parses and temporarily stages the full XMLTV file. The old
+snapshot is replaced only after a non-empty filtered result succeeds; a download/parse failure or no
+matching programmes leaves the old guide intact. This reduces steady-state database storage, not
+network transfer, parsing time, or peak temporary staging space.
+The guide-input signature is recalculated from each downloaded playlist, even when its URL stays the
+same. Changes to channel IDs/names or the first declared guide URL mark relevant feeds due so the next
+EPG sync can include new channels or follow a changed guide URL. Other newly declared guide URLs are
+created due immediately; URLs removed from that M3U lose only their own playlist feed/data.
 Settings provides a confirmed action to pause and clear extra discovered feeds. Plain HTTP remains
-blocked by the manifest security policy.
+blocked by the manifest security policy. Media/logo origins and guide origins each have a separate
+bounded budget of 128 HTTPS origins, so a large media catalogue cannot consume the guide allowance.
+Explicit GitHub `/raw` and `/blob` guide URLs are canonicalized to `raw.githubusercontent.com`;
+the first M3U guide is fetched as a guide URL rather than through the Xtream same-origin API path,
+and arbitrary cross-origin redirects are still blocked.
 
 **Times are stored as UTC epoch millis, always.** `XmltvParser.parseXmltvTime` normalises the
 `+0100`-style offsets that XMLTV uses, treats a missing offset as UTC rather than guessing the
@@ -192,12 +208,28 @@ ordinary IPTV recordings keep their HTTP capture path.
 
 ### Portuguese translation of provider subtitles
 
-FullTV does not capture, transcribe, or upload playback audio. In the full-screen player, the
-optional translation feature processes only readable text cues from a subtitle track supplied by
+The provider-subtitle option processes only readable text cues from a subtitle track supplied by
 the channel and selected by the user. It uses on-device Google ML Kit language identification and
 translation; the translation model is downloaded only when a supported non-Portuguese cue needs it.
-If no readable text track is present (including bitmap-only captions), FullTV does not generate
+If no readable text track is present (including bitmap-only captions), this option does not create
 subtitles. Original provider subtitles remain available if translation cannot be performed.
+
+### Optional live speech captions
+
+The separate live-captions mode is never started at app launch. After an explicit choice in the
+fullscreen player's D-pad controls, a Media3 `TeeAudioProcessor` copies bounded PCM from that
+player's decoded audio path. It does not open another stream and does not use Android's microphone.
+A bounded, in-memory queue feeds a mono 16 kHz converter and voice/silence gate on an I/O worker.
+Vosk performs offline speech recognition using one small model selected by the user or chosen from
+the selected audio track's declared language metadata. This automatic option does not acoustically
+classify the speech; if the provider supplies no supported language tag, the user must choose a
+language manually. Google ML Kit translates completed utterances into Portuguese on-device using
+base language codes. Both models are downloaded only when needed and are not bundled in the APK.
+Switching channels, leaving the player, entering PiP, or turning the option off cancels recognition
+and releases the model. Audio is not written to storage or uploaded. Small Vosk models may use about
+300 MB of memory while loaded; the feature is withheld on Android low-RAM devices and devices
+reporting an app memory class below 256 MB. Recognition quality varies with language model, signal
+quality, accent, and background noise.
 
 ### Retries are tuned for IPTV, not for CDNs
 
