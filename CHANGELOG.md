@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.11.41 (release pública manual; alerta lxml permanece aberto) — 2026-11-12
+
+- **Armazenamento EPG M3U:** processa um feed XMLTV comprimido de cada vez em cache privado limitado a 256 MiB, faz uma passada só de aliases e grava no Room apenas programas/aliases que correspondem aos canais da playlist. Mantém matches exatos prioritários, recusas a nomes ambíguos e a possibilidade de `<programme>` aparecer antes de `<channel>`. Reserva 64 MiB de espaço livre, apaga temporários ao terminar e preserva o snapshot anterior se falhar.
+- **Validação:** build Gradle limpa; 246/246 testes Android e 13/13 testes de ferramentas Python passaram; `assembleDebug`, `lintVitalRelease` e `assembleRelease` concluíram; a revisão estática independente final não encontrou bloqueador. Testes adicionais do guard XXE passaram (2/2) no Python local. Não houve teste no Moto G84 nem sincronização real das URLs EPG remotas.
+- **Segurança/Dependabot:** o APK mantém `lxml==5.3.0`, pois não há wheel Android cp311 oficial do Chaquopy para 6.1.0 nas quatro ABIs. `fulltv_lxml_guard.py` força `resolve_entities=False`, `load_dtd=False` e `no_network=True` para `iterparse` e `ETCompatXMLParser`; o advisory GHSA-vfmq-68hx-4jfw/CVE-2026-41066 permanece aberto, não descartado.
+- **APK universal:** `app.fulltv`, `versionCode 53`, minSdk 24, targetSdk 35, quatro ABIs; 205.735.673 bytes; SHA-256 `8f1f3cac74a882ea70fe2107c5318d26913b419cd6cf0a34342ee2a46d362747`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. Sem `RECORD_AUDIO`; 60 bibliotecas nativas passaram alinhamento 16 KiB. O certificado é legado/compartilhado, não assinatura de produção; esta exceção de publicação não se estende a versões futuras.
+- **Limite importante:** melhora o tamanho lógico do guia nas próximas sincronizações M3U, mas não compacta automaticamente páginas SQLite já liberadas por versões anteriores; use a ação confirmada “Otimizar banco do guia” em Configurações → Armazenamento, que requer espaço livre adicional.
+
+## 0.11.40 (APK local de teste; não publicado) — 2026-11-10
+
+- **EPG depois da abertura:** com atualização automática habilitada, agenda um trabalho único EPG-only após 30 segundos e com requisito de rede. Ele consulta feeds vencidos pelo intervalo configurado ou força feeds habilitados com origem XMLTV utilizável quando não há nenhum programa na janela retida; guias recentes não são baixados novamente. A sincronização completa de catálogo mantém seu atraso periódico, evitando competir com o cold start. WorkManager pode executar o job mais tarde por restrições do Android.
+- **Assinatura/status:** build local para teste autorizado como `v0.11.40/code52` com o certificado legado; não publicar nem reutilizar essa autorização em versões futuras.
+- **Validação local:** build Gradle limpo; 240/240 testes Android e 13/13 testes Python passaram; `assembleDebug`, `lintVitalRelease` e `assembleRelease` concluíram com sucesso. Sem teste físico no Moto G84.
+- **APK universal de teste:** `app.fulltv`, `versionCode 52`, minSdk 24, targetSdk 35, quatro ABIs; 205.719.837 bytes; SHA-256 `7300d1b676f6e79cb4827619b3a1686d27d550d71f395a65c90bf6470a767104`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. Não publicado.
+
 ## 0.11.39 (release pública manual) — 2026-11-10
 
 - **Legendas ao vivo (experimental):** transcrição local e opcional do áudio já decodificado pelo player usando Vosk, com tradução para português pelo ML Kit. Começa desligada, não usa microfone, não grava nem envia áudio/transcrições e baixa modelos sob demanda. A seleção Automático usa somente o idioma declarado na faixa, não identificação acústica. A tradução de legendas textuais fornecidas pelo canal permanece separada.

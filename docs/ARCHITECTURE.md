@@ -98,12 +98,18 @@ automatically. Existing feed toggles are preserved, and a URL removed from the p
 its stored guide rows. A guide URL declared by different M3Us gets a playlist-owned feed row per
 source, so each source retains its own channel-filtered snapshot. Manually configured and built-in
 feeds remain global; if the same URL is also declared by an M3U, both feed scopes exist and may
-download that URL separately. For provider/discovered feeds associated with an M3U, FullTV keeps programme
-rows and XMLTV aliases only for IDs supplied by that playlist or an unambiguous name match against
-its current channels. It still downloads, parses and temporarily stages the full XMLTV file. The old
-snapshot is replaced only after a non-empty filtered result succeeds; a download/parse failure or no
-matching programmes leaves the old guide intact. This reduces steady-state database storage, not
-network transfer, parsing time, or peak temporary staging space.
+download that URL separately. For provider/discovered feeds associated with an M3U, FullTV keeps
+programme rows and XMLTV aliases only for IDs supplied by that playlist or an unambiguous name match
+against its current channels. To support XMLTV whose `<channel>` and `<programme>` elements appear in
+any order, it downloads one compressed feed at a time to a private cache file (maximum 256 MiB, with
+a 64 MiB free-space reserve). A metadata-only first pass builds a compact matcher; a second pass
+writes only matching channels and the configured time window to Room batches. Unrelated programmes
+never enter database staging. The temporary file is deleted after success, failure, or cancellation,
+and leftovers are cleaned at the next EPG sync. A failed download/parse or empty match leaves the old
+guide intact. This reduces steady-state database storage and removes the previous multi-feed
+programme-staging peak; network transfer remains the full guide and one feed still has a bounded
+temporary disk footprint. SQLite may retain freed pages from older versions until the user runs the
+confirmed database optimization action in Settings → Storage, which requires extra free space.
 The guide-input signature is recalculated from each downloaded playlist, even when its URL stays the
 same. Changes to channel IDs/names or the first declared guide URL mark relevant feeds due so the next
 EPG sync can include new channels or follow a changed guide URL. Other newly declared guide URLs are
@@ -157,6 +163,16 @@ old guide rows but never runs SQLite `VACUUM`; a storage settings screen reports
 model and recording sizes. Database compaction is user-triggered, requires free-space headroom, and
 does not delete recordings. A separately confirmed action can clear programmes from playlist-
 discovered guide feeds.
+
+The process does not download the full channel catalogue during cold start. When automatic refresh
+is enabled, `SyncWorker` also enqueues a unique EPG-only one-shot with a 30-second initial delay and
+a connected-network constraint. It uses the configured 1–24 hour refresh interval for feed age;
+feeds with a recent snapshot are skipped, while a completely empty guide window forces enabled feeds
+with a usable XMLTV source to refresh. M3U provider rows without a declared guide URL are skipped.
+WorkManager may defer execution under Android's background-work constraints, but this
+path avoids waiting for the next periodic catalogue job (which can be up to 24 hours away) and does
+not compete with initial UI startup. Failed feeds retain their previous snapshot and use WorkManager
+backoff.
 
 ## Playback
 

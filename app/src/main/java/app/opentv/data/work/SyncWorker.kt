@@ -39,6 +39,24 @@ class SyncWorker(
         val graph = ServiceLocator.get(applicationContext)
         val now = System.currentTimeMillis()
         val force = inputData.getBoolean(KEY_FORCE, false)
+        if (inputData.getBoolean(KEY_STARTUP_EPG_ONLY, false)) {
+            if (!graph.settings.catalogAutoRefresh.value) return Result.success()
+            val intervalMillis = TimeUnit.HOURS.toMillis(
+                graph.settings.catalogRefreshIntervalHours.value.toLong(),
+            )
+            val summary = graph.epgRepository.syncAll(
+                nowUtcMillis = now,
+                refreshIfSnapshotEmpty = true,
+                minimumFeedRefreshIntervalMillis = intervalMillis,
+            )
+            Log.i(
+                TAG,
+                "Startup guide: ${summary.programmesWritten} programmes from " +
+                    "${summary.feedsSucceeded} feed(s), ${summary.channelsMatched}/${summary.channelsTotal} channels matched",
+            )
+            runCatching { graph.recordingEngine.rescanSeriesRules() }
+            return if (summary.feedsFailed > 0) Result.retry() else Result.success()
+        }
         val sources = graph.sourceRepository.enabled()
         if (sources.isEmpty()) return Result.success()
 
@@ -94,6 +112,8 @@ class SyncWorker(
         private const val WORK_NAME = "opentv-periodic-sync-v2"
         private const val LEGACY_WORK_NAME = "opentv-periodic-sync"
         private const val ONE_SHOT_WORK_NAME = "opentv-manual-sync"
+        private const val STARTUP_EPG_WORK_NAME = "opentv-startup-epg-refresh-v1"
+        private const val STARTUP_EPG_DELAY_SECONDS = 30L
 
         /**
          * Kick a single catalogue + guide refresh now, off the UI. Runs the same [doWork] as the
@@ -123,6 +143,7 @@ class SyncWorker(
             if (!settings.catalogAutoRefresh.value) {
                 workManager.cancelUniqueWork(WORK_NAME)
                 workManager.cancelUniqueWork(LEGACY_WORK_NAME)
+                workManager.cancelUniqueWork(STARTUP_EPG_WORK_NAME)
                 return
             }
             val intervalHours = settings.catalogRefreshIntervalHours.value.toLong()
@@ -143,8 +164,9 @@ class SyncWorker(
                 )
                 .build()
 
-            // Migrate old requests once, and don't reset the new periodic timer on every app start.
-            // The initial delay prevents an automatic catalogue download from competing with startup.
+            // Migrate old requests once, and don't reset the periodic timer on every app start.
+            // The full catalogue job keeps its configured initial delay; the separate one-shot
+            // below refreshes only an empty/expired EPG without fetching the catalogue at startup.
             workManager.cancelUniqueWork(LEGACY_WORK_NAME)
             if (forceReschedule) workManager.cancelUniqueWork(WORK_NAME)
             workManager.enqueueUniquePeriodicWork(
@@ -152,8 +174,32 @@ class SyncWorker(
                 ExistingPeriodicWorkPolicy.KEEP,
                 request,
             )
+            enqueueStartupEpgRefresh(workManager)
+        }
+
+        private fun enqueueStartupEpgRefresh(workManager: WorkManager) {
+            val request = OneTimeWorkRequestBuilder<SyncWorker>()
+                .setInputData(Data.Builder().putBoolean(KEY_STARTUP_EPG_ONLY, true).build())
+                .setInitialDelay(STARTUP_EPG_DELAY_SECONDS, TimeUnit.SECONDS)
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build(),
+                )
+                .setBackoffCriteria(
+                    androidx.work.BackoffPolicy.EXPONENTIAL,
+                    15,
+                    TimeUnit.MINUTES,
+                )
+                .build()
+            workManager.enqueueUniqueWork(
+                STARTUP_EPG_WORK_NAME,
+                ExistingWorkPolicy.KEEP,
+                request,
+            )
         }
 
         private const val KEY_FORCE = "force_refresh"
+        private const val KEY_STARTUP_EPG_ONLY = "startup_epg_only"
     }
 }

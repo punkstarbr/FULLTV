@@ -481,6 +481,16 @@ interface ProgrammeDao {
     @Query("SELECT COUNT(*) FROM programmes WHERE feedId = :feedId")
     suspend fun countForFeed(feedId: Long): Int
 
+    @Query(
+        """
+        SELECT COUNT(*) FROM programmes
+        WHERE feedId > 0
+          AND endUtcMillis > :fromUtcMillis
+          AND startUtcMillis < :toUtcMillis
+        """
+    )
+    suspend fun countInWindow(fromUtcMillis: Long, toUtcMillis: Long): Int
+
     /** Distinct guide channels that actually have programmes — the match report's baseline. */
     @Query("SELECT DISTINCT epgChannelId FROM programmes WHERE feedId > 0")
     suspend fun channelIdsWithProgrammes(): List<String>

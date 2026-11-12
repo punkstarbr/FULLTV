@@ -25,16 +25,25 @@ Your provider is the normal destination. Channel logos and posters use the URLs 
 catalogue, which may point to third parties. Playlist EPG URLs are also requested as described
 below.
 
+When automatic catalogue refresh is enabled, a delayed EPG-only background job may request enabled
+guide feeds after app startup if the retained guide is empty or a feed has passed the configured
+refresh interval. It requires network connectivity and does not download the channel catalogue as
+part of this startup job. Android may defer background work; manual refresh remains available.
+
 When an M3U contains `url-tvg` or `x-tvg-url` attributes, FullTV discovers each unique XMLTV URL
 across the playlist and requests all of them automatically when refreshing the guide. Those guide
 hosts can see the device network request and any query parameters included in the URL. Do not post
 or share a playlist containing credentials or private tokens. For the provider/discovered feeds tied
 to that M3U, FullTV stores programme rows only when their XMLTV channel ID is present in the playlist
-or its channel name has one unambiguous match. It still downloads and parses each accepted full guide;
-this saves steady-state programme-database space, not network data or temporary staging space. The
-previous guide snapshot is kept until a non-empty filtered replacement succeeds. A URL shared by
-different playlists gets a separate filtered feed for each list; manually configured and built-in
-feeds remain global. If both scopes use the same URL, the URL may be downloaded more than once.
+or its channel name has one unambiguous match. It still downloads each accepted full guide. To handle
+XMLTV channels and programmes in any order, one compressed feed at a time is briefly cached in the
+app-private cache (maximum 256 MiB, with a 64 MiB free-space reserve), scanned once for channel aliases,
+then parsed again to persist only matching programme rows and aliases. The temporary file is deleted
+after success, failure or cancellation; an abandoned file is cleaned at the next EPG sync. This saves
+programme-database space, not network transfer. The previous guide snapshot is kept until a non-empty
+filtered replacement succeeds. A URL shared by different playlists gets a separate filtered feed
+for each list; manually configured and built-in feeds remain global. If both scopes use the same URL,
+the URL may be downloaded more than once.
 When the playlist's channels or first guide URL changes, its feeds are marked for
 the next EPG refresh, so later channel additions and guide URL changes are considered without hardcoded
 IDs, even when the M3U address stays the same.

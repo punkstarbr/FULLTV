@@ -118,6 +118,31 @@ class XmltvChannelParseTest {
         assertThat(result.programmes.single().description).isEqualTo("The latest news.")
     }
 
+    @Test
+    fun `metadata-only pass finds channels after programmes without emitting programme models`() = runTest {
+        val aliases = mutableListOf<Pair<String, String?>>()
+        val programmes = mutableListOf<Programme>()
+        val stats = XmltvParser.parse(
+            input = """
+                <tv>
+                  <programme channel="bbc1.uk" start="20260727183000 +0100">
+                    <title>News</title><desc>Ignored during metadata pass</desc>
+                  </programme>
+                  <channel id="bbc1.uk"><display-name>BBC One</display-name></channel>
+                </tv>
+            """.trimIndent().byteInputStream(),
+            feedId = 1L,
+            onChannelAlias = { id, name -> aliases += id to name },
+            onProgramme = { programmes += it },
+            readProgrammes = false,
+        )
+
+        assertThat(aliases).containsExactly("bbc1.uk" to "BBC One")
+        assertThat(programmes).isEmpty()
+        assertThat(stats.channelCount).isEqualTo(1)
+        assertThat(stats.programmeCount).isEqualTo(1)
+    }
+
     /** A self-closing channel with no display-name still has to produce an alias. */
     @Test
     fun `falls back to the id when there is no display name`() = runTest {

@@ -5,7 +5,9 @@
  */
 package app.opentv.data.repo
 
+import android.os.StatFs
 import android.util.Log
+import androidx.room.withTransaction
 import app.opentv.core.AppSettings
 import app.opentv.data.db.OpenTvDatabase
 import app.opentv.data.db.ChannelDao
@@ -25,21 +27,24 @@ import app.opentv.data.parser.XmltvParser
 import app.opentv.data.remote.XtreamApi
 import app.opentv.data.remote.HttpsUrlPolicy
 import app.opentv.data.remote.NetworkDestinationPolicy
-import java.io.BufferedInputStream
-import java.io.InputStream
-import java.util.concurrent.TimeUnit
-import java.util.zip.GZIPInputStream
-import org.tukaani.xz.XZInputStream
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import androidx.room.withTransaction
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.tukaani.xz.XZInputStream
+import java.io.BufferedInputStream
+import java.io.File
+import java.io.IOException
+import java.io.InputStream
+import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPInputStream
 
 private const val M3U_FILTER_STATUS_SUFFIX = " (M3U channels only)"
 
@@ -62,9 +67,10 @@ private const val M3U_FILTER_STATUS_SUFFIX = " (M3U channels only)"
  *
  * OpenTV never deletes before it has the replacement:
  *
- * - Programmes and aliases are **staged under a private negative feed id** as they stream out
- *   of the parser. Public guide queries ignore staging rows. Only a fully parsed snapshot replaces
- *   the old feed, in one database transaction; failures and cancellation retain the old guide.
+ * - Programmes and aliases are **staged under a private negative feed id**. For playlist-owned
+ *   feeds, a bounded private-cache copy enables an alias pass followed by a filtered programme
+ *   pass, so unrelated rows never enter Room. Public guide queries ignore staging rows; only a
+ *   fully parsed snapshot replaces the old feed in one transaction.
  * - Old programmes are pruned **by age**, only after at least one feed succeeds.
  * - A failed feed leaves that feed's previous data intact and records the reason on the
  *   feed row, where the settings screen shows it — no silent failure.
@@ -79,8 +85,10 @@ class EpgRepository(
     private val api: XtreamApi,
     private val http: OkHttpClient,
     private val settings: AppSettings,
+    private val cacheDirectory: File,
 ) {
     private val syncMutex = Mutex()
+    private val filteredXmltvDirectory = File(cacheDirectory, "epg-filter-stage")
 
     /** Future guide window used both while parsing feeds and while pruning old database rows. */
     val retentionFutureMillis: Long
@@ -253,9 +261,15 @@ class EpgRepository(
     // ---- Sync ------------------------------------------------------------------------------
 
     /** Downloads every enabled feed, merges, prunes, and re-runs the matcher. */
-    suspend fun syncAll(nowUtcMillis: Long, force: Boolean = false): SyncSummary =
+    suspend fun syncAll(
+        nowUtcMillis: Long,
+        force: Boolean = false,
+        refreshIfSnapshotEmpty: Boolean = false,
+        minimumFeedRefreshIntervalMillis: Long = REFRESH_INTERVAL_MILLIS,
+    ): SyncSummary =
         withContext(Dispatchers.IO) {
           syncMutex.withLock {
+            cleanupAbandonedFilteredXmltvFiles()
             // A process death can leave private staging rows behind. They are never displayed;
             // clear them before starting the next serialized sync.
             database.withTransaction {
@@ -265,13 +279,25 @@ class EpgRepository(
             val futureCutoffMillis = nowUtcMillis + retentionFutureMillis
             ensureFeeds()
             maybeAutoEnableRegionalFeed()
+            val guideSnapshotEmpty = refreshIfSnapshotEmpty &&
+                programmeDao.countInWindow(
+                    fromUtcMillis = nowUtcMillis - RETENTION_PAST_MILLIS,
+                    toUtcMillis = futureCutoffMillis,
+                ) == 0
 
             var succeeded = 0
             var failed = 0
             var written = 0
 
             for (feed in feedDao.enabled()) {
-                if (!force && nowUtcMillis - feed.lastSyncMillis < REFRESH_INTERVAL_MILLIS) {
+                if (refreshIfSnapshotEmpty && !hasUsableStartupGuideSource(feed)) continue
+                if (!force && !EpgStartupRefreshPolicy.shouldSyncFeed(
+                        lastSyncMillis = feed.lastSyncMillis,
+                        nowUtcMillis = nowUtcMillis,
+                        refreshIntervalMillis = minimumFeedRefreshIntervalMillis,
+                        guideSnapshotEmpty = guideSnapshotEmpty,
+                    )
+                ) {
                     succeeded++
                     continue
                 }
@@ -329,92 +355,125 @@ class EpgRepository(
         if (playlistSourceId != null && playlistChannels.isNullOrEmpty()) {
             return FeedResult.Failed("Playlist channels are not loaded; the previous guide was kept.")
         }
-        val batch = ArrayList<Programme>(BATCH_SIZE)
-        val aliases = ArrayList<EpgChannelAlias>(256)
+        val programmeBatch = ArrayList<Programme>(BATCH_SIZE)
+        val aliasBatch = ArrayList<EpgChannelAlias>(BATCH_SIZE)
         var written = 0
         var committed = false
+        var temporaryXmltvFile: File? = null
 
-        try {
-            openFeedStream(feed).use { stream ->
-                val stats = XmltvParser.parse(
-                    input = stream,
-                    feedId = stagingFeedId,
-                    onChannelAlias = { id, displayName ->
-                        aliases += EpgChannelAlias(
+        suspend fun flushProgrammes() {
+            if (programmeBatch.isEmpty()) return
+            programmeDao.upsertAll(programmeBatch)
+            written += programmeBatch.size
+            programmeBatch.clear()
+        }
+
+        suspend fun flushAliases() {
+            if (aliasBatch.isEmpty()) return
+            aliasDao.upsertAll(aliasBatch)
+            aliasBatch.clear()
+        }
+
+        suspend fun parseIntoStaging(
+            stream: InputStream,
+            retainedIds: Set<String>?,
+        ): XmltvParser.Stats {
+            val stats = XmltvParser.parse(
+                input = stream,
+                feedId = stagingFeedId,
+                onChannelAlias = { id, displayName ->
+                    if (retainedIds == null || id in retainedIds) {
+                        val safeName = displayName ?: id
+                        aliasBatch += EpgChannelAlias(
                             feedId = stagingFeedId,
                             epgId = id,
-                            displayName = displayName ?: id,
-                            normalizedKey = ChannelNameNormalizer.normalize(displayName ?: id).groupKey,
+                            displayName = safeName,
+                            normalizedKey = ChannelNameNormalizer.normalize(safeName).groupKey,
                         )
-                    },
-                    onProgramme = { programme ->
-                        // Skip anything that finished before the retention cut-off; no point
-                        // writing rows we are about to prune.
-                        if (programme.endUtcMillis >= nowUtcMillis - RETENTION_PAST_MILLIS &&
-                            programme.startUtcMillis <= futureCutoffMillis
-                        ) {
-                            batch += programme
-                            if (batch.size >= BATCH_SIZE) {
-                                programmeDao.upsertAll(batch)
-                                written += batch.size
-                                batch.clear()
-                            }
-                        }
-                    },
-                )
-                if (batch.isNotEmpty()) {
-                    programmeDao.upsertAll(batch)
-                    written += batch.size
-                }
-                val retainedIds = playlistChannels?.let {
-                    EpgProgrammeChannelFilter.matchingEpgIds(it, aliases)
-                }
-                val aliasesToKeep = if (retainedIds == null) {
-                    aliases
-                } else {
-                    aliases.filter { it.epgId in retainedIds }
-                }
-                if (aliasesToKeep.isNotEmpty()) {
-                    aliasesToKeep.chunked(BATCH_SIZE).forEach { aliasDao.upsertAll(it) }
-                }
+                        if (aliasBatch.size >= BATCH_SIZE) flushAliases()
+                    }
+                },
+                onProgramme = { programme ->
+                    if (EpgProgrammeChannelFilter.shouldKeepProgramme(
+                            epgChannelId = programme.epgChannelId,
+                            startUtcMillis = programme.startUtcMillis,
+                            endUtcMillis = programme.endUtcMillis,
+                            retainedEpgIds = retainedIds,
+                            fromUtcMillis = nowUtcMillis - RETENTION_PAST_MILLIS,
+                            toUtcMillis = futureCutoffMillis,
+                        )
+                    ) {
+                        programmeBatch += programme
+                        if (programmeBatch.size >= BATCH_SIZE) flushProgrammes()
+                    }
+                },
+            )
+            flushAliases()
+            flushProgrammes()
+            return stats
+        }
 
-                if (retainedIds != null) {
-                    written = EpgProgrammeChannelFilter.retainOnly(
-                        programmeDao = programmeDao,
+        try {
+            val stats: XmltvParser.Stats
+            if (playlistChannels != null) {
+                // Cache one compressed feed at a time. A metadata-only first pass discovers all
+                // XMLTV aliases even when channel/programme elements are interleaved; the second
+                // pass writes only matching programme IDs to Room staging.
+                val stagedFile = cacheCompressedGuide(feed)
+                temporaryXmltvFile = stagedFile
+                val matcher = EpgProgrammeChannelFilter.Matcher(playlistChannels)
+                openExpandedGuideStream(stagedFile.inputStream()).use { stream ->
+                    XmltvParser.parse(
+                        input = stream,
                         feedId = stagingFeedId,
-                        retainedEpgIds = retainedIds,
+                        onChannelAlias = { id, displayName -> matcher.addAlias(id, displayName) },
+                        onProgramme = {},
+                        readProgrammes = false,
                     )
                 }
-
-                if (written == 0) {
-                    val reason = if (playlistChannels == null) {
-                        "Downloaded, but contained no programmes in the configured guide window."
-                    } else {
-                        "No programmes matched the current M3U channels; the previous guide was kept."
-                    }
-                    return FeedResult.Failed(reason)
+                val retainedIds = matcher.retainedEpgIds()
+                if (retainedIds.isEmpty()) {
+                    return FeedResult.Failed(
+                        "No XMLTV channels matched the current M3U; the previous guide was kept.",
+                    )
                 }
-                val channelCount = if (playlistChannels == null) {
-                    stats.channelCount
-                } else {
-                    programmeDao.channelIdsForFeed(stagingFeedId).size
+                openExpandedGuideStream(stagedFile.inputStream()).use { stream ->
+                    stats = parseIntoStaging(stream, retainedIds)
                 }
-                // The old guide is authoritative until the replacement is complete. This swap
-                // covers programmes and aliases atomically, so readers never observe an empty or
-                // half-written snapshot after a failed download.
-                database.withTransaction {
-                    programmeDao.deleteForFeed(feed.id)
-                    aliasDao.deleteForFeed(feed.id)
-                    programmeDao.moveFromFeed(stagingFeedId, feed.id)
-                    aliasDao.moveFromFeed(stagingFeedId, feed.id)
+            } else {
+                openFeedStream(feed).use { stream ->
+                    stats = parseIntoStaging(stream, retainedIds = null)
                 }
-                committed = true
-                return FeedResult.Success(
-                    programmes = written,
-                    channels = channelCount,
-                    playlistScoped = playlistChannels != null,
-                )
             }
+
+            written = programmeDao.countForFeed(stagingFeedId)
+            if (written == 0) {
+                val reason = if (playlistChannels == null) {
+                    "Downloaded, but contained no programmes in the configured guide window."
+                } else {
+                    "No M3U channel programmes in the configured guide window; the previous guide was kept."
+                }
+                return FeedResult.Failed(reason)
+            }
+            val channelCount = if (playlistChannels == null) {
+                stats.channelCount
+            } else {
+                programmeDao.channelIdsForFeed(stagingFeedId).size
+            }
+            // The old guide remains authoritative until a complete replacement is ready. This
+            // transaction swaps the filtered snapshot and aliases together.
+            database.withTransaction {
+                programmeDao.deleteForFeed(feed.id)
+                aliasDao.deleteForFeed(feed.id)
+                programmeDao.moveFromFeed(stagingFeedId, feed.id)
+                aliasDao.moveFromFeed(stagingFeedId, feed.id)
+            }
+            committed = true
+            return FeedResult.Success(
+                programmes = written,
+                channels = channelCount,
+                playlistScoped = playlistChannels != null,
+            )
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -423,6 +482,7 @@ class EpgRepository(
                 else "Guide download or parsing failed; the previous guide was kept.",
             )
         } finally {
+            temporaryXmltvFile?.delete()
             if (!committed) {
                 withContext(NonCancellable) {
                     runCatching {
@@ -443,6 +503,66 @@ class EpgRepository(
         return sourceDao.byId(providerSourceId)
             ?.takeIf { it.kind == SourceKind.M3U }
             ?.id
+    }
+
+    /** A playlist without a declared XMLTV URL must not keep an EPG-only startup job retrying. */
+    private suspend fun hasUsableStartupGuideSource(feed: EpgFeed): Boolean {
+        val provider = feed.providerSourceId?.let { sourceDao.byId(it) }
+        return EpgStartupRefreshPolicy.hasUsableGuideSource(feed, provider)
+    }
+
+    /** Removes only our private feed cache files, including leftovers from a process death. */
+    private fun cleanupAbandonedFilteredXmltvFiles() {
+        if (!filteredXmltvDirectory.isDirectory) return
+        filteredXmltvDirectory.listFiles()?.forEach { file ->
+            if (file.isFile && file.name.startsWith("guide-") && file.name.endsWith(".tmp")) {
+                file.delete()
+            }
+        }
+    }
+
+    /**
+     * Stores one compressed XMLTV body in app-private cache so M3U matching can be order-independent
+     * without staging unrelated programmes in Room. It never uses more than the existing compressed
+     * feed limit and preserves at least a small reserve of free internal storage.
+     */
+    private suspend fun cacheCompressedGuide(feed: EpgFeed): File {
+        if (!filteredXmltvDirectory.isDirectory && !filteredXmltvDirectory.mkdirs()) {
+            throw IOException("Could not create private XMLTV cache directory.")
+        }
+        val temporary = File.createTempFile("guide-${feed.id}-", ".tmp", filteredXmltvDirectory)
+        var complete = false
+        try {
+            if (StatFs(cacheDirectory.absolutePath).availableBytes < MIN_TEMP_CACHE_HEADROOM_BYTES) {
+                throw IOException("Not enough free space for a safe temporary XMLTV cache.")
+            }
+            openRawFeedStream(feed).use { raw ->
+                BoundedInputStream(raw, MAX_COMPRESSED_BYTES, "Compressed XMLTV guide").use { input ->
+                    temporary.outputStream().buffered().use { output ->
+                        val buffer = ByteArray(CACHE_COPY_BUFFER_BYTES)
+                        var copied = 0L
+                        var nextSpaceCheck = CACHE_SPACE_CHECK_BYTES
+                        while (true) {
+                            currentCoroutineContext().ensureActive()
+                            val read = input.read(buffer)
+                            if (read < 0) break
+                            copied += read
+                            output.write(buffer, 0, read)
+                            if (copied >= nextSpaceCheck) {
+                                if (StatFs(cacheDirectory.absolutePath).availableBytes < MIN_TEMP_CACHE_HEADROOM_BYTES) {
+                                    throw IOException("XMLTV cache stopped to preserve free storage headroom.")
+                                }
+                                nextSpaceCheck += CACHE_SPACE_CHECK_BYTES
+                            }
+                        }
+                    }
+                }
+            }
+            complete = true
+            return temporary
+        } finally {
+            if (!complete) temporary.delete()
+        }
     }
 
     /** Marks M3U feeds due without deleting the old snapshot before a replacement succeeds. */
@@ -475,8 +595,11 @@ class EpgRepository(
      * the first two bytes for the gzip magic number handles both, regardless of what the
      * URL or the headers claim.
      */
-    private suspend fun openFeedStream(feed: EpgFeed): InputStream {
-        val raw: InputStream = when {
+    private suspend fun openFeedStream(feed: EpgFeed): InputStream =
+        openExpandedGuideStream(openRawFeedStream(feed))
+
+    /** Opens the raw body without decompression, retaining the same HTTPS/SSRF/origin checks. */
+    private suspend fun openRawFeedStream(feed: EpgFeed): InputStream = when {
             feed.providerSourceId != null -> {
                 val stored: Source = sourceDao.byId(feed.providerSourceId)
                     ?: throw IllegalStateException("Provider for this guide no longer exists.")
@@ -522,6 +645,7 @@ class EpgRepository(
             else -> throw IllegalStateException("Feed has no URL and no provider.")
         }
 
+    private fun openExpandedGuideStream(raw: InputStream): InputStream {
         val buffered = BufferedInputStream(
             BoundedInputStream(raw, MAX_COMPRESSED_BYTES, "Compressed XMLTV guide"),
             8 * 1024,
@@ -656,6 +780,9 @@ class EpgRepository(
         /** Hard cap shared by the Room query and the unified search mapping policy. */
         const val MAX_SEARCH_RESULTS = 100
 
+        private const val CACHE_COPY_BUFFER_BYTES = 64 * 1024
+        private const val CACHE_SPACE_CHECK_BYTES = 16L * 1024 * 1024
+        private const val MIN_TEMP_CACHE_HEADROOM_BYTES = 64L * 1024 * 1024
         private const val MAX_COMPRESSED_BYTES = 256L * 1024 * 1024
         private const val MAX_XML_BYTES = 256L * 1024 * 1024
         private const val MAX_XZ_MEMORY_KIB = 64 * 1024

@@ -11,6 +11,9 @@ import java.io.InputStream
 import java.net.URI
 import java.util.Calendar
 import java.util.TimeZone
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlin.coroutines.CoroutineContext
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserException
 
@@ -43,6 +46,8 @@ object XmltvParser {
     /**
      * @param onChannelAlias called with (channelId, displayName) for each `<channel>` element.
      * @param onProgramme called for each successfully parsed `<programme>`.
+     * @param readProgrammes false performs a metadata-only pass, skipping programme subtrees while
+     * still enforcing byte, element-count, document-type and nesting limits.
      *
      * [onProgramme] is a suspending callback, and this function is therefore suspending too.
      * That is deliberate: the whole point of streaming programmes out one at a time is that the
@@ -56,12 +61,15 @@ object XmltvParser {
     suspend fun parse(
         input: InputStream,
         feedId: Long,
-        onChannelAlias: (id: String, displayName: String?) -> Unit = { _, _ -> },
+        onChannelAlias: suspend (id: String, displayName: String?) -> Unit = { _, _ -> },
         onProgramme: suspend (Programme) -> Unit,
+        readProgrammes: Boolean = true,
     ): Stats {
         var channelCount = 0
         var programmeCount = 0
         var skipped = 0
+        val coroutineContext = currentCoroutineContext()
+        var eventsUntilCancellationCheck = 0
 
         val parser = Xml.newPullParser()
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
@@ -70,6 +78,9 @@ object XmltvParser {
 
         var event = parser.eventType
         while (event != XmlPullParser.END_DOCUMENT) {
+            if (eventsUntilCancellationCheck++ % CANCELLATION_CHECK_INTERVAL == 0) {
+                coroutineContext.ensureActive()
+            }
             if (event == XmlPullParser.DOCDECL) {
                 throw XmlPullParserException("DOCTYPE is not supported in XMLTV guides.")
             }
@@ -77,7 +88,7 @@ object XmltvParser {
                 when (parser.name) {
                     "channel" -> {
                         val id = parser.getAttributeValue(null, "id")
-                        val displayName = readChannelDisplayName(parser)
+                        val displayName = readChannelDisplayName(parser, coroutineContext)
                         if (!id.isNullOrBlank() && id.length <= MAX_ID_CHARS) {
                             channelCount++
                             if (channelCount > MAX_CHANNELS) throw XmlPullParserException("XMLTV has too many channels.")
@@ -86,15 +97,23 @@ object XmltvParser {
                     }
 
                     "programme" -> {
-                        val programme = readProgramme(parser, feedId)
-                        if (programme != null) {
+                        if (!readProgrammes) {
                             programmeCount++
                             if (programmeCount > MAX_PROGRAMMES) {
                                 throw XmlPullParserException("XMLTV has too many programmes.")
                             }
-                            onProgramme(programme)
+                            skipElement(parser)
                         } else {
-                            skipped++
+                            val programme = readProgramme(parser, feedId, coroutineContext)
+                            if (programme != null) {
+                                programmeCount++
+                                if (programmeCount > MAX_PROGRAMMES) {
+                                    throw XmlPullParserException("XMLTV has too many programmes.")
+                                }
+                                onProgramme(programme)
+                            } else {
+                                skipped++
+                            }
                         }
                     }
                 }
@@ -105,15 +124,45 @@ object XmltvParser {
         return Stats(channelCount, programmeCount, skipped)
     }
 
-    private fun readChannelDisplayName(parser: XmlPullParser): String? {
+    /** Consumes one complete element without constructing its text/programme model. */
+    private suspend fun skipElement(parser: XmlPullParser) {
+        var depth = 1
+        var eventsUntilCancellationCheck = 0
+        val coroutineContext = currentCoroutineContext()
+        while (depth > 0) {
+            if (eventsUntilCancellationCheck++ % CANCELLATION_CHECK_INTERVAL == 0) {
+                coroutineContext.ensureActive()
+            }
+            when (parser.next()) {
+                XmlPullParser.START_TAG -> {
+                    depth++
+                    if (depth > MAX_SKIP_NESTING) {
+                        throw XmlPullParserException("XMLTV element nesting exceeds the safety limit.")
+                    }
+                }
+                XmlPullParser.END_TAG -> depth--
+                XmlPullParser.DOCDECL -> throw XmlPullParserException("DOCTYPE is not supported in XMLTV guides.")
+                XmlPullParser.END_DOCUMENT -> return
+            }
+        }
+    }
+
+    private fun readChannelDisplayName(
+        parser: XmlPullParser,
+        coroutineContext: CoroutineContext,
+    ): String? {
         var displayName: String? = null
         var depth = 1
+        var eventsUntilCancellationCheck = 0
         while (depth > 0) {
+            if (eventsUntilCancellationCheck++ % CANCELLATION_CHECK_INTERVAL == 0) {
+                coroutineContext.ensureActive()
+            }
             when (parser.next()) {
                     XmlPullParser.START_TAG -> {
                         depth++
                         if (parser.name == "display-name" && displayName == null) {
-                            displayName = readBoundedText(parser, MAX_DISPLAY_NAME_CHARS)
+                            displayName = readBoundedText(parser, MAX_DISPLAY_NAME_CHARS, coroutineContext)
                                 .trim().takeIf { it.isNotEmpty() }
                             depth--
                     }
@@ -125,7 +174,11 @@ object XmltvParser {
         return displayName
     }
 
-    private fun readProgramme(parser: XmlPullParser, feedId: Long): Programme? {
+    private fun readProgramme(
+        parser: XmlPullParser,
+        feedId: Long,
+        coroutineContext: CoroutineContext,
+    ): Programme? {
         val channelId = parser.getAttributeValue(null, "channel")
         val start = parseXmltvTime(parser.getAttributeValue(null, "start"))
         val stop = parseXmltvTime(parser.getAttributeValue(null, "stop"))
@@ -138,19 +191,23 @@ object XmltvParser {
         var episode: Int? = null
 
         var depth = 1
+        var eventsUntilCancellationCheck = 0
         while (depth > 0) {
+            if (eventsUntilCancellationCheck++ % CANCELLATION_CHECK_INTERVAL == 0) {
+                coroutineContext.ensureActive()
+            }
             when (parser.next()) {
                 XmlPullParser.START_TAG -> {
                     depth++
                     when (parser.name) {
                         "title" -> {
-                            if (title == null) { title = readBoundedText(parser, MAX_TITLE_CHARS).trim(); depth-- }
+                            if (title == null) { title = readBoundedText(parser, MAX_TITLE_CHARS, coroutineContext).trim(); depth-- }
                         }
                         "desc" -> {
-                            if (description == null) { description = readBoundedText(parser, MAX_DESCRIPTION_CHARS).trim(); depth-- }
+                            if (description == null) { description = readBoundedText(parser, MAX_DESCRIPTION_CHARS, coroutineContext).trim(); depth-- }
                         }
                         "category" -> {
-                            if (category == null) { category = readBoundedText(parser, MAX_CATEGORY_CHARS).trim(); depth-- }
+                            if (category == null) { category = readBoundedText(parser, MAX_CATEGORY_CHARS, coroutineContext).trim(); depth-- }
                         }
                         "icon" -> {
                             if (iconUrl == null) {
@@ -159,7 +216,7 @@ object XmltvParser {
                         }
                         "episode-num" -> {
                             val system = parser.getAttributeValue(null, "system")
-                            val value = readBoundedText(parser, MAX_EPISODE_NUM_CHARS).trim()
+                            val value = readBoundedText(parser, MAX_EPISODE_NUM_CHARS, coroutineContext).trim()
                             depth--
                             if (system == "xmltv_ns") {
                                 val parts = value.split('.')
@@ -237,10 +294,18 @@ object XmltvParser {
         if (length >= from + 2) substring(from, from + 2).toIntOrNull() ?: 0 else 0
 
     /** Reads nested text without nextText()'s unbounded String allocation. */
-    private fun readBoundedText(parser: XmlPullParser, maxChars: Int): String {
+    private fun readBoundedText(
+        parser: XmlPullParser,
+        maxChars: Int,
+        coroutineContext: CoroutineContext,
+    ): String {
         val text = StringBuilder()
         var nestedDepth = 0
+        var eventsUntilCancellationCheck = 0
         while (true) {
+            if (eventsUntilCancellationCheck++ % CANCELLATION_CHECK_INTERVAL == 0) {
+                coroutineContext.ensureActive()
+            }
             when (parser.next()) {
                 XmlPullParser.START_TAG -> {
                     nestedDepth++
@@ -303,5 +368,7 @@ object XmltvParser {
     private const val MAX_ICON_URL_CHARS = 2_048
     private const val MAX_TIMESTAMP_CHARS = 64
     private const val MAX_TEXT_NESTING = 16
+    private const val MAX_SKIP_NESTING = 64
+    private const val CANCELLATION_CHECK_INTERVAL = 1_024
     private const val MAX_PROGRAMME_SPAN_MILLIS = 7L * 24 * 60 * 60 * 1000
 }

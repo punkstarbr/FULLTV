@@ -134,6 +134,7 @@ object ServiceLocator {
                 api = xtreamApi,
                 http = httpClient,
                 settings = settings,
+                cacheDirectory = appContext.cacheDir,
             )
         }
 

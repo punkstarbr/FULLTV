@@ -46,6 +46,120 @@ class EpgProgrammeChannelFilterTest {
     }
 
     @Test
+    fun `exact name match keeps priority over a longer prefix candidate`() {
+        val channels = listOf(channel("news", "News", epgId = null))
+        val matcher = EpgProgrammeChannelFilter.Matcher(channels)
+
+        matcher.addAlias("news-exact", "News")
+        matcher.addAlias("news-world", "News World")
+
+        assertThat(matcher.retainedEpgIds()).containsExactly("news-exact")
+    }
+
+    @Test
+    fun `short unambiguous alias prefixes still match longer playlist names`() {
+        val channels = listOf(channel("bbc", "BBC One Extra", epgId = null))
+        val matcher = EpgProgrammeChannelFilter.Matcher(channels)
+
+        matcher.addAlias("bbc-guide", "BBC One")
+
+        assertThat(matcher.retainedEpgIds()).containsExactly("bbc-guide")
+    }
+
+    @Test
+    fun `incremental matcher agrees with EpgMatcher for exact prefix and ambiguous aliases`() {
+        val channels = listOf(
+            channel("local", "Local Extra", epgId = "playlist-direct-id"),
+            channel("news", "News", epgId = null),
+            channel("news-world", "News World", epgId = null),
+            channel("sports", "Sports Today", epgId = null),
+            channel("bbc", "BBC One Extra", epgId = null),
+        )
+        val aliases = listOf(
+            alias("news-a", "News"),
+            alias("news-b", "News"),
+            alias("world-id", "News World"),
+            alias("sports-id", "Sports Today HD"),
+            alias("bbc-id", "BBC One"),
+            alias("unrelated-id", "Cartoons"),
+        )
+        val incremental = EpgProgrammeChannelFilter.Matcher(channels).also { matcher ->
+            aliases.forEach { matcher.addAlias(it.epgId, it.displayName) }
+        }.retainedEpgIds()
+        val referenceIndex = EpgMatcher.buildIndex(
+            aliases.flatMap { listOf(it.epgId to it.displayName, it.epgId to it.epgId) },
+        )
+        val expected = buildSet {
+            channels.forEach { channel ->
+                listOfNotNull(channel.epgOverrideId, channel.epgChannelId)
+                    .filter(String::isNotBlank)
+                    .forEach(::add)
+                referenceIndex.match(channel.groupKey)?.let(::add)
+            }
+        }
+
+        assertThat(incremental).containsExactlyElementsIn(expected)
+    }
+
+    @Test
+    fun `ambiguous exact key remains ambiguous when fallback sees a unique shorter alias`() {
+        val channels = listOf(channel("news", "News", epgId = null))
+        val aliases = listOf(
+            alias("news-a", "News"),
+            alias("news-b", "News"),
+            alias("new-id", "New"),
+        )
+        val matcher = EpgProgrammeChannelFilter.Matcher(channels).also { state ->
+            aliases.forEach { state.addAlias(it.epgId, it.displayName) }
+        }
+        val reference = EpgMatcher.buildIndex(
+            aliases.flatMap { listOf(it.epgId to it.displayName, it.epgId to it.epgId) },
+        )
+
+        assertThat(matcher.retainedEpgIds()).isEmpty()
+        assertThat(reference.match(channels.single().groupKey)).isNull()
+        assertThat(
+            EpgProgrammeChannelFilter.matchingEpgIds(channels, aliases),
+        ).isEmpty()
+    }
+
+    @Test
+    fun `programme predicate filters unrelated channels and out-of-window rows before insert`() {
+        val retained = setOf("playlist-channel")
+
+        assertThat(
+            EpgProgrammeChannelFilter.shouldKeepProgramme(
+                epgChannelId = "playlist-channel",
+                startUtcMillis = 100,
+                endUtcMillis = 200,
+                retainedEpgIds = retained,
+                fromUtcMillis = 150,
+                toUtcMillis = 250,
+            ),
+        ).isTrue()
+        assertThat(
+            EpgProgrammeChannelFilter.shouldKeepProgramme(
+                epgChannelId = "xmltv-only-channel",
+                startUtcMillis = 100,
+                endUtcMillis = 200,
+                retainedEpgIds = retained,
+                fromUtcMillis = 150,
+                toUtcMillis = 250,
+            ),
+        ).isFalse()
+        assertThat(
+            EpgProgrammeChannelFilter.shouldKeepProgramme(
+                epgChannelId = "playlist-channel",
+                startUtcMillis = 300,
+                endUtcMillis = 400,
+                retainedEpgIds = retained,
+                fromUtcMillis = 150,
+                toUtcMillis = 250,
+            ),
+        ).isFalse()
+    }
+
+    @Test
     fun `deletes unrelated programme IDs in SQLite-safe batches`() = runBlocking {
         val feedId = 91L
         val staleIds = (0 until 1_201).map { "unrelated-$it" }
