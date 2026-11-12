@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.11.42 (release pública manual) — 2026-11-12
+
+- **Notificações contextuais:** pede `POST_NOTIFICATIONS` somente após o usuário escolher gravação ou lembrete, nunca no cold start. Gravações imediatas, agendadas e de série continuam se o usuário negar; o app avisa que notificações/avisos podem faltar. Não cria lembrete nem troca automática sem notificações disponíveis e oferece atalho às configurações do app.
+- **Formulário e contraste:** os quatro chips de tipo de fonte quebram linha em telas estreitas; colar substitui a URL existente; contorno dos campos atinge contraste maior nos temas escuro e claro (≥3:1 sobre as superfícies auditadas).
+- **Acessibilidade do guia:** alturas da grade, cabeçalho temporal e painel de preview escalam com `fontScale`; o texto do preview aceita rolagem. O tamanho horizontal dos blocos e o layout em escala 1× permanecem.
+- **Atualização pelo FullTV:** preserva `app.fulltv`, aumenta para `versionCode 54` e usa o mesmo certificado SHA-256 da .41. Asset universal canônico e digest SHA-256 são publicados para o atualizador in-app; o instalador do Android ainda requer autorização/confirmação do usuário. O certificado é legado Android Debug compartilhado, não assinatura de produção (F3 permanece).
+- **Validação:** 254 testes Android e 13 testes Python passaram; `assembleDebug`, `lintVitalRelease` e `assembleRelease` passaram. As 60 bibliotecas nativas passaram verificação manual de offsets ZIP 16 KiB. Não houve teste físico/emulador nem evidência de correção do fechamento inesperado na Box TV.
+- **Dependabot lxml:** advisory permanece aberto; a mitigação existente no parser continua ativa e a wheel Android não foi atualizada nesta versão.
+- **APK universal:** `app.fulltv`, minSdk 24, targetSdk 35, quatro ABIs; 205.758.209 bytes; SHA-256 `c8411d3d4704883396f8639f0c284a00cefe350bb7323c632f98e47c32717818`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`.
+
 ## 0.11.41 (release pública manual; alerta lxml permanece aberto) — 2026-11-12
 
 - **Armazenamento EPG M3U:** processa um feed XMLTV comprimido de cada vez em cache privado limitado a 256 MiB, faz uma passada só de aliases e grava no Room apenas programas/aliases que correspondem aos canais da playlist. Mantém matches exatos prioritários, recusas a nomes ambíguos e a possibilidade de `<programme>` aparecer antes de `<channel>`. Reserva 64 MiB de espaço livre, apaga temporários ao terminar e preserva o snapshot anterior se falhar.

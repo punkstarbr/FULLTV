@@ -127,7 +127,9 @@ import app.opentv.security.ParentalAuthorization
 import app.opentv.ui.RecordingBackgroundDialog
 import app.opentv.ui.RecordingBackgroundPrompt
 import app.opentv.ui.ParentalPinGate
+import app.opentv.ui.NotificationPermissionPurpose
 import app.opentv.ui.interfacePalette
+import app.opentv.ui.rememberNotificationPermissionGate
 import coil.compose.AsyncImage
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -163,6 +165,7 @@ fun PlayerScreen(
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
+    val notificationPermissionGate = rememberNotificationPermissionGate()
     val view = LocalView.current
     val graph = remember { ServiceLocator.get(context) }
     val settings = remember { graph.settings }
@@ -442,24 +445,39 @@ fun PlayerScreen(
                 .onFailure { Log.e("OpenTV", "Could not stop recording (${it.javaClass.simpleName})") }
         } else {
             val channel = variants.firstOrNull { it.id == currentId } ?: return
-            scope.launch {
-                try {
-                    graph.recordingEngine.startChannel(channel)
-                    if (RecordingBackgroundPrompt.shouldShow(context)) {
-                        RecordingBackgroundPrompt.markShown()
-                        showBackgroundPrompt = true
+            fun startRecording() {
+                scope.launch {
+                    try {
+                        graph.recordingEngine.startChannel(channel)
+                        if (RecordingBackgroundPrompt.shouldShow(context)) {
+                            RecordingBackgroundPrompt.markShown()
+                            showBackgroundPrompt = true
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        Log.e("OpenTV", "Could not start recording (${error.javaClass.simpleName})")
+                        Toast.makeText(
+                            context,
+                            context.getString(R.string.rec_error_nothing),
+                            Toast.LENGTH_LONG,
+                        ).show()
                     }
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Exception) {
-                    Log.e("OpenTV", "Could not start recording (${error.javaClass.simpleName})")
-                    Toast.makeText(
-                        context,
-                        context.getString(R.string.rec_error_nothing),
-                        Toast.LENGTH_LONG,
-                    ).show()
                 }
             }
+            notificationPermissionGate.requireNotifications(
+                context = context,
+                purpose = NotificationPermissionPurpose.RECORDING,
+                onAvailable = { startRecording() },
+                onUnavailable = {
+                    startRecording()
+                    Toast.makeText(
+                        context,
+                        R.string.notification_access_recording_warning,
+                        Toast.LENGTH_LONG,
+                    ).show()
+                },
+            )
         }
         interaction++
     }

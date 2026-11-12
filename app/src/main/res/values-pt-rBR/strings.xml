@@ -688,4 +688,18 @@
     <string name="update_title_failed">Falha na atualização</string>
     <string name="update_download_failed">Não foi possível baixar a atualização. Verifique sua conexão com a internet e tente novamente.</string>
     <string name="update_install_permission_required">Na próxima tela, permita que o FullTV instale apps desta fonte e depois toque em Tentar novamente.</string>
+
+    <!-- Permissão de notificações: solicitada somente após uma ação de lembrete ou gravação. -->
+    <string name="notification_access_title">Permitir notificações?</string>
+    <string name="notification_access_recording_explanation">As notificações são usadas para avisos de gravações agendadas e de troca de canal. A gravação continuará mesmo se você prosseguir sem elas.</string>
+    <string name="notification_access_reminder_explanation">As notificações são necessárias para mostrar lembretes de programas e avisos de troca automática de canal. Se você não permitir, este lembrete ou a troca automática não será criado.</string>
+    <string name="notification_access_allow">Permitir</string>
+    <string name="notification_access_record_without">Continuar sem notificações</string>
+    <string name="notification_access_not_now">Agora não</string>
+    <string name="notification_access_disabled_title">As notificações estão desativadas</string>
+    <string name="notification_access_disabled_recording">A gravação continuará. Abra as configurações de notificações do FullTV para ativar os avisos de gravação e de troca de canal, ou continue sem eles.</string>
+    <string name="notification_access_disabled_reminder">Não é possível criar um lembrete ou uma troca automática de canal enquanto as notificações do FullTV estiverem desativadas. Abra as configurações de notificações do app e tente novamente.</string>
+    <string name="notification_access_open_settings">Abrir configurações de notificações</string>
+    <string name="notification_access_recording_warning">A gravação continuará, mas as notificações e os avisos de troca de canal podem não aparecer.</string>
+    <string name="notification_access_reminder_not_created">O lembrete não foi criado porque as notificações estão indisponíveis. Ative-as e tente novamente.</string>
 </resources>

@@ -741,4 +741,18 @@
     <string name="update_title_failed">Update failed</string>
     <string name="update_download_failed">Could not download the update. Check your internet connection and try again.</string>
     <string name="update_install_permission_required">On the next screen, allow FullTV to install apps from this source, then choose Retry.</string>
+
+    <!-- Notification permission: requested only after the user chooses a reminder or recording. -->
+    <string name="notification_access_title">Allow notifications?</string>
+    <string name="notification_access_recording_explanation">Notifications are used for scheduled recording and channel-switch alerts. The recording will still run if you continue without them.</string>
+    <string name="notification_access_reminder_explanation">Notifications are required for programme reminders and automatic channel-switch alerts. If you do not allow them, this reminder or automatic switch will not be created.</string>
+    <string name="notification_access_allow">Allow</string>
+    <string name="notification_access_record_without">Continue without notifications</string>
+    <string name="notification_access_not_now">Not now</string>
+    <string name="notification_access_disabled_title">Notifications are turned off</string>
+    <string name="notification_access_disabled_recording">Recording will continue. Open FullTV notification settings to enable recording and channel-switch alerts, or continue without them.</string>
+    <string name="notification_access_disabled_reminder">A reminder or automatic channel switch cannot be created while FullTV notifications are turned off. Open app notification settings and try again.</string>
+    <string name="notification_access_open_settings">Open notification settings</string>
+    <string name="notification_access_recording_warning">Recording will continue, but notifications and channel-switch alerts may not appear.</string>
+    <string name="notification_access_reminder_not_created">Reminder was not created because notifications are unavailable. Enable them and try again.</string>
 </resources>

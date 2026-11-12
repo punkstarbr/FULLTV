@@ -129,7 +129,8 @@ fun GuideGrid(
         }
     }
     val now = nowMillis
-    val metrics = remember(density) { guideMetrics(density) }
+    val fontScale = LocalDensity.current.fontScale
+    val metrics = remember(density, fontScale) { guideMetrics(density, fontScale) }
     // Jumping to another day resets the horizontal scroll to that day's start; a within-day time
     // drift (dayOffset unchanged) leaves the user's scroll position untouched.
     androidx.compose.runtime.LaunchedEffect(dayOffset) { scroll.scrollTo(0) }
@@ -402,7 +403,7 @@ private fun TimeHeader(
     metrics: GuideMetrics,
     palette: InterfacePalette,
 ) {
-    Row(Modifier.fillMaxWidth().height(28.dp)) {
+    Row(Modifier.fillMaxWidth().height(metrics.headerHeight)) {
         // Empty corner above the channel column.
         Box(Modifier.width(metrics.channelColumn))
         Row(
@@ -414,7 +415,7 @@ private fun TimeHeader(
             repeat(HOURS_IN_WINDOW * 2) { i ->
                 val slotStart = windowStartMillis + i * HALF_HOUR_MS
                 Box(
-                    Modifier.width(metrics.halfHourWidth).height(28.dp).padding(start = 6.dp),
+                    Modifier.width(metrics.halfHourWidth).height(metrics.headerHeight).padding(start = 6.dp),
                     contentAlignment = Alignment.CenterStart,
                 ) {
                     Text(
@@ -786,6 +787,7 @@ private fun placementsFor(
 private data class GuideMetrics(
     val minute: Float,
     val rowHeight: Dp,
+    val headerHeight: Dp,
     val channelColumn: Dp,
     val minBlock: Dp,
 ) {
@@ -793,13 +795,37 @@ private data class GuideMetrics(
     val windowWidth: Dp get() = (HOURS_IN_WINDOW * 60 * minute).dp
 }
 
-private fun guideMetrics(density: AppSettings.GuideDensity): GuideMetrics = when (density) {
+private fun guideMetrics(density: AppSettings.GuideDensity, fontScale: Float): GuideMetrics = when (density) {
     AppSettings.GuideDensity.COMPACT ->
-        GuideMetrics(minute = 3f, rowHeight = 54.dp, channelColumn = 190.dp, minBlock = 56.dp)
+        GuideMetrics(
+            minute = 3f,
+            rowHeight = guideFontScaledHeightDp(54f, fontScale).dp,
+            headerHeight = guideFontScaledHeightDp(28f, fontScale).dp,
+            channelColumn = 190.dp,
+            minBlock = 56.dp,
+        )
     AppSettings.GuideDensity.NORMAL ->
-        GuideMetrics(minute = 4f, rowHeight = 64.dp, channelColumn = 220.dp, minBlock = 72.dp)
+        GuideMetrics(
+            minute = 4f,
+            rowHeight = guideFontScaledHeightDp(64f, fontScale).dp,
+            headerHeight = guideFontScaledHeightDp(28f, fontScale).dp,
+            channelColumn = 220.dp,
+            minBlock = 72.dp,
+        )
     AppSettings.GuideDensity.COMFORTABLE ->
-        GuideMetrics(minute = 5.5f, rowHeight = 78.dp, channelColumn = 260.dp, minBlock = 96.dp)
+        GuideMetrics(
+            minute = 5.5f,
+            rowHeight = guideFontScaledHeightDp(78f, fontScale).dp,
+            headerHeight = guideFontScaledHeightDp(28f, fontScale).dp,
+            channelColumn = 260.dp,
+            minBlock = 96.dp,
+        )
+}
+
+/** Scale vertical guide space with text, but never shrink the configured density's baseline. */
+internal fun guideFontScaledHeightDp(baseHeightDp: Float, fontScale: Float): Float {
+    val safeFontScale = if (fontScale.isFinite()) fontScale.coerceAtLeast(1f) else 1f
+    return baseHeightDp * safeFontScale
 }
 
 /** Minutes between two instants, as guide width. Never negative; tiny slots stay legible. */

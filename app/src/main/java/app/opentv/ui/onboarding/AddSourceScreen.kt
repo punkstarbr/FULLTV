@@ -6,8 +6,11 @@
 package app.opentv.ui.onboarding
 
 import android.widget.Toast
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +19,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -63,6 +67,7 @@ import app.opentv.ui.channels.readClipboardText
  *    are entitled to know it stays on the device, and to be told so without having to go
  *    looking for a privacy policy.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun AddSourceScreen(
     viewModel: SourcesViewModel,
@@ -166,7 +171,14 @@ fun AddSourceScreen(
 
             Spacer(Modifier.height(24.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            FlowRow(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusGroup()
+                    .selectableGroup(),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
                 FilterChip(
                     selected = kind == SourceKind.XTREAM,
                     onClick = { kind = SourceKind.XTREAM },
@@ -240,7 +252,7 @@ fun AddSourceScreen(
                 },
                 trailingIcon = {
                     PasteButton { pasted ->
-                        val updatedUrl = url + pasted
+                        val updatedUrl = pasted
                         url = updatedUrl
                         if (YouTubeLiveSearchUrl.isSearchUrl(updatedUrl)) {
                             kind = SourceKind.YOUTUBE_LIVE_SEARCH
@@ -386,10 +398,11 @@ fun AddSourceScreen(
 }
 
 /**
- * A trailing "paste" affordance for a provider field: reads the system clipboard and appends it
- * via [onPaste]. A long Xtream URL or username is miserable to type on a d-pad, so this is exactly
- * what the reporter asked for. Reads the same clipboard as the on-screen keyboard's Paste key; an
- * empty clipboard just shows a brief message rather than doing nothing silently.
+ * A trailing "paste" affordance for a provider field: reads the system clipboard and passes its
+ * contents to [onPaste], which decides how to apply it to that field. A long Xtream URL or username
+ * is miserable to type on a d-pad, so this is exactly what the reporter asked for. Reads the same
+ * clipboard as the on-screen keyboard's Paste key; an empty clipboard just shows a brief message
+ * rather than doing nothing silently.
  */
 @Composable
 private fun PasteButton(onPaste: (String) -> Unit) {

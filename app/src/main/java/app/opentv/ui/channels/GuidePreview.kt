@@ -21,7 +21,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.FiberManualRecord
@@ -40,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -98,22 +101,25 @@ fun GuidePreview(
     val palette = interfacePalette(interfaceStyle, MaterialTheme.colorScheme)
     val compactBottomPanel = interfaceStyle == AppSettings.InterfaceStyle.CLASSIC_EPG
     val hybridPreview = interfaceStyle == AppSettings.InterfaceStyle.OI_HYBRID
+    val basePreviewHeightDp = when {
+        compactBottomPanel -> 132f
+        hybridPreview -> 300f
+        else -> 212f
+    }
+    val previewHeight = guideFontScaledHeightDp(basePreviewHeightDp, LocalDensity.current.fontScale).dp
     val previewModifier = if (interfaceStyle == AppSettings.InterfaceStyle.CURRENT) modifier
         else modifier.background(palette.surface)
     Row(
         previewModifier
             .fillMaxWidth()
-            .height(when {
-                compactBottomPanel -> 132.dp
-                hybridPreview -> 300.dp
-                else -> 212.dp
-            })
+            .height(previewHeight)
             .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         // ---- Logo / "watch" card ----------------------------------------------------------
         Box(
             Modifier
-                .fillMaxHeight()
+                .height((basePreviewHeightDp - 24f).dp)
                 .aspectRatio(16f / 9f)
                 .clip(RoundedCornerShape(12.dp))
                 .background(Color.Black)
@@ -173,7 +179,7 @@ fun GuidePreview(
         Spacer(Modifier.width(18.dp))
 
         // ---- Now / next detail ------------------------------------------------------------
-        Column(Modifier.weight(1f).fillMaxHeight()) {
+        Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState())) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 // ---- Day navigation (Sky Q-style): ‹ Today › ----------------------------
                 // Only shown once the caller wires a label in; keeps older callers unchanged.

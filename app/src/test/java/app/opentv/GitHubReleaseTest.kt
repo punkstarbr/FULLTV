@@ -2,6 +2,7 @@ package app.opentv
 
 import app.opentv.data.remote.GitHubAsset
 import app.opentv.data.remote.GitHubRelease
+import app.opentv.update.UpdateChecker
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
@@ -36,5 +37,17 @@ class GitHubReleaseTest {
 
         assertThat(onlyUntrusted.apkAsset()).isNull()
         assertThat(release.apkAsset(releaseTag = "latest")).isNull()
+    }
+
+    @Test
+    fun v01142UsesTheCanonicalUniversalAssetAndUpdatesV01141() {
+        val candidate = GitHubRelease(
+            tagName = "v0.11.42",
+            assets = listOf(GitHubAsset(name = "FullTV-0.11.42-universal.apk")),
+        )
+
+        assertThat(candidate.apkAsset(preferDebug = false)?.name)
+            .isEqualTo("FullTV-0.11.42-universal.apk")
+        assertThat(UpdateChecker.isNewer(candidate.tagName, "0.11.41")).isTrue()
     }
 }

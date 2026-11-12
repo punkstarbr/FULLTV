@@ -39,7 +39,7 @@ private val DarkScheme = darkColorScheme(
     onSurface = Color(0xFFE8EAF0),
     surfaceVariant = Color(0xFF171A24),
     onSurfaceVariant = Color(0xFFA8AEC0),
-    outline = Color(0xFF2A2F3D),
+    outline = Color(0xFF5A6377),
     error = Color(0xFFFF6B6B),
     onError = Color(0xFF1A0505),
 )
@@ -58,7 +58,7 @@ private val LightScheme = lightColorScheme(
     onSurface = Color(0xFF13141A),
     surfaceVariant = Color(0xFFEEF0F6),
     onSurfaceVariant = Color(0xFF4A4F60),
-    outline = Color(0xFFD3D7E2),
+    outline = Color(0xFF858B9B),
 )
 
 /** Scaled up from the Material defaults: ten-foot viewing needs bigger text than a phone. */

@@ -97,6 +97,8 @@ import app.opentv.player.YouTubeChannelUrl
 import app.opentv.ui.ChannelsViewModel
 import app.opentv.ui.RecordingBackgroundDialog
 import app.opentv.ui.RecordingBackgroundPrompt
+import app.opentv.ui.NotificationPermissionPurpose
+import app.opentv.ui.rememberNotificationPermissionGate
 import coil.compose.AsyncImage
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -139,6 +141,7 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val notificationPermissionGate = rememberNotificationPermissionGate()
     val graph = remember { ServiceLocator.get(context) }
     val settings = remember { graph.settings }
     val previewEnabled by settings.guidePreviewVideo.collectAsState()
@@ -229,6 +232,37 @@ fun HomeScreen(
             RecordingBackgroundPrompt.markShown()
             showBackgroundPrompt = true
         }
+    }
+
+    fun requireRecordingNotifications(onStart: () -> Unit) {
+        notificationPermissionGate.requireNotifications(
+            context = context,
+            purpose = NotificationPermissionPurpose.RECORDING,
+            onAvailable = onStart,
+            onUnavailable = {
+                onStart()
+                Toast.makeText(
+                    context,
+                    R.string.notification_access_recording_warning,
+                    Toast.LENGTH_LONG,
+                ).show()
+            },
+        )
+    }
+
+    fun requireReminderNotifications(onCreate: () -> Unit) {
+        notificationPermissionGate.requireNotifications(
+            context = context,
+            purpose = NotificationPermissionPurpose.REMINDER,
+            onAvailable = onCreate,
+            onUnavailable = {
+                Toast.makeText(
+                    context,
+                    R.string.notification_access_reminder_not_created,
+                    Toast.LENGTH_LONG,
+                ).show()
+            },
+        )
     }
 
     // ---- Category rail collapse (Change 2) ---------------------------------------------------
@@ -520,9 +554,11 @@ fun HomeScreen(
                         graph.recordingEngine.stop(active.id)
                         Toast.makeText(context, context.getString(R.string.rec_recording_stopped), Toast.LENGTH_SHORT).show()
                     } else {
-                        recordScope.launch { graph.recordingEngine.startChannel(row.primary, row.now) }
-                        Toast.makeText(context, context.getString(R.string.rec_recording_started_see_tab, row.primary.shownName), Toast.LENGTH_LONG).show()
-                        promptBackgroundIfNeeded()
+                        requireRecordingNotifications {
+                            recordScope.launch { graph.recordingEngine.startChannel(row.primary, row.now) }
+                            Toast.makeText(context, context.getString(R.string.rec_recording_started_see_tab, row.primary.shownName), Toast.LENGTH_LONG).show()
+                            promptBackgroundIfNeeded()
+                        }
                     }
                 }
 
@@ -739,9 +775,12 @@ fun HomeScreen(
                         primary = true,
                         focusRequester = firstActionFocusRequester,
                     ) {
-                        recordScope.launch { graph.recordingEngine.startChannel(chosenVariant, programme) }
-                        Toast.makeText(context, context.getString(R.string.rec_recording_channel, channel.shownName), Toast.LENGTH_LONG).show()
-                        promptBackgroundIfNeeded()
+                        requireRecordingNotifications {
+                            recordScope.launch { graph.recordingEngine.startChannel(chosenVariant, programme) }
+                            Toast.makeText(context, context.getString(R.string.rec_recording_channel, channel.shownName), Toast.LENGTH_LONG).show()
+                            promptBackgroundIfNeeded()
+                            recordTarget = null
+                        }
                         recordTarget = null
                     }
                     // A finished programme on a catch-up channel plays back from the archive.
@@ -772,9 +811,12 @@ fun HomeScreen(
                         primary = true,
                         focusRequester = firstActionFocusRequester,
                     ) {
-                        recordScope.launch { graph.recordingEngine.scheduleProgramme(chosenVariant, programme) }
-                        Toast.makeText(context, context.getString(R.string.rec_scheduled_title, programme.title), Toast.LENGTH_LONG).show()
-                        promptBackgroundIfNeeded()
+                        requireRecordingNotifications {
+                            recordScope.launch { graph.recordingEngine.scheduleProgramme(chosenVariant, programme) }
+                            Toast.makeText(context, context.getString(R.string.rec_scheduled_title, programme.title), Toast.LENGTH_LONG).show()
+                            promptBackgroundIfNeeded()
+                            recordTarget = null
+                        }
                         recordTarget = null
                     }
                 }
@@ -801,13 +843,17 @@ fun HomeScreen(
                         }
                     } else {
                         RecordActionRow(stringResource(R.string.guide_remind_me)) {
-                            recordScope.launch { setReminder(graph, context, channel, programme, autoTune = false) }
-                            Toast.makeText(context, context.getString(R.string.guide_reminder_set, programme.title), Toast.LENGTH_LONG).show()
+                            requireReminderNotifications {
+                                recordScope.launch { setReminder(graph, context, channel, programme, autoTune = false) }
+                                Toast.makeText(context, context.getString(R.string.guide_reminder_set, programme.title), Toast.LENGTH_LONG).show()
+                            }
                             recordTarget = null
                         }
                         RecordActionRow(stringResource(R.string.guide_auto_switch)) {
-                            recordScope.launch { setReminder(graph, context, channel, programme, autoTune = true) }
-                            Toast.makeText(context, context.getString(R.string.guide_will_switch, channel.shownName), Toast.LENGTH_LONG).show()
+                            requireReminderNotifications {
+                                recordScope.launch { setReminder(graph, context, channel, programme, autoTune = true) }
+                                Toast.makeText(context, context.getString(R.string.guide_will_switch, channel.shownName), Toast.LENGTH_LONG).show()
+                            }
                             recordTarget = null
                         }
                     }
@@ -816,11 +862,14 @@ fun HomeScreen(
                     stringResource(R.string.rec_record_series),
                     focusRequester = firstActionFocusRequester.takeIf { firstActionKey == "series" },
                 ) {
-                    recordScope.launch {
-                        graph.recordingEngine.recordSeries(channel, programme, targetRow.programmes)
+                    requireRecordingNotifications {
+                        recordScope.launch {
+                            graph.recordingEngine.recordSeries(channel, programme, targetRow.programmes)
+                        }
+                        Toast.makeText(context, context.getString(R.string.rec_series_recording_set, programme.title), Toast.LENGTH_LONG).show()
+                        promptBackgroundIfNeeded()
+                        recordTarget = null
                     }
-                    Toast.makeText(context, context.getString(R.string.rec_series_recording_set, programme.title), Toast.LENGTH_LONG).show()
-                    promptBackgroundIfNeeded()
                     recordTarget = null
                 }
                 RecordActionRow(stringResource(R.string.guide_watch_channel)) {
@@ -973,19 +1022,25 @@ fun HomeScreen(
                         }
                     } else {
                         RecordActionRow(stringResource(R.string.guide_record_now_playing), primary = true) {
-                            recordScope.launch { graph.recordingEngine.startChannel(channel, nowProg) }
-                            Toast.makeText(context, context.getString(R.string.rec_recording_started_see_tab, channel.shownName), Toast.LENGTH_LONG).show()
-                            promptBackgroundIfNeeded()
+                            requireRecordingNotifications {
+                                recordScope.launch { graph.recordingEngine.startChannel(channel, nowProg) }
+                                Toast.makeText(context, context.getString(R.string.rec_recording_started_see_tab, channel.shownName), Toast.LENGTH_LONG).show()
+                                promptBackgroundIfNeeded()
+                                channelMenu = null
+                            }
                             channelMenu = null
                         }
                     }
                     if (nowProg != null) {
                         RecordActionRow(stringResource(R.string.rec_record_series_named, nowProg.title)) {
-                            recordScope.launch {
-                                graph.recordingEngine.recordSeries(channel, nowProg, menuRow.programmes)
+                            requireRecordingNotifications {
+                                recordScope.launch {
+                                    graph.recordingEngine.recordSeries(channel, nowProg, menuRow.programmes)
+                                }
+                                Toast.makeText(context, context.getString(R.string.rec_series_recording_set, nowProg.title), Toast.LENGTH_LONG).show()
+                                promptBackgroundIfNeeded()
+                                channelMenu = null
                             }
-                            Toast.makeText(context, context.getString(R.string.rec_series_recording_set, nowProg.title), Toast.LENGTH_LONG).show()
-                            promptBackgroundIfNeeded()
                             channelMenu = null
                         }
                     }
