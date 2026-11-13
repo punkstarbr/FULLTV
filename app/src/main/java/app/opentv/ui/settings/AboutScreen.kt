@@ -49,6 +49,9 @@ import app.opentv.core.ServiceLocator
 import app.opentv.update.UpdateChecker
 import kotlinx.coroutines.launch
 
+private const val LEGACY_SIGNING_CERT_SHA256 =
+    "01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91"
+
 /**
  * About: what this is, what version it is, and how to get involved. The update check here is the
  * manual counterpart to the automatic one — someone who just heard a fix landed can pull it now
@@ -78,6 +81,22 @@ fun AboutScreen(onBack: () -> Unit) {
         Section(stringResource(R.string.about_version)) {
             Text("${stringResource(R.string.app_name)} ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(12.dp))
+            if (BuildConfig.RELEASE_SIGNING_CERT_SHA256.isNotBlank()) {
+                if (BuildConfig.RELEASE_SIGNING_CERT_SHA256.equals(LEGACY_SIGNING_CERT_SHA256, ignoreCase = true)) {
+                    Text(
+                        stringResource(R.string.about_legacy_signature_notice),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                val fingerprint = BuildConfig.RELEASE_SIGNING_CERT_SHA256.chunked(2).joinToString(":")
+                Text(
+                    stringResource(R.string.about_signing_fingerprint, fingerprint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(12.dp))
+            }
             if (BuildConfig.UPDATE_REPO_SLUG.isBlank()) {
                 Text(
                     stringResource(R.string.about_updates_manual),

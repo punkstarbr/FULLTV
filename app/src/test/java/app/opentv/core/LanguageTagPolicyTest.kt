@@ -24,4 +24,16 @@ class LanguageTagPolicyTest {
         assertEquals("pt-BR", LanguageTagPolicy.fromStoredValue("pt-BR"))
         assertEquals("pt-PT", LanguageTagPolicy.fromStoredValue("pt-PT"))
     }
+
+    @Test
+    fun englishRemainsSupported() {
+        assertEquals("en", LanguageTagPolicy.fromStoredValue("en"))
+    }
+
+    @Test
+    fun retiredPartialLocalesFollowTheSystem() {
+        assertEquals("", LanguageTagPolicy.fromStoredValue("fr"))
+        assertEquals("", LanguageTagPolicy.fromStoredValue("es"))
+        assertEquals("", LanguageTagPolicy.fromStoredValue("zh"))
+    }
 }

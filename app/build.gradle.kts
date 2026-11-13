@@ -16,8 +16,8 @@ val releaseKeyPassword = providers.environmentVariable("KEY_PASSWORD").orNull
 val releaseCertificateSha256 = providers.environmentVariable("RELEASE_CERT_SHA256").orNull
     ?.trim()
     ?.lowercase()
-val fullTvVersionName = "0.11.42"
-val fullTvVersionCode = 54
+val fullTvVersionName = "0.11.43"
+val fullTvVersionCode = 55
 val hasReleaseSigning = releaseKeystorePath?.let { it.isNotBlank() && file(it).isFile } == true &&
     !releaseKeystorePassword.isNullOrBlank() &&
     !releaseKeyAlias.isNullOrBlank() &&
@@ -126,6 +126,17 @@ android {
             "\"${releaseCertificateSha256.orEmpty()}\"",
         )
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    // Keep the universal APK as the compatibility bridge for older in-app updaters, while also
+    // producing device-specific assets for newer clients and manual installation.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+            isUniversalApk = true
+        }
     }
 
     signingConfigs {

@@ -29,6 +29,7 @@ internal data class CapturedPcm(
  * A non-blocking tap on Media3's PCM sink. It only copies bounded PCM while the user has explicitly
  * started live captions. The TeeAudioProcessor forwards the original buffer unchanged for playback.
  */
+@OptIn(markerClass = [UnstableApi::class])
 class LiveAudioTap internal constructor() : TeeAudioProcessor.AudioBufferSink, AutoCloseable {
     private data class AudioFormat(val sampleRateHz: Int, val channelCount: Int, val encoding: Int)
 

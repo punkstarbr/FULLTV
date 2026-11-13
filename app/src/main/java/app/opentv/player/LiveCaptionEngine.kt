@@ -8,7 +8,9 @@ package app.opentv.player
 import android.app.ActivityManager
 import android.content.Context
 import android.os.SystemClock
+import androidx.annotation.OptIn
 import androidx.media3.common.C
+import androidx.media3.common.util.UnstableApi
 import com.google.android.gms.tasks.Task
 import com.google.mlkit.common.model.DownloadConditions
 import com.google.mlkit.nl.translate.TranslateLanguage
@@ -84,6 +86,7 @@ internal data class LiveCaptionState(
  * decoded PCM tap; this class does not request microphone access, open a second stream, or upload
  * audio/transcripts. Vosk and ML Kit translation models are initialized only after explicit start.
  */
+@OptIn(markerClass = [UnstableApi::class])
 internal class LiveCaptionEngine(
     context: Context,
     httpClient: OkHttpClient,

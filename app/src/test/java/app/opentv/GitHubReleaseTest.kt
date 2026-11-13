@@ -40,14 +40,36 @@ class GitHubReleaseTest {
     }
 
     @Test
-    fun v01142UsesTheCanonicalUniversalAssetAndUpdatesV01141() {
+    fun prefersTheFirstCompatibleAbiAndFallsBackToUniversal() {
         val candidate = GitHubRelease(
-            tagName = "v0.11.42",
-            assets = listOf(GitHubAsset(name = "FullTV-0.11.42-universal.apk")),
+            tagName = "v0.11.43",
+            assets = listOf(
+                GitHubAsset(name = "FullTV-0.11.43-universal.apk"),
+                GitHubAsset(name = "FullTV-0.11.43-armeabi-v7a.apk"),
+                GitHubAsset(name = "FullTV-0.11.43-arm64-v8a.apk"),
+            ),
         )
 
-        assertThat(candidate.apkAsset(preferDebug = false)?.name)
-            .isEqualTo("FullTV-0.11.42-universal.apk")
-        assertThat(UpdateChecker.isNewer(candidate.tagName, "0.11.41")).isTrue()
+        assertThat(candidate.apkAsset(supportedAbis = listOf("arm64-v8a", "armeabi-v7a"))?.name)
+            .isEqualTo("FullTV-0.11.43-arm64-v8a.apk")
+        assertThat(candidate.apkAsset(supportedAbis = listOf("x86"))?.name)
+            .isEqualTo("FullTV-0.11.43-universal.apk")
+        assertThat(UpdateChecker.isNewer(candidate.tagName, "0.11.42")).isTrue()
+    }
+
+    @Test
+    fun duplicateAbiAssetIsRejectedButDebugInstallStillUsesDebugAsset() {
+        val duplicate = GitHubRelease(
+            tagName = "v0.11.43",
+            assets = listOf(
+                GitHubAsset(name = "FullTV-0.11.43-universal.apk"),
+                GitHubAsset(name = "FullTV-0.11.43-arm64-v8a.apk"),
+                GitHubAsset(name = "FullTV-0.11.43-arm64-v8a.apk"),
+                GitHubAsset(name = "FullTV-0.11.43-debug.apk"),
+            ),
+        )
+        assertThat(duplicate.apkAsset(supportedAbis = listOf("arm64-v8a"))).isNull()
+        assertThat(duplicate.apkAsset(preferDebug = true)?.name)
+            .isEqualTo("FullTV-0.11.43-debug.apk")
     }
 }

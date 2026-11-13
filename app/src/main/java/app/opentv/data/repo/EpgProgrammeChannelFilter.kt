@@ -9,11 +9,53 @@ import app.opentv.data.db.ProgrammeDao
 import app.opentv.data.model.Channel
 import app.opentv.data.model.EpgChannelAlias
 import app.opentv.data.parser.ChannelNameNormalizer
+import java.nio.ByteBuffer
+import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 
 /** Keeps programme rows whose XMLTV channel is identified by the current playlist catalogue. */
 internal object EpgProgrammeChannelFilter {
     private const val DELETE_CHUNK_SIZE = 500
     private const val MIN_KEY_LENGTH = 2
+    private const val HEX_DIGITS = "0123456789abcdef"
+
+    /** Increment whenever the matching behavior or the fingerprinted Matcher inputs change. */
+    const val FILTER_ALGORITHM_VERSION: Int = 1
+
+    /**
+     * Fingerprints only the ordered fields consumed by [Matcher]. Length prefixes and a distinct
+     * null marker make the byte stream unambiguous; list order is significant for duplicate keys.
+     */
+    fun fingerprint(playlistChannels: List<Channel>): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        digest.updateInt(playlistChannels.size)
+        playlistChannels.forEach { channel ->
+            digest.updateString(channel.groupKey)
+            digest.updateNullableString(channel.epgOverrideId)
+            digest.updateNullableString(channel.epgChannelId)
+        }
+        return buildString(64) {
+            digest.digest().forEach { byte ->
+                val unsigned = byte.toInt() and 0xff
+                append(HEX_DIGITS[unsigned ushr 4])
+                append(HEX_DIGITS[unsigned and 0x0f])
+            }
+        }
+    }
+
+    private fun MessageDigest.updateInt(value: Int) {
+        update(ByteBuffer.allocate(Int.SIZE_BYTES).putInt(value).array())
+    }
+
+    private fun MessageDigest.updateString(value: String) {
+        val bytes = value.toByteArray(StandardCharsets.UTF_8)
+        updateInt(bytes.size)
+        update(bytes)
+    }
+
+    private fun MessageDigest.updateNullableString(value: String?) {
+        if (value == null) updateInt(-1) else updateString(value)
+    }
 
     /**
      * Incremental equivalent of [EpgMatcher.match], scoped to playlist group keys. It retains only

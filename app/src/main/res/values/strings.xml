@@ -755,4 +755,12 @@
     <string name="notification_access_open_settings">Open notification settings</string>
     <string name="notification_access_recording_warning">Recording will continue, but notifications and channel-switch alerts may not appear.</string>
     <string name="notification_access_reminder_not_created">Reminder was not created because notifications are unavailable. Enable them and try again.</string>
+    <string name="about_legacy_signature_notice">The shared Android Debug signing certificate is retained to allow direct updates. This is not production signing.</string>
+    <string name="about_signing_fingerprint">Certificate SHA-256 fingerprint: %1$s</string>
+    <string name="onboarding_user_agent_label">User-Agent</string>
+    <string name="onboarding_show_password">Show password</string>
+    <string name="onboarding_hide_password">Hide password</string>
+    <string name="onboarding_required_field">This field is required.</string>
+    <string name="onboarding_youtube_search_invalid">Enter a valid YouTube search-results URL.</string>
+    <string name="onboarding_required_fields_summary">Complete the highlighted required fields before testing or saving.</string>
 </resources>

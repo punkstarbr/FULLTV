@@ -702,4 +702,12 @@
     <string name="notification_access_open_settings">Abrir configurações de notificações</string>
     <string name="notification_access_recording_warning">A gravação continuará, mas as notificações e os avisos de troca de canal podem não aparecer.</string>
     <string name="notification_access_reminder_not_created">O lembrete não foi criado porque as notificações estão indisponíveis. Ative-as e tente novamente.</string>
+    <string name="about_legacy_signature_notice">A assinatura Android Debug compartilhada é mantida para permitir atualizações diretas. Ela não é uma assinatura de produção.</string>
+    <string name="about_signing_fingerprint">Impressão digital SHA-256 do certificado: %1$s</string>
+    <string name="onboarding_user_agent_label">User-Agent</string>
+    <string name="onboarding_show_password">Mostrar senha</string>
+    <string name="onboarding_hide_password">Ocultar senha</string>
+    <string name="onboarding_required_field">Este campo é obrigatório.</string>
+    <string name="onboarding_youtube_search_invalid">Informe uma URL válida de resultados de pesquisa do YouTube.</string>
+    <string name="onboarding_required_fields_summary">Preencha os campos obrigatórios destacados antes de testar ou salvar.</string>
 </resources>

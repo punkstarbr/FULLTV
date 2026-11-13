@@ -11,6 +11,7 @@ import android.media.MediaFormat
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import androidx.annotation.OptIn
 import androidx.media3.common.MediaItem
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.transformer.Composition
@@ -42,12 +43,12 @@ import kotlin.coroutines.resume
  * Any failure — an exotic codec, a full disk, a NAS that went away — leaves the original TS intact,
  * so recording never becomes worse because MP4 was requested.
  */
+@OptIn(markerClass = [UnstableApi::class])
 object RecordingRemux {
 
     private data class Tracks(val video: String, val audio: String?)
 
     /** @return true when the MP4 was written and the row now points at it. */
-    @OptIn(UnstableApi::class)
     suspend fun convert(context: Context, recording: Recording): Boolean {
         val graph = ServiceLocator.get(context)
         val settings = graph.settings
@@ -179,7 +180,6 @@ object RecordingRemux {
      * Transmux with Media3. Setting the requested output MIME types to the *input* types is what
      * tells Transformer to copy the samples instead of decoding and re-encoding them.
      */
-    @OptIn(UnstableApi::class)
     private suspend fun transmux(
         context: Context,
         input: File,

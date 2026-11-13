@@ -125,13 +125,17 @@ private fun KeyCap(
 
 /**
  * Plain text currently on the system clipboard, trimmed — or null when there's nothing to paste.
- * Shared by this keyboard's Paste key and the provider form's paste buttons so both read the
- * clipboard the same way.
+ * The on-screen keyboard uses this form; provider credentials use [readClipboardTextRaw] so their
+ * leading and trailing spaces are not silently changed.
  */
 internal fun readClipboardText(context: Context): String? {
+    return readClipboardTextRaw(context)?.trim()?.takeIf { it.isNotEmpty() }
+}
+
+/** Reads clipboard text without trimming; provider-password paste uses this to preserve spaces. */
+internal fun readClipboardTextRaw(context: Context): String? {
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return null
     val clip = clipboard.primaryClip ?: return null
     if (clip.itemCount == 0) return null
-    val text = clip.getItemAt(0)?.coerceToText(context)?.toString()
-    return text?.trim()?.takeIf { it.isNotEmpty() }
+    return clip.getItemAt(0)?.coerceToText(context)?.toString()
 }

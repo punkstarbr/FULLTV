@@ -5,6 +5,7 @@
  */
 package app.opentv.update
 
+import android.os.Build
 import app.opentv.BuildConfig
 import app.opentv.data.remote.GitHubRelease
 import java.io.ByteArrayOutputStream
@@ -32,12 +33,15 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
  * - **Compares the tag, not a build number.** GitHub gives us a tag like `v0.2.0`. We parse it
  *   as a dotted version and compare it to our own [currentVersionName]. A release whose tag is
  *   not strictly newer is ignored, so re-tagging or a same-version hotfix will not prompt.
+ * - **Chooses a compatible package.** New releases can contain ABI-specific APKs; the first one
+ *   matching [supportedAbis] is preferred, with the canonical universal asset as a bridge/fallback.
  * - **Skips drafts and pre-releases**, which are not meant for the general audience.
  */
 class UpdateChecker(
     private val http: OkHttpClient,
     private val currentVersionName: String,
     private val repoSlug: String = BuildConfig.UPDATE_REPO_SLUG,
+    private val supportedAbis: List<String> = Build.SUPPORTED_ABIS?.toList().orEmpty(),
 ) {
     data class Update(
         val versionName: String,
@@ -92,6 +96,7 @@ class UpdateChecker(
                 val asset = release.apkAsset(
                     releaseTag = release.tagName,
                     preferDebug = BuildConfig.APPLICATION_ID.endsWith(".debug"),
+                    supportedAbis = supportedAbis,
                 )
                     ?: return@withContext null
                 if (!isNewer(release.tagName, currentVersionName)) return@withContext null

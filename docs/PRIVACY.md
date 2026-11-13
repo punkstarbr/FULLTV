@@ -44,6 +44,10 @@ programme-database space, not network transfer. The previous guide snapshot is k
 filtered replacement succeeds. A URL shared by different playlists gets a separate filtered feed
 for each list; manually configured and built-in feeds remain global. If both scopes use the same URL,
 the URL may be downloaded more than once.
+After a successful filtered sync, a separate best-effort cache may retain only the matched XMLTV IDs,
+the compressed guide's SHA-256, an ordered fingerprint of the playlist fields used for matching, and
+the filter version. It is app-private, limited to 1 MiB/eight entries, never includes the feed URL or
+XMLTV body, is not copied to another device, and is ignored if corrupt or unavailable.
 When the playlist's channels or first guide URL changes, its feeds are marked for
 the next EPG refresh, so later channel additions and guide URL changes are considered without hardcoded
 IDs, even when the M3U address stays the same.

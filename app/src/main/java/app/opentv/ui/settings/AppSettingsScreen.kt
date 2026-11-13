@@ -358,43 +358,13 @@ private fun TmdbKeySection(settings: AppSettings) {
 }
 
 /**
- * UI languages are labelled with their endonyms and stored as BCP-47 tags. Resource matching may
- * fall back to a language-only folder (for example, pt-PT uses `values-pt`). Brazilian Portuguese
- * is the first Portuguese option and the app's default; Portugal remains selectable.
+ * Only locales with a complete, reviewed catalogue are offered. Brazilian Portuguese remains
+ * the app default; Portugal is also selectable and uses the language-only `values-pt` resources.
  */
 private val OpenTvLanguages: List<Pair<String, String>> = listOf(
     "en" to "English",
-    "es" to "Español",
-    "fr" to "Français",
-    "de" to "Deutsch",
-    "it" to "Italiano",
     "pt-BR" to "Português (Brasil)",
     "pt-PT" to "Português (Portugal)",
-    "nl" to "Nederlands",
-    "pl" to "Polski",
-    "ru" to "Русский",
-    "tr" to "Türkçe",
-    "ar" to "العربية",
-    "zh" to "中文",
-    "ja" to "日本語",
-    "ko" to "한국어",
-    "hi" to "हिन्दी",
-    "sv" to "Svenska",
-    "da" to "Dansk",
-    "fi" to "Suomi",
-    "nb" to "Norsk",
-    "cs" to "Čeština",
-    "el" to "Ελληνικά",
-    "ro" to "Română",
-    "hu" to "Magyar",
-    "uk" to "Українська",
-    "id" to "Bahasa Indonesia",
-    "th" to "ไทย",
-    "vi" to "Tiếng Việt",
-    "bg" to "Български",
-    "sk" to "Slovenčina",
-    "hr" to "Hrvatski",
-    "fa" to "فارسی",
 )
 
 /** Persist the chosen language and recreate the activity so the whole UI reloads translated. */

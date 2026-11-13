@@ -24,6 +24,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentPaste
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,6 +48,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import app.opentv.R
 import app.opentv.data.model.Source
@@ -54,7 +57,7 @@ import app.opentv.data.parser.YouTubeLiveSearchUrl
 import app.opentv.data.remote.HttpsUrlPolicy
 import app.opentv.isRunningOnTelevision
 import app.opentv.ui.SourcesViewModel
-import app.opentv.ui.channels.readClipboardText
+import app.opentv.ui.channels.readClipboardTextRaw
 
 /**
  * First-run setup.
@@ -109,6 +112,7 @@ fun AddSourceScreen(
     var url by remember(existing?.id) { mutableStateOf(existing?.url ?: "") }
     var username by remember(existing?.id) { mutableStateOf(existing?.username ?: "") }
     var password by remember(existing?.id) { mutableStateOf(existing?.password ?: "") }
+    var passwordVisible by remember(existing?.id) { mutableStateOf(false) }
     var mac by remember(existing?.id) { mutableStateOf(existing?.macAddress ?: "") }
     var epgUrl by remember(existing?.id) { mutableStateOf(existing?.epgUrl ?: "") }
     var showAdvanced by remember { mutableStateOf(false) }
@@ -140,12 +144,15 @@ fun AddSourceScreen(
 
     val hasUnsafeScheme = HttpsUrlPolicy.requiresSecureScheme(url) ||
         (showAdvanced && HttpsUrlPolicy.requiresSecureScheme(epgUrl))
-    val canSubmit = url.isNotBlank() && !hasUnsafeScheme && when (kind) {
-        SourceKind.XTREAM -> username.isNotBlank() && password.isNotBlank()
-        SourceKind.M3U -> true
-        SourceKind.YOUTUBE_LIVE_SEARCH -> YouTubeLiveSearchUrl.isSearchUrl(url)
-        SourceKind.STALKER -> mac.isNotBlank()
-    }
+    val formIssues = ProviderFormPolicy.issues(
+        kind = kind,
+        url = url,
+        username = username,
+        password = password,
+        mac = mac,
+        validYouTubeSearchUrl = YouTubeLiveSearchUrl.isSearchUrl(url),
+    )
+    val canSubmit = formIssues.isEmpty() && !hasUnsafeScheme
 
     Column(
         modifier = Modifier
@@ -245,11 +252,20 @@ fun AddSourceScreen(
                                 SourceKind.STALKER -> stringResource(R.string.onboarding_portal_help)
                             },
                         )
+                        if (ProviderFormIssue.URL_REQUIRED in formIssues) {
+                            Text(stringResource(R.string.onboarding_required_field), color = MaterialTheme.colorScheme.error)
+                        }
+                        if (ProviderFormIssue.YOUTUBE_SEARCH_INVALID in formIssues) {
+                            Text(stringResource(R.string.onboarding_youtube_search_invalid), color = MaterialTheme.colorScheme.error)
+                        }
                         if (HttpsUrlPolicy.requiresSecureScheme(url)) {
                             Text(stringResource(R.string.source_https_required), color = MaterialTheme.colorScheme.error)
                         }
                     }
                 },
+                isError = ProviderFormIssue.URL_REQUIRED in formIssues ||
+                    ProviderFormIssue.YOUTUBE_SEARCH_INVALID in formIssues ||
+                    HttpsUrlPolicy.requiresSecureScheme(url),
                 trailingIcon = {
                     PasteButton { pasted ->
                         val updatedUrl = pasted
@@ -270,7 +286,13 @@ fun AddSourceScreen(
                     value = username,
                     onValueChange = { username = it },
                     label = { Text(stringResource(R.string.recset_field_username)) },
-                    trailingIcon = { PasteButton { username += it } },
+                    isError = ProviderFormIssue.USERNAME_REQUIRED in formIssues,
+                    supportingText = {
+                        if (ProviderFormIssue.USERNAME_REQUIRED in formIssues) {
+                            Text(stringResource(R.string.onboarding_required_field), color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    trailingIcon = { PasteButton(preserveWhitespace = true) { username = it } },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -279,9 +301,28 @@ fun AddSourceScreen(
                     value = password,
                     onValueChange = { password = it },
                     label = { Text(stringResource(R.string.recset_field_password)) },
-                    trailingIcon = { PasteButton { password += it } },
+                    isError = ProviderFormIssue.PASSWORD_REQUIRED in formIssues,
+                    supportingText = {
+                        if (ProviderFormIssue.PASSWORD_REQUIRED in formIssues) {
+                            Text(stringResource(R.string.onboarding_required_field), color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    trailingIcon = {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                Icon(
+                                    imageVector = if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                    contentDescription = stringResource(
+                                        if (passwordVisible) R.string.onboarding_hide_password
+                                        else R.string.onboarding_show_password,
+                                    ),
+                                )
+                            }
+                            PasteButton(preserveWhitespace = true) { password = it }
+                        }
+                    },
                     singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
+                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -293,8 +334,16 @@ fun AddSourceScreen(
                     value = mac,
                     onValueChange = { mac = it },
                     label = { Text(stringResource(R.string.onboarding_mac_address)) },
-                    supportingText = { Text(stringResource(R.string.onboarding_mac_help)) },
-                    trailingIcon = { PasteButton { mac += it } },
+                    isError = ProviderFormIssue.MAC_REQUIRED in formIssues,
+                    supportingText = {
+                        Column {
+                            Text(stringResource(R.string.onboarding_mac_help))
+                            if (ProviderFormIssue.MAC_REQUIRED in formIssues) {
+                                Text(stringResource(R.string.onboarding_required_field), color = MaterialTheme.colorScheme.error)
+                            }
+                        }
+                    },
+                    trailingIcon = { PasteButton(preserveWhitespace = true) { mac = it } },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -326,7 +375,7 @@ fun AddSourceScreen(
                 OutlinedTextField(
                     value = userAgent,
                     onValueChange = { userAgent = it },
-                    label = { Text("User-Agent") },
+                    label = { Text(stringResource(R.string.onboarding_user_agent_label)) },
                     supportingText = {
                         Text(stringResource(R.string.onboarding_user_agent_help))
                     },
@@ -359,6 +408,14 @@ fun AddSourceScreen(
                 Spacer(Modifier.height(12.dp))
             }
 
+            if (formIssues.isNotEmpty() && !ui.testing && !ui.syncing) {
+                Text(
+                    stringResource(R.string.onboarding_required_fields_summary),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+                Spacer(Modifier.height(8.dp))
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(
                     onClick = { viewModel.test(draft()) },
@@ -405,11 +462,17 @@ fun AddSourceScreen(
  * rather than doing nothing silently.
  */
 @Composable
-private fun PasteButton(onPaste: (String) -> Unit) {
+private fun PasteButton(
+    preserveWhitespace: Boolean = false,
+    onPaste: (String) -> Unit,
+) {
     val context = LocalContext.current
     IconButton(
         onClick = {
-            val pasted = readClipboardText(context)
+            val pasted = ProviderClipboardText.normalize(
+                readClipboardTextRaw(context),
+                preserveWhitespace = preserveWhitespace,
+            )
             if (pasted != null) onPaste(pasted)
             else Toast.makeText(context, context.getString(R.string.kbd_clipboard_empty), Toast.LENGTH_SHORT).show()
         },

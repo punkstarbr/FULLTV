@@ -43,6 +43,7 @@ import java.io.BufferedInputStream
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
 
@@ -89,6 +90,9 @@ class EpgRepository(
 ) {
     private val syncMutex = Mutex()
     private val filteredXmltvDirectory = File(cacheDirectory, "epg-filter-stage")
+    private val retainedEpgIdCache = RetainedEpgIdCache(File(cacheDirectory, "epg-retained-m3u-ids.bin"))
+
+    private data class CachedGuideBody(val file: File, val sha256: String)
 
     /** Future guide window used both while parsing feeds and while pruning old database rows. */
     val retentionFutureMillis: Long
@@ -360,6 +364,7 @@ class EpgRepository(
         var written = 0
         var committed = false
         var temporaryXmltvFile: File? = null
+        var pendingRetainedIdsCache: Pair<RetainedEpgIdCache.Key, Set<String>>? = null
 
         suspend fun flushProgrammes() {
             if (programmeBatch.isEmpty()) return
@@ -419,25 +424,37 @@ class EpgRepository(
                 // Cache one compressed feed at a time. A metadata-only first pass discovers all
                 // XMLTV aliases even when channel/programme elements are interleaved; the second
                 // pass writes only matching programme IDs to Room staging.
-                val stagedFile = cacheCompressedGuide(feed)
-                temporaryXmltvFile = stagedFile
-                val matcher = EpgProgrammeChannelFilter.Matcher(playlistChannels)
-                openExpandedGuideStream(stagedFile.inputStream()).use { stream ->
-                    XmltvParser.parse(
-                        input = stream,
-                        feedId = stagingFeedId,
-                        onChannelAlias = { id, displayName -> matcher.addAlias(id, displayName) },
-                        onProgramme = {},
-                        readProgrammes = false,
-                    )
+                val stagedGuide = cacheCompressedGuide(feed)
+                temporaryXmltvFile = stagedGuide.file
+                val cacheKey = RetainedEpgIdCache.Key(
+                    compressedXmltvSha256 = stagedGuide.sha256,
+                    playlistFingerprint = EpgProgrammeChannelFilter.fingerprint(playlistChannels),
+                    algorithmVersion = EpgProgrammeChannelFilter.FILTER_ALGORITHM_VERSION,
+                )
+                val cachedIds = retainedEpgIdCache.get(cacheKey)
+                val retainedIds = if (cachedIds != null) {
+                    cachedIds
+                } else {
+                    val matcher = EpgProgrammeChannelFilter.Matcher(playlistChannels)
+                    openExpandedGuideStream(stagedGuide.file.inputStream()).use { stream ->
+                        XmltvParser.parse(
+                            input = stream,
+                            feedId = stagingFeedId,
+                            onChannelAlias = { id, displayName -> matcher.addAlias(id, displayName) },
+                            onProgramme = {},
+                            readProgrammes = false,
+                        )
+                    }
+                    matcher.retainedEpgIds().also { ids ->
+                        if (ids.isNotEmpty()) pendingRetainedIdsCache = cacheKey to ids
+                    }
                 }
-                val retainedIds = matcher.retainedEpgIds()
                 if (retainedIds.isEmpty()) {
                     return FeedResult.Failed(
                         "No XMLTV channels matched the current M3U; the previous guide was kept.",
                     )
                 }
-                openExpandedGuideStream(stagedFile.inputStream()).use { stream ->
+                openExpandedGuideStream(stagedGuide.file.inputStream()).use { stream ->
                     stats = parseIntoStaging(stream, retainedIds)
                 }
             } else {
@@ -469,6 +486,7 @@ class EpgRepository(
                 aliasDao.moveFromFeed(stagingFeedId, feed.id)
             }
             committed = true
+            pendingRetainedIdsCache?.let { (key, ids) -> retainedEpgIdCache.put(key, ids) }
             return FeedResult.Success(
                 programmes = written,
                 channels = channelCount,
@@ -526,11 +544,12 @@ class EpgRepository(
      * without staging unrelated programmes in Room. It never uses more than the existing compressed
      * feed limit and preserves at least a small reserve of free internal storage.
      */
-    private suspend fun cacheCompressedGuide(feed: EpgFeed): File {
+    private suspend fun cacheCompressedGuide(feed: EpgFeed): CachedGuideBody {
         if (!filteredXmltvDirectory.isDirectory && !filteredXmltvDirectory.mkdirs()) {
             throw IOException("Could not create private XMLTV cache directory.")
         }
         val temporary = File.createTempFile("guide-${feed.id}-", ".tmp", filteredXmltvDirectory)
+        val digest = MessageDigest.getInstance("SHA-256")
         var complete = false
         try {
             if (StatFs(cacheDirectory.absolutePath).availableBytes < MIN_TEMP_CACHE_HEADROOM_BYTES) {
@@ -547,6 +566,7 @@ class EpgRepository(
                             val read = input.read(buffer)
                             if (read < 0) break
                             copied += read
+                            digest.update(buffer, 0, read)
                             output.write(buffer, 0, read)
                             if (copied >= nextSpaceCheck) {
                                 if (StatFs(cacheDirectory.absolutePath).availableBytes < MIN_TEMP_CACHE_HEADROOM_BYTES) {
@@ -558,8 +578,15 @@ class EpgRepository(
                     }
                 }
             }
+            val sha256 = buildString(64) {
+                digest.digest().forEach { byte ->
+                    val value = byte.toInt() and 0xff
+                    append(HEX_DIGITS[value ushr 4])
+                    append(HEX_DIGITS[value and 0x0f])
+                }
+            }
             complete = true
-            return temporary
+            return CachedGuideBody(temporary, sha256)
         } finally {
             if (!complete) temporary.delete()
         }
@@ -780,6 +807,7 @@ class EpgRepository(
         /** Hard cap shared by the Room query and the unified search mapping policy. */
         const val MAX_SEARCH_RESULTS = 100
 
+        private const val HEX_DIGITS = "0123456789abcdef"
         private const val CACHE_COPY_BUFFER_BYTES = 64 * 1024
         private const val CACHE_SPACE_CHECK_BYTES = 16L * 1024 * 1024
         private const val MIN_TEMP_CACHE_HEADROOM_BYTES = 64L * 1024 * 1024

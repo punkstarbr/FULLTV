@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.43 (release pública manual) — 2026-11-12
+
+- **Assinatura/About:** mostrar no ecrã Sobre que a assinatura Android Debug partilhada é uma âncora legada de atualização, não de produção, e apresentar o fingerprint SHA-256 real do certificado do build.
+- **Formulário:** colar substitui URL/credenciais/MAC em vez de concatenar; URLs são aparadas, mas espaços periféricos de credenciais são preservados. Acrescentar mostrar/ocultar palavra-passe e mensagens específicas para URL, utilizador, palavra-passe, MAC e pesquisa YouTube inválida.
+- **Idiomas:** manter apenas inglês, pt-BR e pt-PT em Settings e na configuração de locales do Android. Completar strings pt-PT e migrar preferências antigas para idiomas parciais para o idioma do sistema (fallback de recursos completos).
+- **Armazenamento EPG:** cache privado limitado de IDs XMLTV retidos, validado pelo SHA-256 do feed comprimido, fingerprint ordenado da playlist e versão do algoritmo. Cache é só de melhor esforço, armazena IDs, limita snapshot a 1 MiB/oito entradas, e grava apenas após swap EPG bem-sucedido.
+- **Atualização:** produzir APK universal canónico para clientes antigos e variantes por ABI para novas instalações; o atualizador prefere a primeira ABI compatível e mantém fallback universal, com verificações de URL/digest/certificado existentes.
+- **Validação:** 273 testes Android em 52 classes e 23 testes Python (13 das ferramentas e 10 de segurança do app) passaram, sem falhas, erros ou testes ignorados. `assembleDebug`, `lintRelease`, `lintVitalRelease` e `assembleRelease` concluíram. As 60 bibliotecas nativas do universal e as 15 de cada APK ABI passaram alinhamento ZIP 16 KiB. Não houve teste físico no Moto G84, Fire TV ou Box TV.
+- **Assinatura e Dependabot:** a versão mantém a âncora Android Debug legada compartilhada para permitir atualizações por cima; não é assinatura de produção. O advisory lxml não foi corrigido nem encerrado; permanece `lxml==5.3.0` com a mitigação existente no parser.
+- **APK universal:** `app.fulltv`, versionCode 55, minSdk 24, targetSdk 35, quatro ABIs; 204.945.437 bytes; SHA-256 `56bef84443e3ccdc468ec3ba0d6b0c7c4eca1537d2c3faeee822f3dcafdd0186`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. Os quatro APKs ABI e seus hashes estão em `SHA256SUMS.txt` da release.
+
 ## 0.11.42 (release pública manual) — 2026-11-12
 
 - **Notificações contextuais:** pede `POST_NOTIFICATIONS` somente após o usuário escolher gravação ou lembrete, nunca no cold start. Gravações imediatas, agendadas e de série continuam se o usuário negar; o app avisa que notificações/avisos podem faltar. Não cria lembrete nem troca automática sem notificações disponíveis e oferece atalho às configurações do app.

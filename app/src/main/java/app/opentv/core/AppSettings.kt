@@ -447,8 +447,9 @@ class AppSettings private constructor(context: Context) {
     val languageTag: StateFlow<String> = _languageTag.asStateFlow()
 
     fun setLanguageTag(tag: String) {
-        prefs.edit().putString(KEY_LANGUAGE, tag).apply()
-        _languageTag.value = tag
+        val supportedTag = LanguageTagPolicy.fromStoredValue(tag)
+        prefs.edit().putString(KEY_LANGUAGE, supportedTag).apply()
+        _languageTag.value = supportedTag
     }
 
     /** The last channel played, for boot-to-last-channel. Not a flow — only read once at launch. */

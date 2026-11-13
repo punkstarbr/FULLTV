@@ -57,6 +57,13 @@ catalogues and the guide, then applies favourites and watch positions. It delibe
 catalogue/EPG caches, local video recordings, device IDs, filesystem paths and USB SAF grants; those
 are either re-downloaded or must be selected again on the new device.
 
+## UI languages
+
+The app exposes only English, Brazilian Portuguese (`pt-BR`) and European Portuguese (`pt-PT`),
+which are the complete reviewed resource sets. The Android `localeConfig` and in-app selector use the
+same list. Older saved choices for partial translations migrate to the device-language option, which
+falls back to the complete base resources rather than showing a mixed catalogue.
+
 ## The EPG, and why it is written the way it is
 
 A guide that quietly stops working is the defining bug of this app category. It is almost
@@ -110,6 +117,11 @@ guide intact. This reduces steady-state database storage and removes the previou
 programme-staging peak; network transfer remains the full guide and one feed still has a bounded
 temporary disk footprint. SQLite may retain freed pages from older versions until the user runs the
 confirmed database optimization action in Settings → Storage, which requires extra free space.
+After a filtered feed commits successfully, a separate best-effort `cacheDir` snapshot can avoid the
+metadata-only alias pass on the next identical sync. It stores only retained XMLTV IDs plus the
+compressed-feed SHA-256, ordered playlist fingerprint and filter algorithm version; it is capped at
+1 MiB and eight entries, atomically replaced, and discarded as a cache miss on corruption or write
+failure. The second XMLTV parse and transactional Room replacement still run on a cache hit.
 The guide-input signature is recalculated from each downloaded playlist, even when its URL stays the
 same. Changes to channel IDs/names or the first declared guide URL mark relevant feeds due so the next
 EPG sync can include new channels or follow a changed guide URL. Other newly declared guide URLs are
