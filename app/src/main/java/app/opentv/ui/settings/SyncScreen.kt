@@ -12,6 +12,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,13 +22,16 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -41,6 +47,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
@@ -58,12 +65,19 @@ import app.opentv.core.ServiceLocator
 import app.opentv.sync.SyncServer
 import app.opentv.ui.ProtectSensitiveScreen
 import app.opentv.ui.SyncViewModel
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
+import app.opentv.ui.fullTvFocusRing
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.ExperimentalComposeUiApi
 import kotlinx.coroutines.launch
 
 /**
  * Local watch-history sync between two OpenTV devices on the same wifi. No servers of ours: one
  * device shares behind a code, the other receives. Only continue-watching positions travel.
  */
+@OptIn(ExperimentalComposeUiApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun SyncScreen(
     onBack: () -> Unit,
@@ -84,16 +98,17 @@ fun SyncScreen(
         }
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp, vertical = 24.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.settings_sync_title), style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.weight(1f))
-            OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) }
-        }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val pageInset = if (maxWidth < 600.dp) FullTvChrome.compactPageInset else FullTvChrome.pageInset
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).focusRestorer().focusGroup()
+                .padding(horizontal = pageInset, vertical = FullTvChrome.pageInset)
+                .widthIn(max = 1040.dp).align(Alignment.TopCenter),
+        ) {
+            FullTvSectionHeader(
+                title = stringResource(R.string.settings_sync_title),
+                trailingContent = { OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) } },
+            )
         Spacer(Modifier.height(8.dp))
         Text(
             stringResource(R.string.sync_desc),
@@ -103,7 +118,11 @@ fun SyncScreen(
         )
 
         Spacer(Modifier.height(16.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth().focusGroup(),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             ModeChip(stringResource(R.string.sync_share_from_here), mode == Mode.SHARE) { mode = Mode.SHARE }
             ModeChip(stringResource(R.string.sync_receive), mode == Mode.RECEIVE) { mode = Mode.RECEIVE }
             ModeChip(stringResource(R.string.sync_nas), mode == Mode.NAS) { mode = Mode.NAS }
@@ -116,6 +135,7 @@ fun SyncScreen(
             Mode.RECEIVE -> ReceivePane(viewModel)
             Mode.NAS -> NasPane(viewModel)
             Mode.BACKUP -> BackupPane()
+        }
         }
     }
 }
@@ -184,7 +204,7 @@ private fun BackupPane() {
         }
     }
 
-    Card {
+    FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
         Column(Modifier.padding(20.dp).widthIn(max = 680.dp)) {
             Text(stringResource(R.string.sync_backup_title), style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
@@ -235,7 +255,7 @@ private fun BackupPane() {
 @Composable
 private fun SharePane(viewModel: SyncViewModel) {
     val state by viewModel.serverState.collectAsState()
-    Card {
+    FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
         Column(Modifier.padding(20.dp).widthIn(max = 640.dp)) {
             when (val s = state) {
                 is SyncServer.State.Sharing -> {
@@ -292,7 +312,7 @@ private fun ReceivePane(viewModel: SyncViewModel) {
     var entry by remember { mutableStateOf("") }
 
     Row {
-        Card {
+        FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
             Column(Modifier.padding(20.dp).widthIn(max = 520.dp)) {
                 Text(stringResource(R.string.sync_type_what_shows), style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(8.dp))
@@ -347,7 +367,7 @@ private fun NasPane(viewModel: SyncViewModel) {
     val smbHost by viewModel.smbHost.collectAsState()
     val configured = smbHost.isNotBlank()
 
-    Card {
+    FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
         Column(Modifier.padding(20.dp).widthIn(max = 640.dp)) {
             Text(stringResource(R.string.sync_nas_title), style = MaterialTheme.typography.titleMedium)
             Spacer(Modifier.height(8.dp))
@@ -422,10 +442,11 @@ private fun ModeChip(label: String, selected: Boolean, onClick: () -> Unit) {
         color = if (focused) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
         modifier = Modifier
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(10.dp))
+            .clip(FullTvChrome.controlShape)
             .background(bg)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 8.dp),
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .fullTvFocusRing(focused, MaterialTheme.colorScheme.primary)
+            .padding(horizontal = 16.dp, vertical = 10.dp),
     )
 }
 

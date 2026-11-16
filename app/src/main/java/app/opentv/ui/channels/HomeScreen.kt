@@ -9,8 +9,10 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -29,7 +31,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListScope
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -61,6 +66,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,11 +89,16 @@ import androidx.compose.ui.window.Dialog
 import app.opentv.R
 import app.opentv.core.AppSettings
 import app.opentv.core.ServiceLocator
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
 import app.opentv.ui.InterfacePalette
+import app.opentv.ui.fullTvFocusRing
 import app.opentv.ui.interfacePalette
 import app.opentv.core.findActivity
 import app.opentv.core.requestIgnoreBatteryOptimizations
 import app.opentv.data.model.Channel
+import app.opentv.data.model.Source
 import app.opentv.data.model.Programme
 import app.opentv.data.model.Reminder
 import app.opentv.data.model.shownName
@@ -433,99 +445,9 @@ fun HomeScreen(
         }
     }
 
-    Row(modifier.fillMaxSize().background(palette.screenBackground)) {
-
-        // ---- Category rail -----------------------------------------------------------------
-        // Width animates to 0 while focus is in the guide (see onFocusRow) so the grid gets the
-        // whole screen; d-pad LEFT from the guide's channel column slides it back (onExitLeft…).
-        Column(
-            Modifier
-                .width(railWidth)
-                .fillMaxHeight()
-                .background(palette.surface)
-                .clipToBounds()
-                .focusGroup()
-                .padding(vertical = 16.dp),
-        ) {
-            Text(
-                stringResource(R.string.nav_live_tv),
-                style = MaterialTheme.typography.headlineMedium,
-                modifier = Modifier.padding(horizontal = 20.dp),
-            )
-            Spacer(Modifier.height(12.dp))
-            // The top "Search channels" bar was removed — Search now lives in the global nav rail.
-
-            LazyColumn(
-                state = categoryRailListState,
-                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                // Provider switch — only when there's more than one source. Lets the user keep
-                // several playlists and flip between them (cardiodoc's request); "All" folds them.
-                if (sources.size > 1) {
-                    item(key = "provider-header") {
-                        Text(
-                            stringResource(R.string.channels_manager_source_header),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                        )
-                    }
-                    item(key = "provider-all") {
-                        RailEntry(
-                            label = stringResource(R.string.channels_manager_all_sources),
-                            selected = selectedSource == null,
-                            onClick = { viewModel.selectSource(null) },
-                            palette = palette,
-                        )
-                    }
-                    items(sources, key = { "src-${it.id}" }) { source ->
-                        RailEntry(
-                            label = source.name,
-                            selected = selectedSource == source.id,
-                            onClick = { viewModel.selectSource(source.id) },
-                            palette = palette,
-                        )
-                    }
-                    item(key = "provider-divider") { Spacer(Modifier.height(10.dp)) }
-                }
-                // The currently-selected entry carries the rail's FocusRequester, so reopening the
-                // rail (d-pad LEFT in the guide) lands focus straight back on the current category.
-                item {
-                    RailEntry(
-                        label = stringResource(R.string.guide_favourites),
-                        selected = favouritesOnly,
-                        onClick = viewModel::selectFavourites,
-                        palette = palette,
-                        modifier = if (favouritesOnly) Modifier.focusRequester(railFocusRequester) else Modifier,
-                    )
-                }
-                item {
-                    val allSelected = !favouritesOnly &&
-                        (selectedCategory == null || selectedCategoryIndex == null)
-                    RailEntry(
-                        label = stringResource(R.string.guide_all_channels),
-                        selected = allSelected,
-                        onClick = { viewModel.selectCategory(null) },
-                        palette = palette,
-                        modifier = if (allSelected) Modifier.focusRequester(railFocusRequester) else Modifier,
-                    )
-                }
-                items(categories, key = { it.key }) { group ->
-                    val groupSelected = !favouritesOnly && selectedCategory == group.key
-                    RailEntry(
-                        label = group.label,
-                        selected = groupSelected,
-                        onClick = { viewModel.selectCategory(group.key) },
-                        palette = palette,
-                        modifier = if (groupSelected) Modifier.focusRequester(railFocusRequester) else Modifier,
-                    )
-                }
-            }
-        }
-
+    val guideContent: @Composable (Modifier) -> Unit = { contentModifier ->
         // ---- Preview + guide ---------------------------------------------------------------
-        Column(Modifier.weight(1f).background(palette.screenBackground)) {
+        Column(contentModifier.background(palette.screenBackground)) {
             if (rows.isEmpty()) {
                 when {
                     favouritesOnly -> NoFavouritesState()
@@ -598,10 +520,10 @@ fun HomeScreen(
                     highlightedRow = it
                     previewArmed = true
                     pendingRailFocus = false
-                    railExpanded = false
+                    if (isTelevision) railExpanded = false
                 }
                 val onExitLeftChannel: () -> Boolean = {
-                    if (!railExpanded) {
+                    if (isTelevision && !railExpanded) {
                         railExpanded = true
                         pendingRailFocus = true
                         true
@@ -665,6 +587,48 @@ fun HomeScreen(
         }
     }
 
+    if (isTelevision) {
+        Row(modifier.fillMaxSize().background(palette.screenBackground)) {
+            CategoryRail(
+                horizontal = false,
+                modifier = Modifier.width(railWidth).fillMaxHeight(),
+                listState = categoryRailListState,
+                categories = categories,
+                sources = sources,
+                selectedSource = selectedSource,
+                selectedCategory = selectedCategory,
+                selectedCategoryIndex = selectedCategoryIndex,
+                favouritesOnly = favouritesOnly,
+                railFocusRequester = railFocusRequester,
+                palette = palette,
+                onSelectSource = viewModel::selectSource,
+                onSelectCategory = viewModel::selectCategory,
+                onSelectFavourites = viewModel::selectFavourites,
+            )
+            guideContent(Modifier.weight(1f))
+        }
+    } else {
+        Column(modifier.fillMaxSize().background(palette.screenBackground)) {
+            CategoryRail(
+                horizontal = true,
+                modifier = Modifier.fillMaxWidth(),
+                listState = categoryRailListState,
+                categories = categories,
+                sources = sources,
+                selectedSource = selectedSource,
+                selectedCategory = selectedCategory,
+                selectedCategoryIndex = selectedCategoryIndex,
+                favouritesOnly = favouritesOnly,
+                railFocusRequester = railFocusRequester,
+                palette = palette,
+                onSelectSource = viewModel::selectSource,
+                onSelectCategory = viewModel::selectCategory,
+                onSelectFavourites = viewModel::selectFavourites,
+            )
+            guideContent(Modifier.weight(1f))
+        }
+    }
+
     // The record menu for a programme picked in the grid.
     recordTarget?.let { (targetRow, programme) ->
         val channel = targetRow.primary
@@ -700,11 +664,15 @@ fun HomeScreen(
         Dialog(onDismissRequest = { recordTarget = null }) {
             Column(
                 Modifier
-                    .width(440.dp)
+                    .fillMaxWidth()
+                    .widthIn(max = 440.dp)
+                    .heightIn(max = 620.dp)
+                    .verticalScroll(rememberScrollState())
                     .focusRestorer()
                     .focusGroup()
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(FullTvChrome.cardShape)
                     .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, FullTvChrome.cardShape)
                     .padding(24.dp),
             ) {
                 Text(
@@ -730,7 +698,10 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         sourceOptions.forEach { opt ->
                             QualityChip(
                                 label = sources.firstOrNull { it.id == opt.sourceId }?.name
@@ -748,7 +719,10 @@ fun HomeScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Spacer(Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(
+                        Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
                         targetRow.variants.forEach { variant ->
                             QualityChip(
                                 label = variant.qualityLabel.ifBlank { stringResource(R.string.rec_quality_sd) },
@@ -897,11 +871,13 @@ fun HomeScreen(
         Dialog(onDismissRequest = { pendingLiveChannel = null }) {
             Column(
                 Modifier
-                    .width(480.dp)
+                    .fillMaxWidth()
+                    .widthIn(max = 480.dp)
                     .focusRestorer()
                     .focusGroup()
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(FullTvChrome.cardShape)
                     .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, FullTvChrome.cardShape)
                     .padding(20.dp),
             ) {
                 Text(
@@ -957,11 +933,13 @@ fun HomeScreen(
         Dialog(onDismissRequest = { channelMenu = null }) {
             Column(
                 Modifier
-                    .width(480.dp)
+                    .fillMaxWidth()
+                    .widthIn(max = 480.dp)
                     .focusRestorer()
                     .focusGroup()
-                    .clip(RoundedCornerShape(16.dp))
+                    .clip(FullTvChrome.cardShape)
                     .background(MaterialTheme.colorScheme.surface)
+                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, FullTvChrome.cardShape)
                     .padding(20.dp),
             ) {
                 Text(
@@ -1099,6 +1077,126 @@ fun HomeScreen(
     }
 }
 
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
+@Composable
+private fun CategoryRail(
+    horizontal: Boolean,
+    modifier: Modifier,
+    listState: LazyListState,
+    categories: List<ChannelsViewModel.CategoryGroup>,
+    sources: List<Source>,
+    selectedSource: Long?,
+    selectedCategory: String?,
+    selectedCategoryIndex: Int?,
+    favouritesOnly: Boolean,
+    railFocusRequester: FocusRequester,
+    palette: InterfacePalette,
+    onSelectSource: (Long?) -> Unit,
+    onSelectCategory: (String?) -> Unit,
+    onSelectFavourites: () -> Unit,
+) {
+    Column(
+        modifier
+            .background(palette.surface)
+            .clipToBounds()
+            .focusRestorer()
+            .focusGroup()
+            .padding(vertical = if (horizontal) 6.dp else 16.dp),
+    ) {
+        FullTvSectionHeader(
+            title = stringResource(R.string.nav_live_tv),
+            modifier = Modifier.padding(horizontal = if (horizontal) 16.dp else 20.dp),
+        )
+        Spacer(Modifier.height(if (horizontal) 6.dp else 12.dp))
+
+        val categoryItems: LazyListScope.() -> Unit = {
+            // Provider switching remains available when more than one source is configured.
+            if (sources.size > 1) {
+                item(key = "provider-header") {
+                    Text(
+                        stringResource(R.string.channels_manager_source_header),
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
+                item(key = "provider-all") {
+                    RailEntry(
+                        label = stringResource(R.string.channels_manager_all_sources),
+                        selected = selectedSource == null,
+                        onClick = { onSelectSource(null) },
+                        palette = palette,
+                        horizontal = horizontal,
+                    )
+                }
+                items(sources, key = { "src-${it.id}" }) { source ->
+                    RailEntry(
+                        label = source.name,
+                        selected = selectedSource == source.id,
+                        onClick = { onSelectSource(source.id) },
+                        palette = palette,
+                        horizontal = horizontal,
+                    )
+                }
+                item(key = "provider-divider") {
+                    if (horizontal) Spacer(Modifier.width(8.dp)) else Spacer(Modifier.height(10.dp))
+                }
+            }
+            item(key = "favourites") {
+                RailEntry(
+                    label = stringResource(R.string.guide_favourites),
+                    selected = favouritesOnly,
+                    onClick = onSelectFavourites,
+                    palette = palette,
+                    horizontal = horizontal,
+                    modifier = if (favouritesOnly) Modifier.focusRequester(railFocusRequester) else Modifier,
+                )
+            }
+            item(key = "all-channels") {
+                val allSelected = !favouritesOnly &&
+                    (selectedCategory == null || selectedCategoryIndex == null)
+                RailEntry(
+                    label = stringResource(R.string.guide_all_channels),
+                    selected = allSelected,
+                    onClick = { onSelectCategory(null) },
+                    palette = palette,
+                    horizontal = horizontal,
+                    modifier = if (allSelected) Modifier.focusRequester(railFocusRequester) else Modifier,
+                )
+            }
+            items(categories, key = { it.key }) { group ->
+                val groupSelected = !favouritesOnly && selectedCategory == group.key
+                RailEntry(
+                    label = group.label,
+                    selected = groupSelected,
+                    onClick = { onSelectCategory(group.key) },
+                    palette = palette,
+                    horizontal = horizontal,
+                    modifier = if (groupSelected) Modifier.focusRequester(railFocusRequester) else Modifier,
+                )
+            }
+        }
+
+        if (horizontal) {
+            LazyRow(
+                state = listState,
+                modifier = Modifier.focusGroup(),
+                contentPadding = PaddingValues(horizontal = FullTvChrome.compactPageInset, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                content = categoryItems,
+            )
+        } else {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                content = categoryItems,
+            )
+        }
+    }
+}
+
 /** Inserts a reminder for a future programme and arms its alarm. No-op if one already exists. */
 private suspend fun setReminder(
     graph: ServiceLocator.Graph,
@@ -1151,11 +1249,11 @@ private fun RecordActionRow(
             .padding(vertical = 3.dp)
             .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(10.dp))
+            .clip(FullTvChrome.controlShape)
             .background(bg)
-            .then(
-                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(10.dp))
-                else Modifier,
+            .fullTvFocusRing(
+                focused = focused,
+                color = if (focused) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
             )
             .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -1183,11 +1281,11 @@ private fun QualityChip(label: String, selected: Boolean, onClick: () -> Unit) {
         color = fg,
         modifier = Modifier
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(8.dp))
+            .clip(FullTvChrome.controlShape)
             .background(bg)
-            .then(
-                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(8.dp))
-                else Modifier,
+            .fullTvFocusRing(
+                focused = focused,
+                color = if (focused) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
             )
             .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp),
@@ -1201,6 +1299,7 @@ private fun RailEntry(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     palette: InterfacePalette? = null,
+    horizontal: Boolean = false,
 ) {
     var focused by remember { mutableStateOf(false) }
     val selectedBackground = palette?.selectedChannel ?: MaterialTheme.colorScheme.primaryContainer
@@ -1216,15 +1315,18 @@ private fun RailEntry(
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier
-            .fillMaxWidth()
+            .then(
+                if (horizontal) Modifier.widthIn(min = 136.dp, max = 224.dp).heightIn(min = 48.dp)
+                else Modifier.fillMaxWidth(),
+            )
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(8.dp))
+            .clip(FullTvChrome.controlShape)
             .background(
                 if (selected) selectedBackground else unselectedBackground,
             )
-            .then(
-                if (focused) Modifier.border(2.dp, focusAccent, RoundedCornerShape(8.dp))
-                else Modifier,
+            .fullTvFocusRing(
+                focused = focused,
+                color = focusAccent,
             )
             .selectable(selected = selected, role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -1239,16 +1341,20 @@ private fun ChannelRow(
     onToggleFavourite: () -> Unit,
 ) {
     val now = System.currentTimeMillis()
+    var focused by remember { mutableStateOf(false) }
     val background =
-        if (isSelected) MaterialTheme.colorScheme.surfaceVariant
+        if (isSelected || focused) MaterialTheme.colorScheme.surfaceVariant
         else MaterialTheme.colorScheme.background
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
+            .clip(FullTvChrome.cardShape)
             .background(background)
-            .clickable(onClick = onClick)
+            .fullTvFocusRing(focused = focused, color = MaterialTheme.colorScheme.primary, shape = FullTvChrome.cardShape)
+            .semantics { this.selected = isSelected }
+            .onFocusChanged { focused = it.isFocused }
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1318,41 +1424,43 @@ private fun LoadingState(isSyncing: Boolean) {
     val p by app.opentv.core.StatusBus.progress.collectAsState()
     val status = s
     val progress = p
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.widthIn(max = 460.dp),
+    Box(Modifier.fillMaxSize().padding(horizontal = FullTvChrome.compactPageInset), contentAlignment = Alignment.Center) {
+        FullTvCard(
+            modifier = Modifier.fillMaxWidth().widthIn(max = 460.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
         ) {
-            if (progress == null) {
-                CircularProgressIndicator()
-            } else {
-                Text(
-                    "${(progress * 100).toInt()}%",
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                )
-            }
-            Spacer(Modifier.height(20.dp))
-            Text(stringResource(R.string.guide_loading_channels), style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                when {
-                    // Actively assembling — this is work in progress, not a failure.
-                    status != null -> status
-                    isSyncing -> stringResource(R.string.guide_fetching_desc)
-                    // Channels are already on the device; the guide is being built from them.
-                    // A big provider takes a moment (longer on this debug build) — not a failure.
-                    else -> stringResource(R.string.guide_building_desc)
-                },
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-            if (progress != null) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.fillMaxWidth().padding(24.dp),
+            ) {
+                if (progress == null) {
+                    CircularProgressIndicator()
+                } else {
+                    Text(
+                        "${(progress * 100).toInt()}%",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
                 Spacer(Modifier.height(20.dp))
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier.fillMaxWidth().height(6.dp),
+                Text(stringResource(R.string.guide_loading_channels), style = MaterialTheme.typography.headlineSmall)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    when {
+                        status != null -> status
+                        isSyncing -> stringResource(R.string.guide_fetching_desc)
+                        else -> stringResource(R.string.guide_building_desc)
+                    },
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
                 )
+                if (progress != null) {
+                    Spacer(Modifier.height(20.dp))
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier.fillMaxWidth().height(6.dp),
+                    )
+                }
             }
         }
     }
@@ -1360,48 +1468,76 @@ private fun LoadingState(isSyncing: Boolean) {
 
 @Composable
 private fun NoFavouritesState() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(stringResource(R.string.guide_no_favourites_title), style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                stringResource(R.string.guide_no_favourites_desc),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+    Box(Modifier.fillMaxSize().padding(horizontal = FullTvChrome.compactPageInset), contentAlignment = Alignment.Center) {
+        FullTvCard(
+            modifier = Modifier.fillMaxWidth().widthIn(max = 460.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(stringResource(R.string.guide_no_favourites_title), style = MaterialTheme.typography.headlineSmall)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.guide_no_favourites_desc),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 }
 
-/**
- * Shown when a provider is configured but there are no channels to display and nothing is
- * syncing — i.e. the last catalogue load failed or came back empty. Replaces the endless
- * "Loading your channels" spinner with something the user can act on.
- */
+/** Shown when a provider is configured but no channels are available and nothing is syncing. */
 @Composable
 private fun ChannelsErrorState(onRetry: () -> Unit, onEditProvider: () -> Unit) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.widthIn(max = 460.dp),
+    BoxWithConstraints(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        val compact = maxWidth < 500.dp
+        FullTvCard(
+            modifier = Modifier
+                .padding(horizontal = FullTvChrome.compactPageInset)
+                .fillMaxWidth()
+                .widthIn(max = 460.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
         ) {
-            Text(
-                stringResource(R.string.guide_load_failed_title),
-                style = MaterialTheme.typography.headlineSmall,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                stringResource(R.string.guide_load_failed_desc),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(20.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                androidx.compose.material3.Button(onClick = onRetry) {
-                    Text(stringResource(R.string.common_try_again))
-                }
-                androidx.compose.material3.OutlinedButton(onClick = onEditProvider) {
-                    Text(stringResource(R.string.guide_edit_provider))
+            Column(
+                Modifier.fillMaxWidth().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    stringResource(R.string.guide_load_failed_title),
+                    style = MaterialTheme.typography.headlineSmall,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.guide_load_failed_desc),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(20.dp))
+                if (compact) {
+                    Column(
+                        Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        androidx.compose.material3.Button(onClick = onRetry, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.common_try_again))
+                        }
+                        androidx.compose.material3.OutlinedButton(onClick = onEditProvider, modifier = Modifier.fillMaxWidth()) {
+                            Text(stringResource(R.string.guide_edit_provider))
+                        }
+                    }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        androidx.compose.material3.Button(onClick = onRetry) {
+                            Text(stringResource(R.string.common_try_again))
+                        }
+                        androidx.compose.material3.OutlinedButton(onClick = onEditProvider) {
+                            Text(stringResource(R.string.guide_edit_provider))
+                        }
+                    }
                 }
             }
         }
@@ -1410,16 +1546,27 @@ private fun ChannelsErrorState(onRetry: () -> Unit, onEditProvider: () -> Unit) 
 
 @Composable
 private fun EmptyState(onAddSource: () -> Unit) {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(stringResource(R.string.guide_no_channels_title), style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                stringResource(R.string.guide_add_provider_desc),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(16.dp))
-            androidx.compose.material3.Button(onClick = onAddSource) { Text(stringResource(R.string.guide_add_provider_button)) }
+    Box(Modifier.fillMaxSize().padding(horizontal = FullTvChrome.compactPageInset), contentAlignment = Alignment.Center) {
+        FullTvCard(
+            modifier = Modifier.fillMaxWidth().widthIn(max = 460.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
+            Column(
+                Modifier.fillMaxWidth().padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(stringResource(R.string.guide_no_channels_title), style = MaterialTheme.typography.headlineSmall)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.guide_add_provider_desc),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(16.dp))
+                androidx.compose.material3.Button(onClick = onAddSource) {
+                    Text(stringResource(R.string.guide_add_provider_button))
+                }
+            }
         }
     }
 }

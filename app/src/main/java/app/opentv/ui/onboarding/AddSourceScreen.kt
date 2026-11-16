@@ -44,6 +44,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -56,8 +57,12 @@ import app.opentv.data.model.SourceKind
 import app.opentv.data.parser.YouTubeLiveSearchUrl
 import app.opentv.data.remote.HttpsUrlPolicy
 import app.opentv.isRunningOnTelevision
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
 import app.opentv.ui.SourcesViewModel
 import app.opentv.ui.channels.readClipboardTextRaw
+import app.opentv.ui.fullTvFocusRing
 
 /**
  * First-run setup.
@@ -158,289 +163,290 @@ fun AddSourceScreen(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(32.dp),
+            .padding(
+                horizontal = if (isTelevision) FullTvChrome.pageInset else FullTvChrome.compactPageInset,
+                vertical = if (isTelevision) 24.dp else 16.dp,
+            ),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Column(Modifier.widthIn(max = 640.dp)) {
-            Text(
-                stringResource(
+        Column(Modifier.widthIn(max = 840.dp).fillMaxWidth()) {
+            FullTvSectionHeader(
+                title = stringResource(
                     if (existing != null) R.string.settings_edit_provider_title
                     else R.string.onboarding_add_provider_title,
                 ),
-                style = MaterialTheme.typography.displaySmall,
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                stringResource(R.string.onboarding_add_provider_desc),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                subtitle = stringResource(R.string.onboarding_add_provider_desc),
             )
 
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(FullTvChrome.sectionGap))
 
-            FlowRow(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .focusGroup()
-                    .selectableGroup(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                FilterChip(
-                    selected = kind == SourceKind.XTREAM,
-                    onClick = { kind = SourceKind.XTREAM },
-                    label = { Text(stringResource(R.string.onboarding_xtream_login)) },
-                )
-                FilterChip(
-                    selected = kind == SourceKind.M3U,
-                    onClick = { kind = SourceKind.M3U },
-                    label = { Text(stringResource(R.string.onboarding_m3u_url)) },
-                )
-                FilterChip(
-                    selected = kind == SourceKind.YOUTUBE_LIVE_SEARCH,
-                    onClick = { kind = SourceKind.YOUTUBE_LIVE_SEARCH },
-                    label = { Text(stringResource(R.string.onboarding_youtube_live)) },
-                )
-                FilterChip(
-                    selected = kind == SourceKind.STALKER,
-                    onClick = { kind = SourceKind.STALKER },
-                    label = { Text(stringResource(R.string.onboarding_stalker_portal)) },
-                )
-            }
-
-            Spacer(Modifier.height(8.dp))
-            Text(
-                stringResource(R.string.onboarding_source_order_note),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            Spacer(Modifier.height(20.dp))
-
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it },
-                label = { Text(stringResource(R.string.epg_name_optional)) },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(12.dp))
-
-            OutlinedTextField(
-                value = url,
-                onValueChange = {
-                    url = it
-                    if (YouTubeLiveSearchUrl.isSearchUrl(it)) kind = SourceKind.YOUTUBE_LIVE_SEARCH
-                },
-                label = {
-                    Text(
-                        when (kind) {
-                            SourceKind.XTREAM -> stringResource(R.string.onboarding_server_address)
-                            SourceKind.M3U -> stringResource(R.string.onboarding_playlist_url)
-                            SourceKind.YOUTUBE_LIVE_SEARCH -> stringResource(R.string.onboarding_youtube_search_url)
-                            SourceKind.STALKER -> stringResource(R.string.onboarding_portal_url)
-                        },
-                    )
-                },
-                supportingText = {
-                    Column {
-                        Text(
-                            when (kind) {
-                                SourceKind.XTREAM -> stringResource(R.string.onboarding_server_help)
-                                SourceKind.M3U -> stringResource(R.string.onboarding_playlist_help)
-                                SourceKind.YOUTUBE_LIVE_SEARCH -> stringResource(R.string.onboarding_youtube_search_help)
-                                SourceKind.STALKER -> stringResource(R.string.onboarding_portal_help)
-                            },
+            FullTvCard(Modifier.fillMaxWidth()) {
+                Column(Modifier.fillMaxWidth().padding(18.dp)) {
+                    FlowRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusGroup()
+                            .selectableGroup(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        SourceTypeChip(
+                            selected = kind == SourceKind.XTREAM,
+                            onClick = { kind = SourceKind.XTREAM },
+                            label = stringResource(R.string.onboarding_xtream_login),
                         )
-                        if (ProviderFormIssue.URL_REQUIRED in formIssues) {
-                            Text(stringResource(R.string.onboarding_required_field), color = MaterialTheme.colorScheme.error)
-                        }
-                        if (ProviderFormIssue.YOUTUBE_SEARCH_INVALID in formIssues) {
-                            Text(stringResource(R.string.onboarding_youtube_search_invalid), color = MaterialTheme.colorScheme.error)
-                        }
-                        if (HttpsUrlPolicy.requiresSecureScheme(url)) {
-                            Text(stringResource(R.string.source_https_required), color = MaterialTheme.colorScheme.error)
-                        }
+                        SourceTypeChip(
+                            selected = kind == SourceKind.M3U,
+                            onClick = { kind = SourceKind.M3U },
+                            label = stringResource(R.string.onboarding_m3u_url),
+                        )
+                        SourceTypeChip(
+                            selected = kind == SourceKind.YOUTUBE_LIVE_SEARCH,
+                            onClick = { kind = SourceKind.YOUTUBE_LIVE_SEARCH },
+                            label = stringResource(R.string.onboarding_youtube_live),
+                        )
+                        SourceTypeChip(
+                            selected = kind == SourceKind.STALKER,
+                            onClick = { kind = SourceKind.STALKER },
+                            label = stringResource(R.string.onboarding_stalker_portal),
+                        )
                     }
-                },
-                isError = ProviderFormIssue.URL_REQUIRED in formIssues ||
-                    ProviderFormIssue.YOUTUBE_SEARCH_INVALID in formIssues ||
-                    HttpsUrlPolicy.requiresSecureScheme(url),
-                trailingIcon = {
-                    PasteButton { pasted ->
-                        val updatedUrl = pasted
-                        url = updatedUrl
-                        if (YouTubeLiveSearchUrl.isSearchUrl(updatedUrl)) {
-                            kind = SourceKind.YOUTUBE_LIVE_SEARCH
-                        }
-                    }
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                modifier = Modifier.fillMaxWidth(),
-            )
 
-            if (kind == SourceKind.XTREAM) {
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = username,
-                    onValueChange = { username = it },
-                    label = { Text(stringResource(R.string.recset_field_username)) },
-                    isError = ProviderFormIssue.USERNAME_REQUIRED in formIssues,
-                    supportingText = {
-                        if (ProviderFormIssue.USERNAME_REQUIRED in formIssues) {
-                            Text(stringResource(R.string.onboarding_required_field), color = MaterialTheme.colorScheme.error)
-                        }
-                    },
-                    trailingIcon = { PasteButton(preserveWhitespace = true) { username = it } },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = password,
-                    onValueChange = { password = it },
-                    label = { Text(stringResource(R.string.recset_field_password)) },
-                    isError = ProviderFormIssue.PASSWORD_REQUIRED in formIssues,
-                    supportingText = {
-                        if (ProviderFormIssue.PASSWORD_REQUIRED in formIssues) {
-                            Text(stringResource(R.string.onboarding_required_field), color = MaterialTheme.colorScheme.error)
-                        }
-                    },
-                    trailingIcon = {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            IconButton(onClick = { passwordVisible = !passwordVisible }) {
-                                Icon(
-                                    imageVector = if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
-                                    contentDescription = stringResource(
-                                        if (passwordVisible) R.string.onboarding_hide_password
-                                        else R.string.onboarding_show_password,
-                                    ),
-                                )
-                            }
-                            PasteButton(preserveWhitespace = true) { password = it }
-                        }
-                    },
-                    singleLine = true,
-                    visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            if (kind == SourceKind.STALKER) {
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = mac,
-                    onValueChange = { mac = it },
-                    label = { Text(stringResource(R.string.onboarding_mac_address)) },
-                    isError = ProviderFormIssue.MAC_REQUIRED in formIssues,
-                    supportingText = {
-                        Column {
-                            Text(stringResource(R.string.onboarding_mac_help))
-                            if (ProviderFormIssue.MAC_REQUIRED in formIssues) {
-                                Text(stringResource(R.string.onboarding_required_field), color = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    },
-                    trailingIcon = { PasteButton(preserveWhitespace = true) { mac = it } },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            Spacer(Modifier.height(12.dp))
-            OutlinedButton(onClick = { showAdvanced = !showAdvanced }) {
-                Text(if (showAdvanced) stringResource(R.string.onboarding_hide_advanced) else stringResource(R.string.onboarding_advanced))
-            }
-
-            if (showAdvanced) {
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = epgUrl,
-                    onValueChange = { epgUrl = it },
-                    label = { Text(stringResource(R.string.onboarding_guide_url_optional)) },
-                    supportingText = {
-                        Column {
-                            Text(stringResource(R.string.onboarding_guide_blank_help))
-                            if (HttpsUrlPolicy.requiresSecureScheme(epgUrl)) {
-                                Text(stringResource(R.string.source_https_required), color = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(Modifier.height(12.dp))
-                OutlinedTextField(
-                    value = userAgent,
-                    onValueChange = { userAgent = it },
-                    label = { Text(stringResource(R.string.onboarding_user_agent_label)) },
-                    supportingText = {
-                        Text(stringResource(R.string.onboarding_user_agent_help))
-                    },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-
-            Spacer(Modifier.height(20.dp))
-
-            ui.testResult?.let { message ->
-                Card(Modifier.fillMaxWidth()) {
-                    Text(message, Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium)
-                }
-                Spacer(Modifier.height(12.dp))
-            }
-            ui.testError?.let { message ->
-                Card(Modifier.fillMaxWidth()) {
+                    Spacer(Modifier.height(12.dp))
                     Text(
-                        message,
-                        Modifier.padding(16.dp),
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
+                        stringResource(R.string.onboarding_source_order_note),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                }
-                Spacer(Modifier.height(12.dp))
-            }
-            ui.syncMessage?.let { message ->
-                Text(message, style = MaterialTheme.typography.bodyMedium)
-                Spacer(Modifier.height(12.dp))
-            }
 
-            if (formIssues.isNotEmpty() && !ui.testing && !ui.syncing) {
-                Text(
-                    stringResource(R.string.onboarding_required_fields_summary),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                )
-                Spacer(Modifier.height(8.dp))
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedButton(
-                    onClick = { viewModel.test(draft()) },
-                    enabled = canSubmit && !ui.testing && !ui.syncing,
-                ) {
-                    if (ui.testing) {
-                        CircularProgressIndicator(Modifier.height(18.dp), strokeWidth = 2.dp)
-                    } else {
-                        Text(stringResource(R.string.recset_test_connection))
+                    Spacer(Modifier.height(20.dp))
+
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text(stringResource(R.string.epg_name_optional)) },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Spacer(Modifier.height(12.dp))
+
+                    OutlinedTextField(
+                        value = url,
+                        onValueChange = {
+                            url = it
+                            if (YouTubeLiveSearchUrl.isSearchUrl(it)) kind = SourceKind.YOUTUBE_LIVE_SEARCH
+                        },
+                        label = {
+                            Text(
+                                when (kind) {
+                                    SourceKind.XTREAM -> stringResource(R.string.onboarding_server_address)
+                                    SourceKind.M3U -> stringResource(R.string.onboarding_playlist_url)
+                                    SourceKind.YOUTUBE_LIVE_SEARCH -> stringResource(R.string.onboarding_youtube_search_url)
+                                    SourceKind.STALKER -> stringResource(R.string.onboarding_portal_url)
+                                },
+                            )
+                        },
+                        supportingText = {
+                            Column {
+                                Text(
+                                    when (kind) {
+                                        SourceKind.XTREAM -> stringResource(R.string.onboarding_server_help)
+                                        SourceKind.M3U -> stringResource(R.string.onboarding_playlist_help)
+                                        SourceKind.YOUTUBE_LIVE_SEARCH -> stringResource(R.string.onboarding_youtube_search_help)
+                                        SourceKind.STALKER -> stringResource(R.string.onboarding_portal_help)
+                                    },
+                                )
+                                if (ProviderFormIssue.URL_REQUIRED in formIssues) {
+                                    Text(stringResource(R.string.onboarding_required_field), color = MaterialTheme.colorScheme.error)
+                                }
+                                if (ProviderFormIssue.YOUTUBE_SEARCH_INVALID in formIssues) {
+                                    Text(stringResource(R.string.onboarding_youtube_search_invalid), color = MaterialTheme.colorScheme.error)
+                                }
+                                if (HttpsUrlPolicy.requiresSecureScheme(url)) {
+                                    Text(stringResource(R.string.source_https_required), color = MaterialTheme.colorScheme.error)
+                                }
+                            }
+                        },
+                        isError = ProviderFormIssue.URL_REQUIRED in formIssues ||
+                            ProviderFormIssue.YOUTUBE_SEARCH_INVALID in formIssues ||
+                            HttpsUrlPolicy.requiresSecureScheme(url),
+                        trailingIcon = {
+                            PasteButton { pasted ->
+                                val updatedUrl = pasted
+                                url = updatedUrl
+                                if (YouTubeLiveSearchUrl.isSearchUrl(updatedUrl)) {
+                                    kind = SourceKind.YOUTUBE_LIVE_SEARCH
+                                }
+                            }
+                        },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+
+                    if (kind == SourceKind.XTREAM) {
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = username,
+                            onValueChange = { username = it },
+                            label = { Text(stringResource(R.string.recset_field_username)) },
+                            isError = ProviderFormIssue.USERNAME_REQUIRED in formIssues,
+                            supportingText = {
+                                if (ProviderFormIssue.USERNAME_REQUIRED in formIssues) {
+                                    Text(stringResource(R.string.onboarding_required_field), color = MaterialTheme.colorScheme.error)
+                                }
+                            },
+                            trailingIcon = { PasteButton(preserveWhitespace = true) { username = it } },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it },
+                            label = { Text(stringResource(R.string.recset_field_password)) },
+                            isError = ProviderFormIssue.PASSWORD_REQUIRED in formIssues,
+                            supportingText = {
+                                if (ProviderFormIssue.PASSWORD_REQUIRED in formIssues) {
+                                    Text(stringResource(R.string.onboarding_required_field), color = MaterialTheme.colorScheme.error)
+                                }
+                            },
+                            trailingIcon = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                        Icon(
+                                            imageVector = if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                            contentDescription = stringResource(
+                                                if (passwordVisible) R.string.onboarding_hide_password
+                                                else R.string.onboarding_show_password,
+                                            ),
+                                        )
+                                    }
+                                    PasteButton(preserveWhitespace = true) { password = it }
+                                }
+                            },
+                            singleLine = true,
+                            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            modifier = Modifier.fillMaxWidth(),
+                        )
                     }
-                }
-                Button(
-                    onClick = { viewModel.saveAndSync(draft()) { ok -> if (ok) onFinished() } },
-                    enabled = canSubmit && !ui.testing && !ui.syncing,
-                ) {
-                    Text(if (ui.syncing) stringResource(R.string.onboarding_working) else stringResource(R.string.onboarding_save_load))
-                }
-            }
 
-            // "Set up from your phone" (the QR pairing flow) is offered only on a TV — see the
-            // isTelevision note above. On a phone it would just show a QR to nowhere.
-            if (isTelevision) {
-                Spacer(Modifier.height(20.dp))
-                OutlinedButton(onClick = { usePhone = true }) {
-                    Text(stringResource(R.string.onboarding_use_phone))
+                    if (kind == SourceKind.STALKER) {
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = mac,
+                            onValueChange = { mac = it },
+                            label = { Text(stringResource(R.string.onboarding_mac_address)) },
+                            isError = ProviderFormIssue.MAC_REQUIRED in formIssues,
+                            supportingText = {
+                                Column {
+                                    Text(stringResource(R.string.onboarding_mac_help))
+                                    if (ProviderFormIssue.MAC_REQUIRED in formIssues) {
+                                        Text(stringResource(R.string.onboarding_required_field), color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            },
+                            trailingIcon = { PasteButton(preserveWhitespace = true) { mac = it } },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedButton(onClick = { showAdvanced = !showAdvanced }) {
+                        Text(if (showAdvanced) stringResource(R.string.onboarding_hide_advanced) else stringResource(R.string.onboarding_advanced))
+                    }
+
+                    if (showAdvanced) {
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = epgUrl,
+                            onValueChange = { epgUrl = it },
+                            label = { Text(stringResource(R.string.onboarding_guide_url_optional)) },
+                            supportingText = {
+                                Column {
+                                    Text(stringResource(R.string.onboarding_guide_blank_help))
+                                    if (HttpsUrlPolicy.requiresSecureScheme(epgUrl)) {
+                                        Text(stringResource(R.string.source_https_required), color = MaterialTheme.colorScheme.error)
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = userAgent,
+                            onValueChange = { userAgent = it },
+                            label = { Text(stringResource(R.string.onboarding_user_agent_label)) },
+                            supportingText = {
+                                Text(stringResource(R.string.onboarding_user_agent_help))
+                            },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
+
+                    Spacer(Modifier.height(20.dp))
+
+                    ui.testResult?.let { message ->
+                        Card(Modifier.fillMaxWidth()) {
+                            Text(message, Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium)
+                        }
+                        Spacer(Modifier.height(12.dp))
+                    }
+                    ui.testError?.let { message ->
+                        Card(Modifier.fillMaxWidth()) {
+                            Text(
+                                message,
+                                Modifier.padding(16.dp),
+                                color = MaterialTheme.colorScheme.error,
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
+                        Spacer(Modifier.height(12.dp))
+                    }
+                    ui.syncMessage?.let { message ->
+                        Text(message, style = MaterialTheme.typography.bodyMedium)
+                        Spacer(Modifier.height(12.dp))
+                    }
+
+                    if (formIssues.isNotEmpty() && !ui.testing && !ui.syncing) {
+                        Text(
+                            stringResource(R.string.onboarding_required_fields_summary),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        OutlinedButton(
+                            onClick = { viewModel.test(draft()) },
+                            enabled = canSubmit && !ui.testing && !ui.syncing,
+                        ) {
+                            if (ui.testing) {
+                                CircularProgressIndicator(Modifier.height(18.dp), strokeWidth = 2.dp)
+                            } else {
+                                Text(stringResource(R.string.recset_test_connection))
+                            }
+                        }
+                        Button(
+                            onClick = { viewModel.saveAndSync(draft()) { ok -> if (ok) onFinished() } },
+                            enabled = canSubmit && !ui.testing && !ui.syncing,
+                        ) {
+                            Text(if (ui.syncing) stringResource(R.string.onboarding_working) else stringResource(R.string.onboarding_save_load))
+                        }
+                    }
+
+                    // "Set up from your phone" (the QR pairing flow) is offered only on a TV — see the
+                    // isTelevision note above. On a phone it would just show a QR to nowhere.
+                    if (isTelevision) {
+                        Spacer(Modifier.height(20.dp))
+                        OutlinedButton(onClick = { usePhone = true }) {
+                            Text(stringResource(R.string.onboarding_use_phone))
+                        }
+                    }
                 }
             }
 
@@ -479,4 +485,21 @@ private fun PasteButton(
     ) {
         Icon(Icons.Filled.ContentPaste, contentDescription = stringResource(R.string.kbd_paste))
     }
+}
+
+@Composable
+private fun SourceTypeChip(
+    selected: Boolean,
+    label: String,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        modifier = Modifier
+            .onFocusChanged { focused = it.isFocused }
+            .fullTvFocusRing(focused, MaterialTheme.colorScheme.primary, FullTvChrome.controlShape),
+    )
 }

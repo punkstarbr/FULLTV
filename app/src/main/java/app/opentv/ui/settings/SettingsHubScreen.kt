@@ -9,6 +9,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -51,9 +52,14 @@ import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.opentv.R
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
+import app.opentv.ui.fullTvFocusRing
 
 /**
  * The one settings entry point. Every other settings surface is reached from here, so there is
@@ -90,28 +96,29 @@ fun SettingsHubScreen(
         HubEntry(Icons.Filled.Info, stringResource(R.string.settings_about_title), stringResource(R.string.settings_about_subtitle), onOpenAbout),
     )
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .focusRestorer()
-            .focusGroup()
-            .padding(horizontal = 32.dp, vertical = 24.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.Filled.Tv, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.width(12.dp))
-            Text(stringResource(R.string.nav_settings), style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.weight(1f))
-            HubTextButton(stringResource(R.string.common_done), onBack)
-        }
-
-        Spacer(Modifier.height(20.dp))
-
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.widthIn(max = 760.dp),
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val pageInset = if (maxWidth < 600.dp) FullTvChrome.compactPageInset else FullTvChrome.pageInset
+        Column(
+            Modifier
+                .fillMaxSize()
+                .focusRestorer()
+                .focusGroup()
+                .padding(horizontal = pageInset, vertical = FullTvChrome.pageInset),
         ) {
-            items(entries) { entry -> HubRow(entry) }
+            FullTvSectionHeader(
+                title = stringResource(R.string.nav_settings),
+                modifier = Modifier.widthIn(max = 1000.dp),
+                trailingContent = { HubTextButton(stringResource(R.string.common_done), onBack) },
+            )
+
+            Spacer(Modifier.height(FullTvChrome.sectionGap))
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(FullTvChrome.cardGap),
+                modifier = Modifier.widthIn(max = 760.dp).focusRestorer().focusGroup(),
+            ) {
+                items(entries, key = { it.title }) { entry -> HubRow(entry) }
+            }
         }
     }
 }
@@ -126,44 +133,41 @@ private data class HubEntry(
 @Composable
 private fun HubRow(entry: HubEntry) {
     var focused by remember { mutableStateOf(false) }
-    Row(
-        Modifier
+    FullTvCard(
+        modifier = Modifier
             .fillMaxWidth()
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(14.dp))
-            .background(
-                if (focused) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surfaceVariant,
-            )
-            .then(
-                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(14.dp))
-                else Modifier,
-            )
             .clickable(role = Role.Button, onClick = entry.onClick)
-            .padding(horizontal = 18.dp, vertical = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .fullTvFocusRing(focused, MaterialTheme.colorScheme.primary, FullTvChrome.cardShape)
+            .semantics(mergeDescendants = true) {},
+        containerColor = if (focused) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
     ) {
-        Icon(
-            entry.icon,
-            contentDescription = null,
-            tint = if (focused) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.primary,
-            modifier = Modifier.size(28.dp),
-        )
-        Spacer(Modifier.width(18.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                entry.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = if (focused) MaterialTheme.colorScheme.onPrimaryContainer
-                else MaterialTheme.colorScheme.onSurface,
+        Row(
+            Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                entry.icon,
+                contentDescription = null,
+                tint = if (focused) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(30.dp),
             )
-            Text(
-                entry.subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (focused) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            Spacer(Modifier.width(18.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    entry.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (focused) MaterialTheme.colorScheme.onPrimaryContainer
+                    else MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    entry.subtitle,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (focused) MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.9f)
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -181,6 +185,7 @@ internal fun HubTextButton(label: String, onClick: () -> Unit) {
             .clip(RoundedCornerShape(10.dp))
             .background(if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
             .clickable(onClick = onClick)
+            .fullTvFocusRing(focused, MaterialTheme.colorScheme.primary)
             .padding(horizontal = 18.dp, vertical = 8.dp),
     )
 }

@@ -12,10 +12,13 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -39,6 +42,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -47,6 +51,12 @@ import app.opentv.BuildConfig
 import app.opentv.R
 import app.opentv.core.ServiceLocator
 import app.opentv.update.UpdateChecker
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
+import app.opentv.ui.fullTvFocusRing
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.ExperimentalComposeUiApi
 import kotlinx.coroutines.launch
 
 private const val LEGACY_SIGNING_CERT_SHA256 =
@@ -57,6 +67,7 @@ private const val LEGACY_SIGNING_CERT_SHA256 =
  * manual counterpart to the automatic one — someone who just heard a fix landed can pull it now
  * instead of waiting for the periodic check.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun AboutScreen(onBack: () -> Unit) {
     val context = LocalContext.current
@@ -64,17 +75,17 @@ fun AboutScreen(onBack: () -> Unit) {
     var updateLine by remember { mutableStateOf<String?>(null) }
     var checking by remember { mutableStateOf(false) }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 32.dp, vertical = 24.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.about_title), style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.weight(1f))
-            OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) }
-        }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val pageInset = if (maxWidth < 600.dp) FullTvChrome.compactPageInset else FullTvChrome.pageInset
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).focusRestorer().focusGroup()
+                .padding(horizontal = pageInset, vertical = FullTvChrome.pageInset)
+                .widthIn(max = 1000.dp).align(Alignment.TopCenter),
+        ) {
+            FullTvSectionHeader(
+                title = stringResource(R.string.about_title),
+                trailingContent = { OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) } },
+            )
 
         Spacer(Modifier.height(20.dp))
 
@@ -202,14 +213,17 @@ fun AboutScreen(onBack: () -> Unit) {
             LinkLine(stringResource(R.string.about_source_code), "github.com/$slug", url = "https://github.com/$slug")
             LinkLine(stringResource(R.string.about_report_bug), "github.com/$slug/issues", url = "https://github.com/$slug/issues")
         }
+        }
     }
 }
 
 @Composable
 private fun Section(title: String, content: @Composable () -> Unit) {
-    Text(title, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
+    FullTvSectionHeader(title = title)
     Spacer(Modifier.height(8.dp))
-    Column(Modifier.widthIn(max = 760.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) { content() }
+    FullTvCard(Modifier.widthIn(max = 920.dp), containerColor = MaterialTheme.colorScheme.surfaceVariant) {
+        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) { content() }
+    }
 }
 
 /**
@@ -223,20 +237,22 @@ private fun LinkLine(label: String, value: String, url: String = "https://$value
     var focused by remember { mutableStateOf(false) }
     Row(
         Modifier
+            .fillMaxWidth()
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(8.dp))
+            .clip(FullTvChrome.controlShape)
             .then(
                 if (focused) Modifier.background(MaterialTheme.colorScheme.primary.copy(alpha = 0.18f))
                 else Modifier,
             )
-            .clickable {
+            .clickable(role = Role.Button) {
                 runCatching {
                     context.startActivity(
                         Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                     )
                 }.onFailure { Toast.makeText(context, url, Toast.LENGTH_LONG).show() }
             }
-            .padding(vertical = 6.dp, horizontal = 6.dp),
+            .fullTvFocusRing(focused, MaterialTheme.colorScheme.primary)
+            .padding(vertical = 10.dp, horizontal = 10.dp),
     ) {
         Text(
             "$label:  ",

@@ -10,7 +10,11 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.FlowRowScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
@@ -19,6 +23,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -53,6 +58,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -62,7 +68,11 @@ import app.opentv.data.model.Movie
 import app.opentv.data.model.Series
 import app.opentv.data.model.StremioStream
 import app.opentv.data.parser.displayTitle
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
 import app.opentv.ui.VodViewModel
+import app.opentv.ui.fullTvFocusRing
 import coil.compose.AsyncImage
 import androidx.compose.ui.window.Dialog
 import kotlinx.coroutines.delay
@@ -74,6 +84,7 @@ import kotlinx.coroutines.launch
  * enriches the row from the provider (backdrop/cast/genre) if those fields are still bare, so a card
  * that was plain in a grid fills out here.
  */
+@kotlin.OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun MovieDetailScreen(
     movieId: Long,
@@ -256,6 +267,7 @@ private fun AddonStreamRow(stream: StremioStream, onPick: (StremioStream) -> Uni
  * are fetched on demand — pulling every episode of every series up front is what makes a first sync
  * take twenty minutes on a large provider, and most of it is never looked at.
  */
+@kotlin.OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SeriesDetailScreen(
     seriesId: Long,
@@ -363,23 +375,23 @@ fun SeriesDetailScreen(
  * a title with no backdrop at all and a broken poster still shows its name over the app gradient
  * beside an intentional-looking placeholder card, never an empty rectangle.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun DetailBackdrop(
     title: String,
     backdropUrl: String?,
     posterUrl: String?,
     meta: String,
-    actions: @Composable RowScope.() -> Unit,
+    actions: @Composable FlowRowScope.() -> Unit,
 ) {
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .height(360.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant),
-    ) {
-        // Background: try the backdrop, fall back to the poster on load error, then to the gradient
-        // alone. Coil silently renders nothing on a failed load, so we drive the fallback from the
-        // error callback rather than trusting a non-null URL to actually resolve.
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val compact = maxWidth < 600.dp
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(if (compact) 420.dp else 360.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant),
+        ) {
         val bgCandidates = remember(backdropUrl, posterUrl) { listOfNotNull(backdropUrl, posterUrl).distinct() }
         var bgIndex by remember(bgCandidates) { mutableStateOf(0) }
         bgCandidates.getOrNull(bgIndex)?.let { model ->
@@ -391,8 +403,6 @@ private fun DetailBackdrop(
                 onError = { if (bgIndex < bgCandidates.lastIndex) bgIndex++ },
             )
         }
-        // Scrim: keeps text readable over any art, and — with no art at all — is itself the tasteful
-        // gradient the hero falls back to.
         Box(
             Modifier.matchParentSize().background(
                 Brush.verticalGradient(
@@ -402,34 +412,69 @@ private fun DetailBackdrop(
                 ),
             ),
         )
-        Row(
-            Modifier
-                .align(Alignment.BottomStart)
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 20.dp),
-            horizontalArrangement = Arrangement.spacedBy(20.dp),
-            verticalAlignment = Alignment.Bottom,
-        ) {
-            HeroPosterCard(posterUrl = posterUrl, title = title)
-            Column(Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.headlineLarge,
-                    color = Color.White,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (meta.isNotBlank()) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(meta, style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = 0.85f))
+
+        if (compact) {
+            Column(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 18.dp),
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                    HeroPosterCard(posterUrl = posterUrl, title = title, compact = true)
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            title,
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = Color.White,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (meta.isNotBlank()) {
+                            Spacer(Modifier.height(6.dp))
+                            Text(meta, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.88f))
+                        }
+                    }
                 }
-                Spacer(Modifier.height(16.dp))
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
                     content = actions,
                 )
             }
+        } else {
+            Row(
+                Modifier
+                    .align(Alignment.BottomStart)
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 20.dp),
+                horizontalArrangement = Arrangement.spacedBy(20.dp),
+                verticalAlignment = Alignment.Bottom,
+            ) {
+                HeroPosterCard(posterUrl = posterUrl, title = title)
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        title,
+                        style = MaterialTheme.typography.headlineLarge,
+                        color = Color.White,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (meta.isNotBlank()) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(meta, style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = 0.88f))
+                    }
+                    Spacer(Modifier.height(16.dp))
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                        content = actions,
+                    )
+                }
+            }
+        }
         }
     }
 }
@@ -442,12 +487,12 @@ private fun DetailBackdrop(
  * hero's d-pad targets.
  */
 @Composable
-private fun HeroPosterCard(posterUrl: String?, title: String) {
+private fun HeroPosterCard(posterUrl: String?, title: String, compact: Boolean = false) {
     var posterFailed by remember(posterUrl) { mutableStateOf(false) }
     Box(
         Modifier
-            .width(128.dp)
-            .height(192.dp)
+            .width(if (compact) 76.dp else 128.dp)
+            .height(if (compact) 114.dp else 192.dp)
             .shadow(12.dp, RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,

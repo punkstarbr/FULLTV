@@ -36,6 +36,9 @@ import app.opentv.data.model.Movie
 import app.opentv.data.model.Series
 import app.opentv.data.parser.displayTitle
 import app.opentv.data.repo.PersonTitle
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
 import app.opentv.ui.VodViewModel
 
 /**
@@ -59,13 +62,9 @@ fun PersonScreen(
     BackHandler { onBack() }
 
     Column(Modifier.fillMaxSize()) {
-        Text(
-            stringResource(R.string.vod_person_title, name),
-            style = MaterialTheme.typography.headlineMedium,
-            color = MaterialTheme.colorScheme.onSurface,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
+        FullTvSectionHeader(
+            title = stringResource(R.string.vod_person_title, name),
+            modifier = Modifier.padding(horizontal = FullTvChrome.pageInset, vertical = 20.dp),
         )
 
         // Weighted so the grid/empty state fills the space under the fixed header, exactly — the same
@@ -75,18 +74,21 @@ fun PersonScreen(
                 null -> Centered { CircularProgressIndicator() }
                 else -> if (list.isEmpty()) {
                     Centered {
-                        Text(
-                            stringResource(R.string.vod_person_empty, name),
-                            style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
+                            Text(
+                                stringResource(R.string.vod_person_empty, name),
+                                style = MaterialTheme.typography.titleMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 20.dp, vertical = 16.dp),
+                            )
+                        }
                     }
                 } else {
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(minSize = 140.dp),
-                        contentPadding = PaddingValues(horizontal = 24.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                        contentPadding = PaddingValues(horizontal = FullTvChrome.pageInset, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.spacedBy(FullTvChrome.cardGap),
+                        verticalArrangement = Arrangement.spacedBy(FullTvChrome.sectionGap),
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         gridItems(list, key = { it.gridKey() }) { item ->

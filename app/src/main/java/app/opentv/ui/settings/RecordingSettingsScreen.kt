@@ -9,7 +9,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -61,6 +64,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -93,6 +97,12 @@ import app.opentv.recording.RecordingStorage
 import app.opentv.recording.SmbClient
 import app.opentv.recording.SmbConfig
 import app.opentv.ui.ProtectSensitiveScreen
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
+import app.opentv.ui.fullTvFocusRing
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.ExperimentalComposeUiApi
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -105,6 +115,7 @@ import kotlinx.coroutines.withContext
  * exactly like a provider's login; the USB drive is addressed through a folder the user grants
  * with the system picker (Storage Access Framework), which needs no storage permission.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun RecordingSettingsScreen(onBack: () -> Unit) {
     ProtectSensitiveScreen()
@@ -274,18 +285,23 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
         return true
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .imePadding()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 32.dp, vertical = 24.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.settings_recording_title), style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.weight(1f))
-            OutlinedButton(onClick = { if (persist()) onBack() }) { Text(stringResource(R.string.common_done)) }
-        }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val pageInset = if (maxWidth < 600.dp) FullTvChrome.compactPageInset else FullTvChrome.pageInset
+        Column(
+            Modifier
+                .fillMaxSize()
+                .imePadding()
+                .focusRestorer()
+                .focusGroup()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = pageInset, vertical = FullTvChrome.pageInset)
+                .widthIn(max = 1040.dp)
+                .align(Alignment.TopCenter),
+        ) {
+        FullTvSectionHeader(
+            title = stringResource(R.string.settings_recording_title),
+            trailingContent = { OutlinedButton(onClick = { if (persist()) onBack() }) { Text(stringResource(R.string.common_done)) } },
+        )
         Spacer(Modifier.height(8.dp))
         Text(
             stringResource(R.string.recset_desc),
@@ -734,6 +750,7 @@ fun RecordingSettingsScreen(onBack: () -> Unit) {
                 if (persist()) status = context.getString(R.string.recset_status_saved)
             },
         ) { Text(stringResource(R.string.common_save)) }
+        }
     }
 }
 
@@ -1016,32 +1033,29 @@ private fun BackgroundStatus() {
 
 @Composable
 private fun SectionCard(title: String, content: @Composable () -> Unit) {
-    Column(Modifier.widthIn(max = 720.dp)) {
-        Text(
-            title,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-        )
+    Column(Modifier.widthIn(max = 860.dp)) {
+        FullTvSectionHeader(title = title)
         Spacer(Modifier.height(8.dp))
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(14.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) { content() }
+        FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
+            Column(
+                Modifier.fillMaxWidth().padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) { content() }
+        }
     }
 }
 
 @Composable
 private fun TargetRow(label: String, subtitle: String, selected: Boolean, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
-            .padding(8.dp),
+            .onFocusChanged { focused = it.isFocused }
+            .clip(FullTvChrome.controlShape)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .fullTvFocusRing(focused, MaterialTheme.colorScheme.primary)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(

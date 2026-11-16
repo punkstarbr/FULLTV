@@ -46,9 +46,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -59,6 +63,10 @@ import app.opentv.data.model.Series
 import app.opentv.data.model.Source
 import app.opentv.data.parser.displayTitle
 import app.opentv.ui.VodViewModel
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
+import app.opentv.ui.fullTvFocusRing
 import coil.compose.AsyncImage
 
 /**
@@ -326,14 +334,9 @@ internal fun SeriesPosterRow(title: String, series: List<Series>, onOpenSeries: 
 
 @Composable
 internal fun SectionHeader(title: String) {
-    Text(
-        title,
-        style = MaterialTheme.typography.titleMedium,
-        fontWeight = FontWeight.SemiBold,
-        color = MaterialTheme.colorScheme.onSurface,
-        maxLines = 1,
-        overflow = TextOverflow.Ellipsis,
-        modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp),
+    FullTvSectionHeader(
+        title = title,
+        modifier = Modifier.padding(start = FullTvChrome.pageInset, end = FullTvChrome.pageInset, bottom = 4.dp),
     )
 }
 
@@ -362,7 +365,8 @@ internal fun PosterCard(
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onClick)
+            .fullTvFocusRing(focused, MaterialTheme.colorScheme.primary, FullTvChrome.cardShape)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(4.dp),
     ) {
         Box(
@@ -370,11 +374,7 @@ internal fun PosterCard(
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
                 .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .then(
-                    if (focused) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
-                    else Modifier,
-                ),
+                .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
             AsyncImage(
                 model = posterUrl,
@@ -471,7 +471,8 @@ private fun ResumeCard(item: VodViewModel.ResumeItem, onClick: () -> Unit) {
             .graphicsLayer { scaleX = scale; scaleY = scale }
             .onFocusChanged { focused = it.isFocused }
             .clip(RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
+            .fullTvFocusRing(focused, MaterialTheme.colorScheme.primary, FullTvChrome.cardShape)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(4.dp),
     ) {
         Box(
@@ -479,11 +480,7 @@ private fun ResumeCard(item: VodViewModel.ResumeItem, onClick: () -> Unit) {
                 .fillMaxWidth()
                 .height(107.dp)
                 .clip(RoundedCornerShape(6.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant)
-                .then(
-                    if (focused) Modifier.border(3.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(6.dp))
-                    else Modifier,
-                ),
+                .background(MaterialTheme.colorScheme.surfaceVariant),
         ) {
             AsyncImage(
                 model = item.posterUrl,
@@ -577,6 +574,7 @@ private fun ProviderChips(
 @Composable
 private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
+    val selectedDescription = stringResource(R.string.common_selected)
     val bg = when {
         focused -> MaterialTheme.colorScheme.primary
         selected -> MaterialTheme.colorScheme.primaryContainer
@@ -594,9 +592,13 @@ private fun Chip(label: String, selected: Boolean, onClick: () -> Unit) {
         maxLines = 1,
         modifier = Modifier
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(20.dp))
+            .clip(FullTvChrome.controlShape)
             .background(bg)
-            .clickable(onClick = onClick)
+            .fullTvFocusRing(focused, Color.White, FullTvChrome.controlShape)
+            .semantics(mergeDescendants = true) {
+                if (selected) stateDescription = selectedDescription
+            }
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
     )
 }
@@ -614,13 +616,14 @@ private fun SearchAffordance(onOpenSearch: () -> Unit) {
     Row(
         Modifier
             .padding(horizontal = 16.dp, vertical = 12.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(FullTvChrome.controlShape)
             .background(
                 if (focused) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceVariant,
             )
             .onFocusChanged { focused = it.isFocused }
-            .clickable(onClick = onOpenSearch)
+            .fullTvFocusRing(focused, Color.White, FullTvChrome.controlShape)
+            .clickable(role = Role.Button, onClick = onOpenSearch)
             .padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -639,10 +642,18 @@ private fun SearchAffordance(onOpenSearch: () -> Unit) {
 @Composable
 private fun EmptyVod(title: String, body: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(title, style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(8.dp))
-            Text(body, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        FullTvCard(
+            modifier = Modifier.padding(24.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ) {
+            Column(
+                Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(title, style = MaterialTheme.typography.headlineSmall)
+                Spacer(Modifier.height(8.dp))
+                Text(body, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
@@ -650,15 +661,23 @@ private fun EmptyVod(title: String, body: String) {
 @Composable
 private fun LoadingVod(message: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            CircularProgressIndicator()
-            Spacer(Modifier.height(16.dp))
-            Text(message, style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(8.dp))
-            Text(
-                stringResource(R.string.vod_large_provider_note),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+        FullTvCard(
+            modifier = Modifier.padding(24.dp),
+            containerColor = MaterialTheme.colorScheme.surfaceVariant,
+        ) {
+            Column(
+                Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                CircularProgressIndicator()
+                Spacer(Modifier.height(16.dp))
+                Text(message, style = MaterialTheme.typography.headlineSmall)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    stringResource(R.string.vod_large_provider_note),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }

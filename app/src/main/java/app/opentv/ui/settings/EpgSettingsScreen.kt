@@ -6,6 +6,7 @@
 package app.opentv.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,9 +18,9 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.focusGroup
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -34,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -45,6 +47,10 @@ import app.opentv.core.AppSettings
 import app.opentv.core.ServiceLocator
 import app.opentv.data.model.EpgFeed
 import app.opentv.ui.EpgViewModel
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
+import androidx.compose.ui.ExperimentalComposeUiApi
 
 /**
  * Guide settings: where guide data comes from.
@@ -55,6 +61,7 @@ import app.opentv.ui.EpgViewModel
  * sync outcome, because "the guide silently didn't update" is the failure this whole app
  * exists to avoid.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun EpgSettingsScreen(
     onBack: () -> Unit,
@@ -69,20 +76,26 @@ fun EpgSettingsScreen(
     var newName by remember { mutableStateOf("") }
     var newUrl by remember { mutableStateOf("") }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp, vertical = 24.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.settings_guide_title), style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.weight(1f))
-            OutlinedButton(onClick = { viewModel.refresh() }, enabled = !ui.syncing) {
-                Text(if (ui.syncing) stringResource(R.string.epg_updating) else stringResource(R.string.epg_update_now))
-            }
-            Spacer(Modifier.width(12.dp))
-            OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) }
-        }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val pageInset = if (maxWidth < 600.dp) FullTvChrome.compactPageInset else FullTvChrome.pageInset
+        Column(
+            Modifier
+                .fillMaxSize()
+                .focusRestorer()
+                .focusGroup()
+                .padding(horizontal = pageInset, vertical = FullTvChrome.pageInset)
+                .widthIn(max = 1100.dp)
+                .align(Alignment.TopCenter),
+        ) {
+        FullTvSectionHeader(
+            title = stringResource(R.string.settings_guide_title),
+            trailingContent = {
+                OutlinedButton(onClick = { viewModel.refresh() }, enabled = !ui.syncing) {
+                    Text(if (ui.syncing) stringResource(R.string.epg_updating) else stringResource(R.string.epg_update_now))
+                }
+                OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) }
+            },
+        )
 
         ui.statusLine?.let { line ->
             Spacer(Modifier.height(8.dp))
@@ -109,10 +122,13 @@ fun EpgSettingsScreen(
         )
         Spacer(Modifier.height(16.dp))
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(FullTvChrome.cardGap),
+            modifier = Modifier.focusRestorer().focusGroup(),
+        ) {
             item {
-                Card {
-                    Column(Modifier.padding(16.dp)) {
+                FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
+                    Column(Modifier.fillMaxWidth().padding(20.dp)) {
                         Text(
                             stringResource(R.string.guide_density_title),
                             style = MaterialTheme.typography.titleMedium,
@@ -165,8 +181,8 @@ fun EpgSettingsScreen(
                 if (!showAdd) {
                     OutlinedButton(onClick = { showAdd = true }) { Text(stringResource(R.string.epg_add_own)) }
                 } else {
-                    Card {
-                        Column(Modifier.padding(16.dp)) {
+                    FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
+                        Column(Modifier.fillMaxWidth().padding(20.dp)) {
                             OutlinedTextField(
                                 value = newName,
                                 onValueChange = { newName = it },
@@ -205,6 +221,7 @@ fun EpgSettingsScreen(
         }
     }
 
+    }
     if (showPauseExtraGuides) {
         AlertDialog(
             onDismissRequest = { showPauseExtraGuides = false },
@@ -231,7 +248,7 @@ private fun FeedRow(
     onToggle: (Boolean) -> Unit,
     onRemove: () -> Unit,
 ) {
-    Card {
+    FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
         Row(
             Modifier
                 .fillMaxWidth()

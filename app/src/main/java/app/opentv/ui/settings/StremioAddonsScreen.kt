@@ -7,6 +7,8 @@ package app.opentv.ui.settings
 
 import android.app.Application
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,7 +21,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -35,6 +36,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -42,6 +44,10 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.opentv.R
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
+import androidx.compose.ui.ExperimentalComposeUiApi
 import app.opentv.core.ServiceLocator
 import app.opentv.data.model.StremioAddon
 import kotlinx.coroutines.Dispatchers
@@ -92,6 +98,7 @@ class StremioAddonsViewModel(app: Application) : AndroidViewModel(app) {
  * on-device. OpenTV bundles none and points at none — the user brings their own. A short note makes
  * the debrid model explicit: the key lives in the add-on's own personalised URL, not in OpenTV.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun StremioAddonsScreen(onBack: () -> Unit) {
     val viewModel: StremioAddonsViewModel = viewModel()
@@ -105,16 +112,17 @@ fun StremioAddonsScreen(onBack: () -> Unit) {
         if (status is StremioAddonsViewModel.Status.Added) input = ""
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp, vertical = 24.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.settings_addons_title), style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.weight(1f))
-            OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) }
-        }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val pageInset = if (maxWidth < 600.dp) FullTvChrome.compactPageInset else FullTvChrome.pageInset
+        Column(
+            Modifier.fillMaxSize().focusRestorer().focusGroup()
+                .padding(horizontal = pageInset, vertical = FullTvChrome.pageInset)
+                .widthIn(max = 1040.dp).align(Alignment.TopCenter),
+        ) {
+            FullTvSectionHeader(
+                title = stringResource(R.string.settings_addons_title),
+                trailingContent = { OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) } },
+            )
 
         Spacer(Modifier.height(8.dp))
         Text(
@@ -187,12 +195,13 @@ fun StremioAddonsScreen(onBack: () -> Unit) {
                 }
             }
         }
+        }
     }
 }
 
 @Composable
 private fun AddonRow(addon: StremioAddon, onRemove: () -> Unit) {
-    Card {
+    FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
         Row(
             Modifier
                 .fillMaxWidth()

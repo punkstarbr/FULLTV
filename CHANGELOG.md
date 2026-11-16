@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.11.44 (release pública manual) — 2026-11-16
+
+- **Remodelação completa da interface:** unificar cartões, seções, espaçamento e anéis de foco; adaptar Live TV, portal, guia, mosaico, busca, formulários de fontes, player, gravações, VOD, configurações e gerenciamento para TV e celular, preservando ações existentes.
+- **Navegação e acessibilidade:** melhorar estados de foco/seleção, retorno D-pad, teclado na tela, scroll e layout em viewports estreitas. No player estreito com controles visíveis, Cima/Baixo percorrem a barra de controles; validar esse comportamento em Android TV/Fire TV com densidade alta.
+- **Validação:** build Gradle limpa; 273 testes Android (52 XML) e 23 testes Python (13 ferramentas + 10 segurança) passaram sem falhas/erros/ignorados. `assembleDebug`, `lintDebug`, `lintVitalRelease` e `assembleRelease` passaram. Três revisões estáticas independentes não acharam regressões funcionais concretas. Não houve teste físico no Moto G84, Android TV ou Fire TV, nem evidência de correção do fechamento ao abrir.
+- **Compatibilidade e riscos:** mantém `app.fulltv`, versionCode 56, minSdk 24, targetSdk 35 e o certificado legado compartilhado para permitir atualização in-app; não é uma assinatura de produção. O advisory lxml continua aberto com a mitigação existente.
+- **APK universal:** 204.962.209 bytes, quatro ABIs, 60 bibliotecas nativas alinhadas a 16 KiB; SHA-256 `3b33ac8bd25030d8148771987dab82bf4ade55379c32bf4aef98d59119770253`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. Os hashes dos quatro APKs por ABI também estão em `SHA256SUMS.txt` da release.
+
 ## 0.11.43 (release pública manual) — 2026-11-12
 
 - **Assinatura/About:** mostrar no ecrã Sobre que a assinatura Android Debug partilhada é uma âncora legada de atualização, não de produção, e apresentar o fingerprint SHA-256 real do certificado do build.

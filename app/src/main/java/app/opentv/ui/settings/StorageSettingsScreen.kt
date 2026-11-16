@@ -10,6 +10,8 @@ import android.os.StatFs
 import android.text.format.Formatter
 import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,9 +21,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -37,11 +39,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.opentv.R
 import app.opentv.core.ServiceLocator
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
+import androidx.compose.ui.ExperimentalComposeUiApi
 import app.opentv.data.repo.EpgRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -51,6 +58,7 @@ import java.io.File
 private const val TAG = "StorageSettings"
 private const val MIN_VACUUM_HEADROOM_BYTES = 64L * 1024 * 1024
 
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun StorageSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current.applicationContext
@@ -66,18 +74,23 @@ fun StorageSettingsScreen(onBack: () -> Unit) {
         snapshot = withContext(Dispatchers.IO) { measureStorage(context) }
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 32.dp, vertical = 24.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.storage_title), style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.weight(1f))
-            OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) }
-        }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val pageInset = if (maxWidth < 600.dp) FullTvChrome.compactPageInset else FullTvChrome.pageInset
+        Column(
+            Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .focusRestorer()
+                .focusGroup()
+                .padding(horizontal = pageInset, vertical = FullTvChrome.pageInset)
+                .widthIn(max = 1000.dp)
+                .align(Alignment.TopCenter),
+            verticalArrangement = Arrangement.spacedBy(FullTvChrome.cardGap),
+        ) {
+            FullTvSectionHeader(
+                title = stringResource(R.string.storage_title),
+                trailingContent = { OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) } },
+            )
         Text(
             stringResource(R.string.storage_subtitle),
             style = MaterialTheme.typography.bodyMedium,
@@ -88,7 +101,7 @@ fun StorageSettingsScreen(onBack: () -> Unit) {
         if (current == null) {
             CircularProgressIndicator()
         } else {
-            Card(Modifier.fillMaxWidth()) {
+            FullTvCard(Modifier.fillMaxWidth(), containerColor = MaterialTheme.colorScheme.surfaceVariant) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     StorageMetric(context, R.string.storage_apk_files, current.apkBytes)
                     StorageMetric(context, R.string.storage_native_libraries, current.nativeLibraryBytes)
@@ -137,6 +150,7 @@ fun StorageSettingsScreen(onBack: () -> Unit) {
 
         if (statusMessage != 0) {
             Text(stringResource(statusMessage), color = MaterialTheme.colorScheme.primary)
+        }
         }
     }
 

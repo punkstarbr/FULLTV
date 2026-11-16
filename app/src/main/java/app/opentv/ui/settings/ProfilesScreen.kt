@@ -6,6 +6,8 @@
 package app.opentv.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,7 +20,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -31,18 +32,24 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.opentv.R
 import app.opentv.ui.ProfilesViewModel
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
+import androidx.compose.ui.ExperimentalComposeUiApi
 import app.opentv.ui.channels.OnScreenKeyboard
 
 /**
  * Who's watching. Add, rename, remove and switch between local profiles; the active one decides
  * whose continue-watching and watched state is in play across the app.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun ProfilesScreen(
     onBack: () -> Unit,
@@ -67,38 +74,39 @@ fun ProfilesScreen(
         return
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .padding(horizontal = 32.dp, vertical = 24.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.profiles_title), style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.weight(1f))
-            Button(onClick = { editing = NEW }) { Text(stringResource(R.string.profiles_add)) }
-            Spacer(Modifier.width(12.dp))
-            OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) }
-        }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val pageInset = if (maxWidth < 600.dp) FullTvChrome.compactPageInset else FullTvChrome.pageInset
+        val compactLayout = maxWidth < 600.dp
+        Column(
+            Modifier
+                .fillMaxSize()
+                .focusRestorer()
+                .focusGroup()
+                .padding(horizontal = pageInset, vertical = FullTvChrome.pageInset),
+        ) {
+        FullTvSectionHeader(
+            title = stringResource(R.string.profiles_title),
+            trailingContent = {
+                Button(onClick = { editing = NEW }) { Text(stringResource(R.string.profiles_add)) }
+                OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) }
+            },
+        )
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(FullTvChrome.sectionGap))
 
         LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.widthIn(max = 760.dp),
+            verticalArrangement = Arrangement.spacedBy(FullTvChrome.cardGap),
+            modifier = Modifier.widthIn(max = 760.dp).focusRestorer().focusGroup(),
         ) {
             items(profiles, key = { it.id }) { profile ->
                 val active = profile.id == activeId
-                Card {
+                FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
                     Row(
-                        Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
+                        Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Column(Modifier.weight(1f)) {
-                            Text(
-                                profile.name,
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
+                            Text(profile.name, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                             if (active) {
                                 Text(
                                     stringResource(R.string.profiles_active),
@@ -107,16 +115,21 @@ fun ProfilesScreen(
                                 )
                             }
                         }
-                        if (!active) {
-                            TextButton(onClick = { viewModel.select(profile.id) }) { Text(stringResource(R.string.profiles_use)) }
-                        }
-                        TextButton(onClick = { editing = profile.id }) { Text(stringResource(R.string.profiles_rename)) }
-                        if (profile.id != 1L) {
-                            TextButton(onClick = { viewModel.remove(profile.id) }) { Text(stringResource(R.string.common_remove)) }
+                        if (compactLayout) {
+                            Column(horizontalAlignment = Alignment.End) {
+                                if (!active) TextButton(onClick = { viewModel.select(profile.id) }) { Text(stringResource(R.string.profiles_use)) }
+                                TextButton(onClick = { editing = profile.id }) { Text(stringResource(R.string.profiles_rename)) }
+                                if (profile.id != 1L) TextButton(onClick = { viewModel.remove(profile.id) }) { Text(stringResource(R.string.common_remove)) }
+                            }
+                        } else {
+                            if (!active) TextButton(onClick = { viewModel.select(profile.id) }) { Text(stringResource(R.string.profiles_use)) }
+                            TextButton(onClick = { editing = profile.id }) { Text(stringResource(R.string.profiles_rename)) }
+                            if (profile.id != 1L) TextButton(onClick = { viewModel.remove(profile.id) }) { Text(stringResource(R.string.common_remove)) }
                         }
                     }
                 }
             }
+        }
         }
     }
 }

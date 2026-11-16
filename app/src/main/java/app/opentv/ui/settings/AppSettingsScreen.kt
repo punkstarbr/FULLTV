@@ -6,7 +6,11 @@
 package app.opentv.ui.settings
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -38,6 +42,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
@@ -48,12 +55,19 @@ import app.opentv.core.AppSettings
 import app.opentv.core.SleepTimer
 import app.opentv.core.findActivity
 import app.opentv.data.work.SyncWorker
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
+import app.opentv.ui.fullTvFocusRing
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.ExperimentalComposeUiApi
 
 /**
  * Display & playback preferences: the app-behaviour settings, kept apart from the guide/data
  * settings so neither screen becomes a junk drawer. Everything here writes straight to
  * [AppSettings] and takes effect immediately.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun AppSettingsScreen(onBack: () -> Unit) {
     val context = LocalContext.current
@@ -84,17 +98,22 @@ fun AppSettingsScreen(onBack: () -> Unit) {
         Toast.makeText(context, refreshingMessage, Toast.LENGTH_SHORT).show()
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 32.dp, vertical = 24.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.settings_display_title), style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.weight(1f))
-            OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) }
-        }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val pageInset = if (maxWidth < 600.dp) FullTvChrome.compactPageInset else FullTvChrome.pageInset
+        Column(
+            Modifier
+                .fillMaxSize()
+                .focusRestorer()
+                .focusGroup()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = pageInset, vertical = FullTvChrome.pageInset)
+                .widthIn(max = 1040.dp)
+                .align(Alignment.TopCenter),
+        ) {
+        FullTvSectionHeader(
+            title = stringResource(R.string.settings_display_title),
+            trailingContent = { OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) } },
+        )
 
         Spacer(Modifier.height(20.dp))
 
@@ -310,6 +329,7 @@ fun AppSettingsScreen(onBack: () -> Unit) {
         Spacer(Modifier.height(16.dp))
 
         SleepTimerSection()
+        }
     }
 }
 
@@ -427,17 +447,13 @@ private fun SleepOption(label: String, selected: Boolean, onSelect: () -> Unit) 
 
 @Composable
 private fun SettingsSection(title: String, content: @Composable () -> Unit) {
-    Text(
-        title,
-        style = MaterialTheme.typography.titleMedium,
-        color = MaterialTheme.colorScheme.primary,
-    )
+    FullTvSectionHeader(title = title)
     Spacer(Modifier.height(8.dp))
-    Card {
+    FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
         Column(
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(horizontal = 20.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) { content() }
     }
@@ -445,11 +461,16 @@ private fun SettingsSection(title: String, content: @Composable () -> Unit) {
 
 @Composable
 private fun ThemeOption(label: String, selected: Boolean, onSelect: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
     Row(
         Modifier
             .fillMaxWidth()
-            .selectable(selected = selected, onClick = onSelect)
-            .padding(vertical = 4.dp),
+            .onFocusChanged { focused = it.isFocused }
+            .clip(FullTvChrome.controlShape)
+            .background(if (focused) MaterialTheme.colorScheme.surface else androidx.compose.ui.graphics.Color.Transparent)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onSelect)
+            .fullTvFocusRing(focused, MaterialTheme.colorScheme.primary)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         RadioButton(selected = selected, onClick = onSelect)
@@ -468,7 +489,7 @@ private fun ToggleRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clickable { onToggle(!checked) },
+            .clickable(role = Role.Switch) { onToggle(!checked) },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Column(Modifier.weight(1f).widthIn(max = 640.dp)) {

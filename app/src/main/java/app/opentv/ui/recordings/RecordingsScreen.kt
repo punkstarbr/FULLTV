@@ -11,11 +11,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -47,6 +50,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -61,6 +65,10 @@ import app.opentv.data.model.Reminder
 import app.opentv.data.model.SeriesRule
 import app.opentv.recording.RecordingStorage
 import app.opentv.reminders.ReminderScheduler
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
+import app.opentv.ui.fullTvFocusRing
 import coil.compose.AsyncImage
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -156,22 +164,25 @@ fun RecordingsScreen(onPlay: (Recording) -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(horizontal = 28.dp, vertical = 20.dp)) {
-        Text(stringResource(R.string.rec_screen_title), style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(4.dp))
-        Text(
-            stringResource(R.string.rec_screen_desc),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+    Column(Modifier.fillMaxSize().padding(horizontal = FullTvChrome.pageInset, vertical = 20.dp)) {
+        FullTvSectionHeader(
+            title = stringResource(R.string.rec_screen_title),
+            subtitle = stringResource(R.string.rec_screen_desc),
         )
         Spacer(Modifier.height(16.dp))
 
         if (recordings.isEmpty() && upcomingReminders.isEmpty() && seriesRules.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(
-                    stringResource(R.string.rec_empty_state),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+                FullTvCard(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.padding(24.dp),
+                ) {
+                    Text(
+                        stringResource(R.string.rec_empty_state),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 24.dp, vertical = 20.dp),
+                    )
+                }
             }
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -229,57 +240,51 @@ fun RecordingsScreen(onPlay: (Recording) -> Unit) {
 
 @Composable
 private fun SectionHeader(text: String) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelLarge,
-        color = MaterialTheme.colorScheme.primary,
+    FullTvSectionHeader(
+        title = text,
         modifier = Modifier.padding(top = 6.dp, bottom = 2.dp),
     )
 }
 
 @Composable
 private fun ReminderRow(reminder: Reminder, onCancel: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    FullTvCard(
+        modifier = Modifier.fillMaxWidth(),
+        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        shape = FullTvChrome.cardShape,
     ) {
-        Box(
-            Modifier.size(44.dp).clip(RoundedCornerShape(6.dp))
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
-            contentAlignment = Alignment.Center,
+        Column(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Icon(
-                Icons.Filled.Notifications,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(48.dp).clip(FullTvChrome.controlShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Notifications, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(reminder.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(3.dp))
+                    val prefix = if (reminder.autoTune) stringResource(R.string.rec_reminder_autoswitch)
+                    else stringResource(R.string.rec_reminder_plain)
+                    Text(
+                        "$prefix · ${reminder.channelName} · ${formatWhen(reminder.startUtcMillis)}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                ActionButton(Icons.Filled.Delete, stringResource(R.string.rec_cancel_reminder), onCancel)
+            }
         }
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                reminder.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(2.dp))
-            val prefix = if (reminder.autoTune) stringResource(R.string.rec_reminder_autoswitch)
-            else stringResource(R.string.rec_reminder_plain)
-            Text(
-                "$prefix · ${reminder.channelName} · ${formatWhen(reminder.startUtcMillis)}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-        Spacer(Modifier.width(10.dp))
-        ActionButton(Icons.Filled.Delete, stringResource(R.string.rec_cancel_reminder), onCancel)
     }
 }
 
@@ -289,54 +294,52 @@ private fun formatWhen(utcMillis: Long): String =
 
 @Composable
 private fun SeriesRuleRow(rule: SeriesRule, upcomingCount: Int, nextAtMillis: Long?, onRemove: () -> Unit) {
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    FullTvCard(
+        modifier = Modifier.fillMaxWidth(),
+        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        shape = FullTvChrome.cardShape,
     ) {
-        Box(
-            Modifier.size(44.dp).clip(RoundedCornerShape(6.dp))
-                .background(Color(0xFFE53935).copy(alpha = 0.15f)),
-            contentAlignment = Alignment.Center,
+        Column(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            // A repeat glyph, tinted record-red — reads as "records every time it's on".
-            Icon(Icons.Filled.Repeat, contentDescription = null, tint = Color(0xFFE53935))
-        }
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                rule.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(2.dp))
-            // Show when the next episode actually records, once one's on the schedule; otherwise the
-            // rule is armed but the guide hasn't revealed the next airing yet.
-            val line = when {
-                nextAtMillis != null && upcomingCount > 1 ->
-                    stringResource(R.string.rec_series_next_more, formatWhen(nextAtMillis), upcomingCount - 1)
-                nextAtMillis != null ->
-                    stringResource(R.string.rec_series_next_at, rule.channelName, formatWhen(nextAtMillis))
-                else -> stringResource(R.string.rec_series_waiting, rule.channelName)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.size(48.dp).clip(FullTvChrome.controlShape)
+                        .background(Color(0xFFE53935).copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(Icons.Filled.Repeat, contentDescription = null, tint = Color(0xFFE53935))
+                }
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(rule.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(3.dp))
+                    val line = when {
+                        nextAtMillis != null && upcomingCount > 1 ->
+                            stringResource(R.string.rec_series_next_more, formatWhen(nextAtMillis), upcomingCount - 1)
+                        nextAtMillis != null ->
+                            stringResource(R.string.rec_series_next_at, rule.channelName, formatWhen(nextAtMillis))
+                        else -> stringResource(R.string.rec_series_waiting, rule.channelName)
+                    }
+                    Text(
+                        line,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
-            Text(
-                line,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                ActionButton(Icons.Filled.Delete, stringResource(R.string.rec_series_remove), onRemove)
+            }
         }
-        Spacer(Modifier.width(10.dp))
-        ActionButton(Icons.Filled.Delete, stringResource(R.string.rec_series_remove), onRemove)
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun RecordingRow(
     recording: Recording,
@@ -350,80 +353,78 @@ private fun RecordingRow(
 ) {
     val playable = recording.status == RecordingStatus.COMPLETED
     val retryable = recording.status == RecordingStatus.FAILED
-    // An in-progress recording can be watched as it records — tail-followed off disk (internal) or
-    // over SMB (NAS), with no second provider connection. USB (SAF) in-progress isn't offered.
     val watchableLive = recording.status == RecordingStatus.RECORDING &&
         RecordingStorage.supportsGrowingPlayback(recording.filePath)
     val profileName = recording.profileId?.takeIf { it != 0L }?.let { profileNames[it] }
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+
+    FullTvCard(
+        modifier = Modifier.fillMaxWidth(),
+        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
+        shape = FullTvChrome.cardShape,
     ) {
-        AsyncImage(
-            model = recording.logoUrl,
-            contentDescription = null,
-            modifier = Modifier.size(44.dp).clip(RoundedCornerShape(6.dp)),
-        )
-        Spacer(Modifier.width(14.dp))
-        Column(Modifier.weight(1f)) {
-            Text(
-                recording.title,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                statusLine(recording),
-                style = MaterialTheme.typography.bodySmall,
-                color = statusColor(recording.status),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (showProfiles && profileName != null) {
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    stringResource(R.string.rec_for_profile, profileName),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+        Column(
+            Modifier.fillMaxWidth().padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AsyncImage(
+                    model = recording.logoUrl,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp).clip(FullTvChrome.controlShape),
                 )
+                Spacer(Modifier.width(14.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        recording.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        statusLine(recording),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = statusColor(recording.status),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (showProfiles && profileName != null) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            stringResource(R.string.rec_for_profile, profileName),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                    if (clashes) {
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            stringResource(R.string.rec_clashes),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
             }
-            if (clashes) {
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    stringResource(R.string.rec_clashes),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.error,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                if (playable) ActionButton(Icons.Filled.PlayArrow, stringResource(R.string.common_play), onPlay)
+                if (watchableLive) ActionButton(Icons.Filled.PlayArrow, stringResource(R.string.rec_watch_live), onPlay)
+                if (recording.status == RecordingStatus.RECORDING) {
+                    ActionButton(Icons.Filled.Stop, stringResource(R.string.common_stop), onStop)
+                }
+                if (retryable) ActionButton(Icons.Filled.Refresh, stringResource(R.string.rec_retry), onRetry)
+                ActionButton(Icons.Filled.Delete, stringResource(R.string.common_delete), onDelete)
             }
         }
-        Spacer(Modifier.width(10.dp))
-        if (playable) {
-            ActionButton(Icons.Filled.PlayArrow, stringResource(R.string.common_play), onPlay)
-            Spacer(Modifier.width(8.dp))
-        }
-        if (watchableLive) {
-            ActionButton(Icons.Filled.PlayArrow, stringResource(R.string.rec_watch_live), onPlay)
-            Spacer(Modifier.width(8.dp))
-        }
-        if (recording.status == RecordingStatus.RECORDING) {
-            ActionButton(Icons.Filled.Stop, stringResource(R.string.common_stop), onStop)
-            Spacer(Modifier.width(8.dp))
-        }
-        if (retryable) {
-            ActionButton(Icons.Filled.Refresh, stringResource(R.string.rec_retry), onRetry)
-            Spacer(Modifier.width(8.dp))
-        }
-        ActionButton(Icons.Filled.Delete, stringResource(R.string.common_delete), onDelete)
     }
 }
 
@@ -432,15 +433,20 @@ private fun ActionButton(icon: ImageVector, label: String, onClick: () -> Unit) 
     var focused by remember { mutableStateOf(false) }
     val bg = if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surface
     val fg = if (focused) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-    Box(
+    Row(
         Modifier
-            .clip(RoundedCornerShape(10.dp))
+            .heightIn(min = 48.dp)
+            .clip(FullTvChrome.controlShape)
             .background(bg)
             .onFocusChanged { focused = it.isFocused }
-            .clickable(onClick = onClick)
-            .padding(10.dp),
+            .fullTvFocusRing(focused, Color.White, FullTvChrome.controlShape)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(icon, contentDescription = label, tint = fg)
+        Icon(icon, contentDescription = null, tint = fg)
+        Text(label, style = MaterialTheme.typography.labelLarge, color = fg, maxLines = 1)
     }
 }
 

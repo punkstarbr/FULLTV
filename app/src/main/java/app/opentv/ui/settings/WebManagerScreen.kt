@@ -8,12 +8,15 @@ package app.opentv.ui.settings
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -46,6 +49,9 @@ import app.opentv.pairing.ManagerServer
 import app.opentv.pairing.QrCodes
 import app.opentv.ui.ProtectSensitiveScreen
 import app.opentv.ui.WebManagerViewModel
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
 
 /**
  * "Manage your channels from your phone or laptop."
@@ -72,9 +78,12 @@ fun WebManagerScreen(
         }
     }
 
-    Box(Modifier.fillMaxSize().padding(32.dp), contentAlignment = Alignment.Center) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val pageInset = if (maxWidth < 600.dp) FullTvChrome.compactPageInset else FullTvChrome.pageInset
+        val compactLayout = maxWidth < 760.dp
+        Box(Modifier.fillMaxSize().padding(pageInset), contentAlignment = Alignment.Center) {
         when (val current = state) {
-            is ManagerServer.State.Listening -> Listening(current.session, onBack)
+            is ManagerServer.State.Listening -> Listening(current.session, onBack, compact = compactLayout)
 
             is ManagerServer.State.Failed -> Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -98,101 +107,82 @@ fun WebManagerScreen(
 
             ManagerServer.State.Idle -> CircularProgressIndicator()
         }
+        }
     }
 }
 
 @Composable
-private fun Listening(session: ManagerServer.Session, onBack: () -> Unit) {
+private fun Listening(session: ManagerServer.Session, onBack: () -> Unit, compact: Boolean) {
     // Generated once per session — encoding is not free and the content does not change.
     val qr = remember(session.url) { QrCodes.render(session.url, QR_SIZE_PX) }
     val (manualPrefix, token) = remember(session.url) {
         val marker = "?t="
         val markerIndex = session.url.indexOf(marker)
         if (markerIndex >= 0) {
-            session.url.substring(0, markerIndex + marker.length) to
-                session.url.substring(markerIndex + marker.length)
-        } else {
-            session.url to ""
-        }
+            session.url.substring(0, markerIndex + marker.length) to session.url.substring(markerIndex + marker.length)
+        } else session.url to ""
     }
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(48.dp),
-    ) {
-        if (qr != null) {
-            Image(
-                bitmap = qr.asImageBitmap(),
-                contentDescription = stringResource(R.string.webmanager_qr_desc),
-                modifier = Modifier
-                    .size(300.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color.White)
-                    .padding(12.dp),
-            )
-        }
-
+    if (compact) {
         Column(
-            Modifier
-                .widthIn(max = 520.dp)
-                .fillMaxHeight()
-                .verticalScroll(rememberScrollState()),
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).focusGroup(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(FullTvChrome.cardGap),
         ) {
-            Text(stringResource(R.string.webmanager_title), style = MaterialTheme.typography.displaySmall)
+            qr?.let { bmp ->
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = stringResource(R.string.webmanager_qr_desc),
+                    modifier = Modifier.size(180.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(10.dp),
+                )
+            }
+            ManagerInfoColumn(session, manualPrefix, token, onBack, Modifier.fillMaxWidth())
+        }
+    } else {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(FullTvChrome.sectionGap),
+        ) {
+            qr?.let { bmp ->
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = stringResource(R.string.webmanager_qr_desc),
+                    modifier = Modifier.size(300.dp).clip(RoundedCornerShape(16.dp)).background(Color.White).padding(12.dp),
+                )
+            }
+            ManagerInfoColumn(session, manualPrefix, token, onBack, Modifier.widthIn(max = 560.dp).fillMaxHeight())
+        }
+    }
+}
+
+@Composable
+private fun ManagerInfoColumn(
+    session: ManagerServer.Session,
+    manualPrefix: String,
+    token: String,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    FullTvCard(modifier = modifier, containerColor = MaterialTheme.colorScheme.surfaceVariant) {
+        Column(
+            Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            FullTvSectionHeader(title = stringResource(R.string.webmanager_title))
+            Spacer(Modifier.height(8.dp))
+            Text(stringResource(R.string.webmanager_desc), style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(16.dp))
+            Text(stringResource(R.string.webmanager_open_browser), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(manualPrefix, style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace))
+            Text(stringResource(R.string.webmanager_token_label), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(token.chunked(12).joinToString("\n"), style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace))
             Spacer(Modifier.height(12.dp))
-            Text(
-                stringResource(R.string.webmanager_desc),
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            Spacer(Modifier.height(28.dp))
-            Text(
-                stringResource(R.string.webmanager_open_browser),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(Modifier.height(4.dp))
-            // Keep the required token visibly separate from the short IP:port address. The token
-            // is split into lines only for display; joining them without spaces reconstructs URL.
-            Text(
-                manualPrefix,
-                style = MaterialTheme.typography.titleMedium.copy(fontFamily = FontFamily.Monospace),
-            )
-            Text(
-                stringResource(R.string.webmanager_token_label),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Text(
-                token.chunked(12).joinToString("\n"),
-                style = MaterialTheme.typography.bodyLarge.copy(fontFamily = FontFamily.Monospace),
-            )
-
-            Spacer(Modifier.height(20.dp))
-            Text(
-                stringResource(R.string.lan_tls_browser_warning),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                stringResource(R.string.lan_tls_certificate_fingerprint),
-                style = MaterialTheme.typography.labelLarge,
-            )
-            Text(
-                session.certificateSha256.chunked(24).joinToString("\n"),
-                style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            )
-
-            Spacer(Modifier.height(20.dp))
-            Text(
-                stringResource(R.string.webmanager_local_only),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            Spacer(Modifier.height(32.dp))
+            Text(stringResource(R.string.lan_tls_browser_warning), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            Text(stringResource(R.string.lan_tls_certificate_fingerprint), style = MaterialTheme.typography.labelLarge)
+            Text(session.certificateSha256.chunked(24).joinToString("\n"), style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace))
+            Spacer(Modifier.height(12.dp))
+            Text(stringResource(R.string.webmanager_local_only), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(12.dp))
             OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) }
         }
     }

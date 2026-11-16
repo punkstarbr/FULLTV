@@ -9,15 +9,16 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Backspace
 import androidx.compose.material3.Icon
@@ -34,91 +35,161 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import app.opentv.R
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.fullTvFocusRing
 
 /**
  * A d-pad-navigable on-screen keyboard, shared by every screen that needs text entry on a TV.
  * Android TV's system text field punts to "type on your phone"; this keeps entry on the remote.
  */
+@kotlin.OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 internal fun OnScreenKeyboard(
     onKey: (String) -> Unit,
     onSpace: () -> Unit,
     onBackspace: () -> Unit,
     onClear: () -> Unit,
+    compact: Boolean = false,
+    modifier: Modifier = Modifier,
 ) {
     val keyRows = listOf("1234567890", "QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM")
     val firstKey = remember { FocusRequester() }
     val context = LocalContext.current
 
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        keyRows.forEachIndexed { rowIndex, line ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                line.forEachIndexed { colIndex, ch ->
-                    KeyCap(
-                        label = ch.toString(),
-                        focusRequester = if (rowIndex == 0 && colIndex == 0) firstKey else null,
-                        onClick = { onKey(ch.toString()) },
-                    )
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val keyGap = if (compact) 4.dp else 8.dp
+        val maximumKeyWidth = if (compact) 56.dp else 72.dp
+        val keyWidth = ((maxWidth - keyGap * 9) / 10f)
+            .coerceAtMost(maximumKeyWidth)
+            .coerceAtLeast(24.dp)
+        val keyHeight = if (compact) 48.dp else 52.dp
+        val rowGap = if (compact) 5.dp else 8.dp
+
+        Column(
+            Modifier
+                .focusRestorer()
+                .focusGroup(),
+            verticalArrangement = Arrangement.spacedBy(rowGap),
+        ) {
+            keyRows.forEachIndexed { rowIndex, line ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(
+                        keyGap,
+                        Alignment.CenterHorizontally,
+                    ),
+                ) {
+                    line.forEachIndexed { colIndex, ch ->
+                        KeyCap(
+                            label = ch.toString(),
+                            width = keyWidth,
+                            height = keyHeight,
+                            focusRequester = if (rowIndex == 0 && colIndex == 0) firstKey else null,
+                            onClick = { onKey(ch.toString()) },
+                        )
+                    }
                 }
             }
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            KeyCap(label = stringResource(R.string.kbd_space), wide = 3, onClick = onSpace)
-            // Paste the clipboard through the same onKey callback the letter keys use, so it lands
-            // in whatever field this keyboard is driving. Empty clipboard just says so, no crash.
-            KeyCap(
-                label = stringResource(R.string.kbd_paste),
-                wide = 2,
-                onClick = {
-                    val pasted = readClipboardText(context)
-                    if (pasted != null) onKey(pasted)
-                    else Toast.makeText(context, context.getString(R.string.kbd_clipboard_empty), Toast.LENGTH_SHORT).show()
-                },
-            )
-            KeyCap(label = stringResource(R.string.kbd_del), icon = true, wide = 2, onClick = onBackspace)
-            KeyCap(label = stringResource(R.string.kbd_clear), wide = 2, onClick = onClear)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(
+                    keyGap,
+                    Alignment.CenterHorizontally,
+                ),
+            ) {
+                KeyCap(
+                    label = stringResource(R.string.kbd_space),
+                    width = keyWidth * 3 + keyGap * 2,
+                    height = keyHeight,
+                    onClick = onSpace,
+                )
+                // Paste uses the same callback as letter keys; an empty clipboard remains a no-op
+                // apart from its existing localized notice.
+                KeyCap(
+                    label = stringResource(R.string.kbd_paste),
+                    width = keyWidth * 2 + keyGap,
+                    height = keyHeight,
+                    onClick = {
+                        val pasted = readClipboardText(context)
+                        if (pasted != null) onKey(pasted)
+                        else Toast.makeText(
+                            context,
+                            context.getString(R.string.kbd_clipboard_empty),
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    },
+                )
+                KeyCap(
+                    label = stringResource(R.string.kbd_del),
+                    width = keyWidth * 2 + keyGap,
+                    height = keyHeight,
+                    icon = true,
+                    onClick = onBackspace,
+                )
+                KeyCap(
+                    label = stringResource(R.string.kbd_clear),
+                    width = keyWidth * 2 + keyGap,
+                    height = keyHeight,
+                    onClick = onClear,
+                )
+            }
         }
     }
 
-    LaunchedEffect(Unit) { runCatching { firstKey.requestFocus() } }
+    LaunchedEffect(firstKey) { runCatching { firstKey.requestFocus() } }
 }
 
 @Composable
 private fun KeyCap(
     label: String,
+    width: Dp,
+    height: Dp,
     onClick: () -> Unit,
-    wide: Int = 1,
     icon: Boolean = false,
     focusRequester: FocusRequester? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
-    val bg = if (focused) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant
-    val fg = if (focused) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+    val shape = FullTvChrome.controlShape
+    val background = if (focused) MaterialTheme.colorScheme.primaryContainer
+    else MaterialTheme.colorScheme.surfaceVariant
+    val foreground = if (focused) MaterialTheme.colorScheme.onPrimaryContainer
+    else MaterialTheme.colorScheme.onSurface
+
     Box(
         Modifier
-            .height(48.dp)
-            .width((48 * wide + (wide - 1) * 8).dp)
+            .width(width)
+            .height(height)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(8.dp))
-            .background(bg)
-            .then(
-                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(8.dp))
-                else Modifier,
+            .clip(shape)
+            .background(background)
+            .fullTvFocusRing(
+                focused = focused,
+                color = MaterialTheme.colorScheme.primary,
+                shape = shape,
             )
-            .clickable(onClick = onClick),
+            .clickable(role = Role.Button, onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         if (icon) {
-            Icon(Icons.Filled.Backspace, contentDescription = label, tint = fg)
+            Icon(Icons.Filled.Backspace, contentDescription = label, tint = foreground)
         } else {
-            Text(label, style = MaterialTheme.typography.titleMedium, color = fg, fontWeight = FontWeight.SemiBold)
+            Text(
+                text = label,
+                style = MaterialTheme.typography.titleMedium,
+                color = foreground,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+            )
         }
     }
 }

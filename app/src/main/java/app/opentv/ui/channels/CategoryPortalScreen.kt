@@ -8,8 +8,10 @@ package app.opentv.ui.channels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -17,27 +19,36 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -46,8 +57,13 @@ import app.opentv.R
 import app.opentv.data.model.Channel
 import app.opentv.data.model.shownName
 import app.opentv.ui.ChannelsViewModel
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
+import app.opentv.ui.fullTvFocusRing
 import coil.compose.AsyncImage
 
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun CategoryPortalScreen(
     isSyncing: Boolean,
@@ -63,161 +79,178 @@ fun CategoryPortalScreen(
     val uniqueFavourites = remember(favourites) {
         favourites.distinctBy { it.groupKey.ifBlank { "${it.sourceId}:${it.id}" } }.take(12)
     }
-    val background = Color(0xFF081E28)
-    val surface = Color(0xFF102D38)
-    val accent = Color(0xFFB7E41D)
+    val categoryListState = rememberLazyListState()
+    val favouriteListState = rememberLazyListState()
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .background(background)
-            .padding(horizontal = 30.dp, vertical = 24.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column {
-                Text(
-                    stringResource(R.string.portal_live_title),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                )
-                Text(
-                    stringResource(R.string.app_name),
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color(0xFFB8C8CE),
-                )
-            }
-            Spacer(Modifier.weight(1f))
-            Button(onClick = onOpenGuide) {
-                Text(stringResource(R.string.portal_open_guide))
-            }
-        }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val compact = maxWidth < 640.dp
+        val pageInset = if (compact) FullTvChrome.compactPageInset else FullTvChrome.pageInset
 
-        Spacer(Modifier.height(18.dp))
-
-        Surface(
-            modifier = Modifier.fillMaxWidth().height(144.dp),
-            color = Color(0xFF123744),
-            shape = RoundedCornerShape(18.dp),
+        Column(
+            Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+                .focusRestorer()
+                .focusGroup()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = pageInset, vertical = pageInset),
+            verticalArrangement = Arrangement.spacedBy(FullTvChrome.sectionGap),
         ) {
-            Row(
-                Modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 18.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            FullTvSectionHeader(
+                title = stringResource(R.string.nav_live_tv),
+                subtitle = stringResource(R.string.app_name),
+                trailingContent = {
+                    if (!compact) {
+                        Button(onClick = onOpenGuide) {
+                            Text(stringResource(R.string.portal_open_guide))
+                        }
+                    }
+                },
+            )
+
+            FullTvCard(
+                modifier = Modifier.fillMaxWidth(),
+                containerColor = MaterialTheme.colorScheme.surface,
             ) {
-                Column(Modifier.weight(1f)) {
-                    Text(
-                        stringResource(R.string.portal_hero_title),
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = Color.White,
-                        fontWeight = FontWeight.SemiBold,
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = if (compact) 0.dp else 144.dp)
+                        .padding(horizontal = if (compact) 18.dp else 24.dp, vertical = 20.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Box(
+                        Modifier
+                            .width(4.dp)
+                            .heightIn(min = 72.dp)
+                            .clip(FullTvChrome.controlShape)
+                            .background(MaterialTheme.colorScheme.primary),
                     )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        stringResource(R.string.portal_hero_desc),
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = Color(0xFFCAD8DC),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                Spacer(Modifier.width(20.dp))
-                Button(onClick = onOpenGuide) {
-                    Text(stringResource(R.string.portal_open_guide))
+                    Spacer(Modifier.width(if (compact) 14.dp else 20.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            stringResource(R.string.portal_hero_title),
+                            style = MaterialTheme.typography.headlineSmall,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            stringResource(R.string.portal_hero_desc),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = if (compact) 3 else 2,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        if (compact) {
+                            Spacer(Modifier.height(16.dp))
+                            Button(onClick = onOpenGuide) {
+                                Text(stringResource(R.string.portal_open_guide))
+                            }
+                        }
+                    }
+                    if (!compact) {
+                        Spacer(Modifier.width(20.dp))
+                        Button(onClick = onOpenGuide) {
+                            Text(stringResource(R.string.portal_open_guide))
+                        }
+                    }
                 }
             }
-        }
 
-        Spacer(Modifier.height(20.dp))
-        Text(
-            stringResource(R.string.portal_categories),
-            style = MaterialTheme.typography.titleLarge,
-            color = Color.White,
-            fontWeight = FontWeight.SemiBold,
-        )
-        Spacer(Modifier.height(8.dp))
-        if (categories.isEmpty()) {
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (isSyncing) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp, color = accent)
-                    Spacer(Modifier.width(12.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                FullTvSectionHeader(title = stringResource(R.string.portal_categories))
+                if (categories.isEmpty()) {
+                    FullTvCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(18.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (isSyncing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                                Spacer(Modifier.width(12.dp))
+                            }
+                            Text(
+                                stringResource(
+                                    if (isSyncing || hasSources) R.string.portal_no_channels
+                                    else R.string.portal_no_source,
+                                ),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                } else {
+                    LazyRow(
+                        state = categoryListState,
+                        modifier = Modifier.focusRestorer().focusGroup(),
+                        contentPadding = PaddingValues(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(FullTvChrome.cardGap),
+                    ) {
+                        item(key = "all") {
+                            PortalCategoryCard(
+                                label = stringResource(R.string.guide_all_channels),
+                                selected = selectedCategory == null && !favouritesOnly,
+                                onClick = { viewModel.selectCategory(null) },
+                            )
+                        }
+                        item(key = "favourites") {
+                            PortalCategoryCard(
+                                label = stringResource(R.string.guide_favourites),
+                                selected = favouritesOnly,
+                                onClick = viewModel::selectFavourites,
+                            )
+                        }
+                        items(categories, key = { it.key }) { category ->
+                            PortalCategoryCard(
+                                label = category.label,
+                                selected = selectedCategory == category.key && !favouritesOnly,
+                                onClick = { viewModel.selectCategory(category.key) },
+                            )
+                        }
+                    }
                 }
-                Text(
-                    stringResource(
-                        if (isSyncing || hasSources) R.string.portal_no_channels else R.string.portal_no_source,
-                    ),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = Color(0xFFB8C8CE),
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                FullTvSectionHeader(
+                    title = stringResource(R.string.portal_favourites),
+                    trailingContent = {
+                        TextButton(onClick = onOpenGuide) {
+                            Text(stringResource(R.string.portal_open_guide))
+                        }
+                    },
                 )
-            }
-        } else {
-            LazyRow(
-                contentPadding = PaddingValues(vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                item(key = "all") {
-                    PortalCategoryCard(
-                        label = stringResource(R.string.guide_all_channels),
-                        selected = selectedCategory == null && !favouritesOnly,
-                        surface = surface,
-                        accent = accent,
-                        onClick = { viewModel.selectCategory(null) },
-                    )
-                }
-                item(key = "favourites") {
-                    PortalCategoryCard(
-                        label = stringResource(R.string.guide_favourites),
-                        selected = favouritesOnly,
-                        surface = surface,
-                        accent = accent,
-                        onClick = viewModel::selectFavourites,
-                    )
-                }
-                items(categories, key = { it.key }) { category ->
-                    PortalCategoryCard(
-                        label = category.label,
-                        selected = selectedCategory == category.key && !favouritesOnly,
-                        surface = surface,
-                        accent = accent,
-                        onClick = { viewModel.selectCategory(category.key) },
-                    )
-                }
-            }
-        }
-
-        Spacer(Modifier.height(20.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                stringResource(R.string.portal_favourites),
-                style = MaterialTheme.typography.titleLarge,
-                color = Color.White,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(Modifier.weight(1f))
-            Text(
-                stringResource(R.string.portal_open_guide),
-                style = MaterialTheme.typography.labelLarge,
-                color = accent,
-                modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onOpenGuide).padding(8.dp),
-            )
-        }
-        Spacer(Modifier.height(8.dp))
-        if (uniqueFavourites.isEmpty()) {
-            Text(
-                stringResource(R.string.portal_no_favourites),
-                style = MaterialTheme.typography.bodyLarge,
-                color = Color(0xFFB8C8CE),
-                modifier = Modifier.padding(vertical = 12.dp),
-            )
-        } else {
-            LazyRow(
-                contentPadding = PaddingValues(vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                items(uniqueFavourites, key = { "fav-${it.id}" }) { channel ->
-                    FavouriteChannelCard(channel = channel, accent = accent) { onPlayChannel(channel) }
+                if (uniqueFavourites.isEmpty()) {
+                    FullTvCard(
+                        modifier = Modifier.fillMaxWidth(),
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                    ) {
+                        Text(
+                            stringResource(R.string.portal_no_favourites),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
+                        )
+                    }
+                } else {
+                    LazyRow(
+                        state = favouriteListState,
+                        modifier = Modifier.focusRestorer().focusGroup(),
+                        contentPadding = PaddingValues(vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(FullTvChrome.cardGap),
+                    ) {
+                        items(uniqueFavourites, key = { "fav-${it.sourceId}-${it.id}" }) { channel ->
+                            FavouriteChannelCard(channel = channel) { onPlayChannel(channel) }
+                        }
+                    }
                 }
             }
         }
@@ -228,33 +261,41 @@ fun CategoryPortalScreen(
 private fun PortalCategoryCard(
     label: String,
     selected: Boolean,
-    surface: Color,
-    accent: Color,
     onClick: () -> Unit,
 ) {
-    var focused = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    Surface(
+    var focused by remember { mutableStateOf(false) }
+    val shape = FullTvChrome.cardShape
+    FullTvCard(
         modifier = Modifier
-            .width(176.dp)
-            .height(80.dp)
+            .widthIn(min = 164.dp, max = 248.dp)
+            .heightIn(min = 84.dp)
+            .onFocusChanged { focused = it.isFocused }
             .then(
-                if (selected || focused.value) Modifier.border(
-                    width = if (focused.value) 3.dp else 2.dp,
-                    color = accent,
-                    shape = RoundedCornerShape(12.dp),
-                ) else Modifier,
+                if (selected) Modifier.border(1.dp, MaterialTheme.colorScheme.primary, shape)
+                else Modifier,
             )
-            .onFocusChanged { focused.value = it.isFocused }
-            .clickable(onClick = onClick),
-        color = if (selected) Color(0xFF1A3943) else surface,
-        shape = RoundedCornerShape(12.dp),
+            .fullTvFocusRing(focused = focused, color = MaterialTheme.colorScheme.primary, shape = shape)
+            .selectable(selected = selected, role = Role.Button, onClick = onClick),
+        containerColor = if (selected) MaterialTheme.colorScheme.primaryContainer
+        else MaterialTheme.colorScheme.surfaceVariant,
+        contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
+        else MaterialTheme.colorScheme.onSurface,
     ) {
-        Box(Modifier.fillMaxSize().padding(horizontal = 14.dp), contentAlignment = Alignment.CenterStart) {
+        Row(
+            Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+            Spacer(Modifier.width(12.dp))
             Text(
                 label,
                 style = MaterialTheme.typography.titleMedium,
-                color = if (selected || focused.value) accent else Color.White,
-                fontWeight = if (selected || focused.value) FontWeight.SemiBold else FontWeight.Normal,
+                fontWeight = if (selected || focused) FontWeight.SemiBold else FontWeight.Medium,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -263,36 +304,34 @@ private fun PortalCategoryCard(
 }
 
 @Composable
-private fun FavouriteChannelCard(channel: Channel, accent: Color, onClick: () -> Unit) {
-    var focused = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    Surface(
+private fun FavouriteChannelCard(channel: Channel, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    FullTvCard(
         modifier = Modifier
-            .width(164.dp)
-            .height(112.dp)
-            .then(
-                if (focused.value) Modifier.border(3.dp, accent, RoundedCornerShape(12.dp)) else Modifier,
-            )
-            .onFocusChanged { focused.value = it.isFocused }
-            .clickable(onClick = onClick),
-        color = Color(0xFF102D38),
-        shape = RoundedCornerShape(12.dp),
+            .widthIn(min = 156.dp, max = 176.dp)
+            .heightIn(min = 132.dp)
+            .onFocusChanged { focused = it.isFocused }
+            .fullTvFocusRing(focused = focused, color = MaterialTheme.colorScheme.primary)
+            .clickable(role = Role.Button, onClick = onClick),
+        containerColor = MaterialTheme.colorScheme.surfaceVariant,
     ) {
         Column(
-            Modifier.fillMaxSize().padding(10.dp),
+            Modifier.fillMaxSize().padding(12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
         ) {
             AsyncImage(
                 model = channel.logoUrl,
                 contentDescription = null,
-                modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)),
+                modifier = Modifier.size(52.dp).clip(FullTvChrome.controlShape),
             )
-            Spacer(Modifier.height(6.dp))
+            Spacer(Modifier.height(8.dp))
             Text(
                 channel.shownName,
                 style = MaterialTheme.typography.labelLarge,
-                color = Color.White,
-                maxLines = 1,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = if (focused) FontWeight.SemiBold else FontWeight.Medium,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }

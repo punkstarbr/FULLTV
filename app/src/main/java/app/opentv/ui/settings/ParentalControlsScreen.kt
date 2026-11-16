@@ -6,6 +6,8 @@
 package app.opentv.ui.settings
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -20,7 +22,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -34,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
@@ -43,6 +45,10 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import app.opentv.R
 import app.opentv.core.ServiceLocator
 import app.opentv.ui.ChannelsViewModel
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
+import androidx.compose.ui.ExperimentalComposeUiApi
 
 /**
  * Parental controls: a PIN, and a list of categories to keep out of the guide.
@@ -52,6 +58,7 @@ import app.opentv.ui.ChannelsViewModel
  * come here and unlock. The four-digit PIN verifier uses a non-exportable Keystore HMAC and a
  * persistent progressive lockout; this remains a family access control, not a device security boundary.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun ParentalControlsScreen(
     onBack: () -> Unit,
@@ -74,17 +81,17 @@ fun ParentalControlsScreen(
         return
     }
 
-    Column(
-        Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 32.dp, vertical = 24.dp),
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(stringResource(R.string.settings_parental_title), style = MaterialTheme.typography.headlineMedium)
-            Spacer(Modifier.weight(1f))
-            OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) }
-        }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val pageInset = if (maxWidth < 600.dp) FullTvChrome.compactPageInset else FullTvChrome.pageInset
+        Column(
+            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).focusRestorer().focusGroup()
+                .padding(horizontal = pageInset, vertical = FullTvChrome.pageInset)
+                .widthIn(max = 1000.dp).align(Alignment.TopCenter),
+        ) {
+            FullTvSectionHeader(
+                title = stringResource(R.string.settings_parental_title),
+                trailingContent = { OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) } },
+            )
 
         Spacer(Modifier.height(20.dp))
 
@@ -102,7 +109,7 @@ fun ParentalControlsScreen(
         )
         Spacer(Modifier.height(12.dp))
 
-        Card {
+        FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -137,7 +144,7 @@ fun ParentalControlsScreen(
                 modifier = Modifier.fillMaxWidth().widthIn(max = 720.dp),
             ) {
                 categories.forEach { group ->
-                    Card {
+                    FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
                         Row(
                             Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically,
@@ -155,6 +162,7 @@ fun ParentalControlsScreen(
                 }
             }
             Spacer(Modifier.height(24.dp))
+        }
         }
     }
 }
@@ -175,7 +183,7 @@ private fun PinSection(
 
     Text(stringResource(R.string.parental_pin), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
     Spacer(Modifier.height(8.dp))
-    Card {
+    FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
         Column(Modifier.fillMaxWidth().padding(16.dp)) {
             error?.let {
                 Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)

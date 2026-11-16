@@ -19,6 +19,8 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -80,6 +82,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -91,6 +96,9 @@ import app.opentv.R
 import app.opentv.core.ServiceLocator
 import app.opentv.core.SleepTimer
 import app.opentv.core.findActivity
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.fullTvFocusRing
 import app.opentv.player.PlayerController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -108,7 +116,8 @@ import kotlinx.coroutines.launch
  * TV inside Compose, so it reads as "no controls". This is the same self-drawn, auto-hiding bar as
  * the live player, with a seek bar added since a film needs scrubbing.
  */
-@OptIn(UnstableApi::class)
+@kotlin.OptIn(ExperimentalLayoutApi::class)
+@OptIn(UnstableApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun VodPlayerScreen(
     mediaKey: String,
@@ -406,11 +415,14 @@ fun VodPlayerScreen(
 
                 Spacer(Modifier.height(10.dp))
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(10.dp),
+                    verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
+                ) {
                     VodChip(Icons.Filled.FastRewind, stringResource(R.string.player_rewind)) {
                         if (growingRec) seekRelative(-15_000) else controller.seekBackward(); interaction++
                     }
-                    Spacer(Modifier.width(10.dp))
                     VodChip(
                         icon = if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
                         label = if (paused) stringResource(R.string.common_play) else stringResource(R.string.player_pause),
@@ -420,16 +432,13 @@ fun VodPlayerScreen(
                         controller.player.playWhenReady = !paused
                         interaction++
                     }
-                    Spacer(Modifier.width(10.dp))
                     VodChip(Icons.Filled.FastForward, stringResource(R.string.player_forward)) {
                         if (growingRec) seekRelative(15_000) else controller.seekForward(); interaction++
                     }
-                    Spacer(Modifier.width(20.dp))
                     VodChip(Icons.Filled.ClosedCaption, stringResource(R.string.player_subtitles)) {
                         vodPanel = if (vodPanel == VodPanel.SUBTITLES) VodPanel.NONE else VodPanel.SUBTITLES
                         interaction++
                     }
-                    Spacer(Modifier.width(10.dp))
                     VodChip(Icons.Filled.Audiotrack, stringResource(R.string.player_audio)) {
                         vodPanel = if (vodPanel == VodPanel.AUDIO) VodPanel.NONE else VodPanel.AUDIO
                         interaction++
@@ -448,23 +457,21 @@ private fun VodChip(
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val selectedDescription = stringResource(R.string.common_selected)
     val container = if (focused) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.14f)
     val content = if (focused) MaterialTheme.colorScheme.onPrimary else Color.White
     Row(
         modifier = Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(12.dp))
+            .clip(FullTvChrome.controlShape)
             .background(container)
-            .then(
-                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.primary, RoundedCornerShape(12.dp))
-                else Modifier,
-            )
-            .clickable(onClick = onClick)
+            .fullTvFocusRing(focused, Color.White, FullTvChrome.controlShape)
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = label, tint = content)
+        Icon(icon, contentDescription = null, tint = content)
         Spacer(Modifier.width(6.dp))
         Text(label, style = MaterialTheme.typography.labelLarge, color = content)
     }
@@ -499,14 +506,13 @@ private fun TrackPanel(
         }
     }
 
-    Column(
-        Modifier
-            .widthIn(max = 420.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.Black.copy(alpha = 0.92f))
-            .padding(16.dp),
+    FullTvCard(
+        modifier = Modifier.widthIn(max = 420.dp),
+        containerColor = Color.Black.copy(alpha = 0.94f),
+        shape = FullTvChrome.cardShape,
     ) {
-        Text(
+        Column(Modifier.padding(16.dp)) {
+            Text(
             if (panel == VodPanel.SUBTITLES) stringResource(R.string.player_subtitles) else stringResource(R.string.player_audio),
             style = MaterialTheme.typography.titleMedium,
             color = Color.White.copy(alpha = 0.7f),
@@ -520,12 +526,14 @@ private fun TrackPanel(
                 TrackRow(label, selected, onClick, if (index == 0) firstFocus else null)
             }
         }
+        }
     }
 }
 
 @Composable
 private fun TrackRow(label: String, selected: Boolean, onClick: () -> Unit, focusRequester: FocusRequester?) {
     var focused by remember { mutableStateOf(false) }
+    val selectedDescription = stringResource(R.string.common_selected)
     val bg = if (focused) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.08f)
     val fg = if (focused) MaterialTheme.colorScheme.onPrimary else Color.White
     Row(
@@ -533,9 +541,13 @@ private fun TrackRow(label: String, selected: Boolean, onClick: () -> Unit, focu
             .fillMaxWidth()
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(10.dp))
+            .clip(FullTvChrome.controlShape)
             .background(bg)
-            .clickable(onClick = onClick)
+            .fullTvFocusRing(focused, Color.White, FullTvChrome.controlShape)
+            .semantics(mergeDescendants = true) {
+                if (selected) stateDescription = selectedDescription
+            }
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {

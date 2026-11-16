@@ -10,18 +10,22 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -54,10 +58,16 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -75,6 +85,9 @@ import app.opentv.data.model.shownName
 import app.opentv.player.PlayerController
 import app.opentv.player.YouTubeChannelUrl
 import app.opentv.ui.ChannelsViewModel
+import app.opentv.ui.FullTvChrome
+import app.opentv.ui.FullTvSectionHeader
+import app.opentv.ui.fullTvFocusRing
 import kotlinx.coroutines.CancellationException
 
 private const val MOSAIC_TILE_COUNT = 4
@@ -84,6 +97,7 @@ private const val MOSAIC_TILE_COUNT = 4
  * open provider connections. The user selects channels and confirms the provider/device warning
  * before any decoder starts.
  */
+@kotlin.OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun MosaicScreen(
     selectedKeys: List<String>,
@@ -130,6 +144,11 @@ fun MosaicScreen(
     var showStartWarning by remember { mutableStateOf(false) }
     var pendingFullScreenChannel by remember { mutableStateOf<Channel?>(null) }
     val activeRecordings by graph.recordingRepository.observeActive().collectAsState(initial = emptyList())
+    val openPicker: () -> Unit = {
+        draftKeys = selectedKeys.take(MOSAIC_TILE_COUNT)
+        pickerQuery = ""
+        showPicker = true
+    }
 
     LaunchedEffect(selectedChannels.size) {
         if (selectedChannels.isEmpty()) {
@@ -161,7 +180,7 @@ fun MosaicScreen(
             onDismissRequest = { showPicker = false },
             title = { Text(stringResource(R.string.mosaic_picker_title)) },
             text = {
-                Column(Modifier.widthIn(min = 360.dp).height(440.dp)) {
+                Column(Modifier.fillMaxWidth().heightIn(max = 440.dp)) {
                     Text(
                         stringResource(R.string.mosaic_picker_body),
                         style = MaterialTheme.typography.bodyMedium,
@@ -180,7 +199,9 @@ fun MosaicScreen(
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    LazyColumn(Modifier.weight(1f).fillMaxWidth()) {
+                    LazyColumn(
+                        Modifier.weight(1f).fillMaxWidth().focusRestorer().focusGroup(),
+                    ) {
                         items(filteredOptions, key = { it.id }) { channel ->
                             val key = channel.mosaicKey()
                             val checked = key in draftKeys
@@ -273,89 +294,119 @@ fun MosaicScreen(
         )
     }
 
-    Column(
-        Modifier.fillMaxSize().padding(14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+    BoxWithConstraints(Modifier.fillMaxSize().padding(FullTvChrome.compactPageInset)) {
+        val compactLayout = maxWidth < 640.dp
+        Column(
+            Modifier.fillMaxSize().focusRestorer().focusGroup(),
+            verticalArrangement = Arrangement.spacedBy(FullTvChrome.cardGap),
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(
-                    stringResource(R.string.mosaic_title),
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
+            if (compactLayout) {
+                FullTvSectionHeader(
+                    title = stringResource(R.string.mosaic_title),
+                    subtitle = stringResource(R.string.mosaic_subtitle, selectedChannels.size),
                 )
-                Text(
-                    stringResource(R.string.mosaic_subtitle, selectedChannels.size),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            TextButton(onClick = {
-                draftKeys = selectedKeys.take(MOSAIC_TILE_COUNT)
-                pickerQuery = ""
-                showPicker = true
-            }) {
-                Text(stringResource(R.string.mosaic_choose_channels))
-            }
-            if (isRunning) {
-                Button(onClick = { isRunning = false }) {
-                    Text(stringResource(R.string.mosaic_stop))
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(onClick = openPicker, modifier = Modifier.weight(1f)) {
+                        Text(stringResource(R.string.mosaic_choose_channels), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    if (isRunning) {
+                        Button(onClick = { isRunning = false }, modifier = Modifier.weight(1f)) {
+                            Text(stringResource(R.string.mosaic_stop), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    } else {
+                        Button(
+                            enabled = selectedChannels.isNotEmpty(),
+                            onClick = { showStartWarning = true },
+                            modifier = Modifier.weight(1f),
+                        ) {
+                            Text(stringResource(R.string.mosaic_start), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                    }
                 }
             } else {
-                Button(
-                    enabled = selectedChannels.isNotEmpty(),
-                    onClick = { showStartWarning = true },
-                ) {
-                    Text(stringResource(R.string.mosaic_start))
-                }
-            }
-        }
-
-        if (channelOptions.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text(
-                    stringResource(R.string.mosaic_no_channels),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                FullTvSectionHeader(
+                    title = stringResource(R.string.mosaic_title),
+                    subtitle = stringResource(R.string.mosaic_subtitle, selectedChannels.size),
+                    trailingContent = {
+                        TextButton(onClick = openPicker) {
+                            Text(stringResource(R.string.mosaic_choose_channels))
+                        }
+                        if (isRunning) {
+                            Button(onClick = { isRunning = false }) {
+                                Text(stringResource(R.string.mosaic_stop))
+                            }
+                        } else {
+                            Button(
+                                enabled = selectedChannels.isNotEmpty(),
+                                onClick = { showStartWarning = true },
+                            ) {
+                                Text(stringResource(R.string.mosaic_start))
+                            }
+                        }
+                    },
                 )
             }
-        } else {
-            Column(
-                Modifier.weight(1f).fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                repeat(2) { row ->
-                    Row(
-                        Modifier.weight(1f).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        repeat(2) { column ->
-                            val index = row * 2 + column
-                            val channel = selectedChannels.getOrNull(index)
-                            MosaicTile(
-                                channel = channel,
-                                isRunning = isRunning,
-                                isActive = channel != null && index == activeTile,
-                                onActivate = { activeTile = index },
-                                onChooseChannels = {
-                                    draftKeys = selectedKeys.take(MOSAIC_TILE_COUNT)
-                                    pickerQuery = ""
-                                    showPicker = true
-                                },
-                                onChangeChannels = {
-                                    draftKeys = selectedKeys.take(MOSAIC_TILE_COUNT)
-                                    pickerQuery = ""
-                                    showPicker = true
-                                },
-                                onPlayFullScreen = { selected ->
-                                    isRunning = false
-                                    pendingFullScreenChannel = selected
-                                },
-                                modifier = Modifier.weight(1f).fillMaxHeight(),
-                            )
+
+            if (channelOptions.isEmpty()) {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text(
+                        stringResource(R.string.mosaic_no_channels),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else if (compactLayout) {
+                LazyColumn(
+                    modifier = Modifier.weight(1f).fillMaxWidth().focusRestorer().focusGroup(),
+                    contentPadding = PaddingValues(bottom = FullTvChrome.compactPageInset),
+                    verticalArrangement = Arrangement.spacedBy(FullTvChrome.cardGap),
+                ) {
+                    items((0 until MOSAIC_TILE_COUNT).toList(), key = { it }) { index ->
+                        MosaicTile(
+                            channel = selectedChannels.getOrNull(index),
+                            isRunning = isRunning,
+                            isActive = selectedChannels.getOrNull(index) != null && index == activeTile,
+                            onActivate = { activeTile = index },
+                            onChooseChannels = openPicker,
+                            onChangeChannels = openPicker,
+                            onPlayFullScreen = { selected ->
+                                isRunning = false
+                                pendingFullScreenChannel = selected
+                            },
+                            modifier = Modifier.fillMaxWidth().aspectRatio(16f / 9f),
+                        )
+                    }
+                }
+            } else {
+                Column(
+                    Modifier.weight(1f).fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(FullTvChrome.cardGap),
+                ) {
+                    repeat(2) { row ->
+                        Row(
+                            Modifier.weight(1f).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(FullTvChrome.cardGap),
+                        ) {
+                            repeat(2) { column ->
+                                val index = row * 2 + column
+                                val channel = selectedChannels.getOrNull(index)
+                                MosaicTile(
+                                    channel = channel,
+                                    isRunning = isRunning,
+                                    isActive = channel != null && index == activeTile,
+                                    onActivate = { activeTile = index },
+                                    onChooseChannels = openPicker,
+                                    onChangeChannels = openPicker,
+                                    onPlayFullScreen = { selected ->
+                                        isRunning = false
+                                        pendingFullScreenChannel = selected
+                                    },
+                                    modifier = Modifier.weight(1f).fillMaxHeight(),
+                                )
+                            }
                         }
                     }
                 }
@@ -376,20 +427,39 @@ private fun MosaicTile(
     modifier: Modifier = Modifier,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val tileDescription = if (channel == null) {
+        stringResource(R.string.mosaic_empty_slot)
+    } else {
+        channel.shownName
+    }
+    val audioActiveDescription = stringResource(R.string.mosaic_audio_active)
     val borderColor = when {
         focused -> MaterialTheme.colorScheme.primary
-        isActive -> MaterialTheme.colorScheme.secondary
+        isActive -> MaterialTheme.colorScheme.primary
         else -> MaterialTheme.colorScheme.outlineVariant
     }
     val tileModifier = modifier
-        .clip(RoundedCornerShape(8.dp))
-        .border(BorderStroke(if (focused || isActive) 2.dp else 1.dp, borderColor), RoundedCornerShape(8.dp))
-        .background(Color.Black)
+        .clip(FullTvChrome.cardShape)
+        .border(
+            BorderStroke(if (isActive) 2.dp else 1.dp, borderColor),
+            FullTvChrome.cardShape,
+        )
+        .background(if (channel == null) MaterialTheme.colorScheme.surfaceVariant else Color.Black)
         .onFocusChanged {
             focused = it.isFocused
             if (it.isFocused && channel != null) onActivate()
         }
-        .clickable {
+        .semantics {
+            contentDescription = tileDescription
+            if (isActive && isRunning) stateDescription = audioActiveDescription
+        }
+        .fullTvFocusRing(
+            focused = focused,
+            color = MaterialTheme.colorScheme.primary,
+            shape = FullTvChrome.cardShape,
+            width = 3.dp,
+        )
+        .clickable(role = Role.Button) {
             if (channel == null) onChooseChannels() else onActivate()
         }
         .focusable()
@@ -447,27 +517,37 @@ private fun MosaicTile(
                         )
                     }
                 }
-                IconButton(onClick = onChangeChannels, modifier = Modifier.size(38.dp)) {
-                    Icon(
-                        Icons.Filled.Edit,
-                        contentDescription = stringResource(R.string.mosaic_change_channel),
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp),
-                    )
-                }
-                IconButton(
+                MosaicTileAction(
+                    image = Icons.Filled.Edit,
+                    description = stringResource(R.string.mosaic_change_channel),
+                    onClick = onChangeChannels,
+                )
+                MosaicTileAction(
+                    image = Icons.Filled.Fullscreen,
+                    description = stringResource(R.string.mosaic_fullscreen),
                     onClick = { onPlayFullScreen(channel) },
-                    modifier = Modifier.size(38.dp),
-                ) {
-                    Icon(
-                        Icons.Filled.Fullscreen,
-                        contentDescription = stringResource(R.string.mosaic_fullscreen),
-                        tint = Color.White,
-                        modifier = Modifier.size(21.dp),
-                    )
-                }
+                )
             }
         }
+    }
+}
+
+@Composable
+private fun MosaicTileAction(
+    image: ImageVector,
+    description: String,
+    onClick: () -> Unit,
+) {
+    var focused by remember { mutableStateOf(false) }
+    IconButton(
+        onClick = onClick,
+        modifier = Modifier
+            .size(40.dp)
+            .clip(FullTvChrome.controlShape)
+            .onFocusChanged { focused = it.isFocused }
+            .fullTvFocusRing(focused, Color.White, FullTvChrome.controlShape),
+    ) {
+        Icon(image, contentDescription = description, tint = Color.White)
     }
 }
 

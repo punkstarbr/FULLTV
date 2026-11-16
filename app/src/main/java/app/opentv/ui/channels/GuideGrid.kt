@@ -69,7 +69,9 @@ import app.opentv.data.model.Channel
 import app.opentv.data.model.Programme
 import app.opentv.data.model.shownName
 import app.opentv.ui.ChannelsViewModel
+import app.opentv.ui.FullTvChrome
 import app.opentv.ui.InterfacePalette
+import app.opentv.ui.fullTvFocusRing
 import app.opentv.ui.interfacePalette
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Job
@@ -284,14 +286,11 @@ private fun ChannelListRow(
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(8.dp))
+            .clip(FullTvChrome.controlShape)
             .background(
                 if (isHighlighted) palette.selectedChannel else palette.surface,
             )
-            .then(
-                if (focused) Modifier.border(2.dp, palette.accent, RoundedCornerShape(8.dp))
-                else Modifier,
-            )
+            .fullTvFocusRing(focused, palette.accent, FullTvChrome.controlShape)
             .semantics(mergeDescendants = true) {
                 contentDescription = channelAccessibility
                 if (isHighlighted) stateDescription = previewState
@@ -403,7 +402,7 @@ private fun TimeHeader(
     metrics: GuideMetrics,
     palette: InterfacePalette,
 ) {
-    Row(Modifier.fillMaxWidth().height(metrics.headerHeight)) {
+    Row(Modifier.fillMaxWidth().height(metrics.headerHeight).background(palette.surfaceVariant)) {
         // Empty corner above the channel column.
         Box(Modifier.width(metrics.channelColumn))
         Row(
@@ -469,15 +468,11 @@ private fun GuideRow(
             Modifier
                 .width(metrics.channelColumn)
                 .fillMaxSize()
-                .clip(RoundedCornerShape(8.dp))
+                .clip(FullTvChrome.controlShape)
                 .background(
                     if (isHighlighted) palette.selectedChannel else palette.surface,
                 )
-                .then(
-                    if (focused) Modifier.border(
-                        2.dp, palette.accent, RoundedCornerShape(8.dp),
-                    ) else Modifier,
-                )
+                .fullTvFocusRing(focused, palette.accent, FullTvChrome.controlShape)
                 .semantics(mergeDescendants = true) {
                     contentDescription = channelAccessibility
                     if (isHighlighted) stateDescription = previewState
@@ -682,7 +677,7 @@ private fun ProgrammeBlock(
             .width(width)
             .fillMaxSize()
             .padding(end = 3.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .clip(FullTvChrome.controlShape)
             .background(
                 when {
                     focused -> palette.focusedBlock
@@ -691,12 +686,13 @@ private fun ProgrammeBlock(
                 },
             )
             .then(
-                if (focused || isNow) Modifier.border(
-                    if (focused) 2.dp else 1.dp,
+                if (isNow && !focused) Modifier.border(
+                    1.dp,
                     palette.accent,
-                    RoundedCornerShape(6.dp),
+                    FullTvChrome.controlShape,
                 ) else Modifier,
             )
+            .fullTvFocusRing(focused, palette.accent, FullTvChrome.controlShape)
             .focusRequester(focusRequester)
             .onPreviewKeyEvent { event ->
                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false

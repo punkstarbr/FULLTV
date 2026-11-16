@@ -12,8 +12,8 @@ import app.opentv.core.findActivity
 import app.opentv.core.StatusBus
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Box
@@ -27,7 +27,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.LiveTv
@@ -214,7 +214,7 @@ fun MainScreen(
     // screen has its own category rail down its left edge, and an overlaying menu would land on top
     // of it and leave a sliver poking out — so they live side by side and never collide.
     Column(Modifier.fillMaxSize()) {
-      Row(Modifier.weight(1f).fillMaxWidth()) {
+      if (!isTelevision) {
         NavRail(
             tabs = visibleTabs,
             current = tab,
@@ -223,7 +223,22 @@ fun MainScreen(
             onOpenSettings = onOpenSettings,
             onOpenProfiles = onOpenProfiles,
             activeProfileName = activeProfileName,
+            isTelevision = false,
         )
+      }
+      Row(Modifier.weight(1f).fillMaxWidth()) {
+        if (isTelevision) {
+            NavRail(
+                tabs = visibleTabs,
+                current = tab,
+                onSelect = { tab = it },
+                onOpenSearch = onOpenSearch,
+                onOpenSettings = onOpenSettings,
+                onOpenProfiles = onOpenProfiles,
+                activeProfileName = activeProfileName,
+                isTelevision = true,
+            )
+        }
 
         Box(Modifier.weight(1f).fillMaxHeight()) {
             when (tab) {
@@ -256,7 +271,8 @@ fun MainScreen(
                                 pendingProgrammeAction = pendingProgrammeAction,
                                 onProgrammeActionConsumed = onProgrammeActionConsumed,
                                 interfaceStyle = interfaceStyle,
-                                modifier = Modifier.fillMaxHeight().aspectRatio(4f / 3f),
+                                modifier = if (isTelevision) Modifier.fillMaxHeight().aspectRatio(4f / 3f)
+                                else Modifier.fillMaxSize(),
                             )
                         }
 
@@ -362,8 +378,86 @@ private fun NavRail(
     onOpenSettings: () -> Unit,
     onOpenProfiles: () -> Unit,
     activeProfileName: String,
+    isTelevision: Boolean,
     modifier: Modifier = Modifier,
 ) {
+    if (!isTelevision) {
+        Column(
+            modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surface)
+                .focusRestorer()
+                .focusGroup(),
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Image(
+                    painter = painterResource(R.drawable.ic_fulltv_logo),
+                    contentDescription = stringResource(R.string.app_name),
+                    modifier = Modifier.size(30.dp),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    stringResource(R.string.app_name),
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                )
+                Spacer(Modifier.weight(1f))
+                RailItem(
+                    Icons.Filled.Search,
+                    stringResource(R.string.nav_search),
+                    expanded = false,
+                    selected = false,
+                    horizontal = true,
+                    showLabel = false,
+                    onClick = onOpenSearch,
+                )
+                RailItem(
+                    Icons.Filled.Person,
+                    activeProfileName,
+                    expanded = false,
+                    selected = false,
+                    horizontal = true,
+                    showLabel = false,
+                    onClick = onOpenProfiles,
+                )
+                RailItem(
+                    Icons.Filled.Settings,
+                    stringResource(R.string.nav_settings),
+                    expanded = false,
+                    selected = false,
+                    horizontal = true,
+                    showLabel = false,
+                    onClick = onOpenSettings,
+                )
+            }
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
+                    .focusRestorer()
+                    .focusGroup(),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                tabs.forEach { item ->
+                    RailItem(
+                        item.icon,
+                        stringResource(item.labelRes),
+                        expanded = false,
+                        selected = current == item,
+                        horizontal = true,
+                        showLabel = true,
+                    ) { onSelect(item) }
+                }
+            }
+        }
+        return
+    }
+
     // Expand whenever focus is anywhere inside the rail; collapse back to icons when it leaves.
     var expanded by remember { mutableStateOf(false) }
     val width by animateDpAsState(
@@ -413,9 +507,9 @@ private fun NavRail(
         Spacer(Modifier.height(1.dp).fillMaxWidth())
         Spacer(Modifier.weight(1f))
 
-        RailItem(Icons.Filled.Search, stringResource(R.string.nav_search), expanded, false, onOpenSearch)
-        RailItem(Icons.Filled.Person, activeProfileName, expanded, false, onOpenProfiles)
-        RailItem(Icons.Filled.Settings, stringResource(R.string.nav_settings), expanded, false, onOpenSettings)
+        RailItem(Icons.Filled.Search, stringResource(R.string.nav_search), expanded, false, onClick = onOpenSearch)
+        RailItem(Icons.Filled.Person, activeProfileName, expanded, false, onClick = onOpenProfiles)
+        RailItem(Icons.Filled.Settings, stringResource(R.string.nav_settings), expanded, false, onClick = onOpenSettings)
     }
 }
 
@@ -425,27 +519,28 @@ private fun RailItem(
     label: String,
     expanded: Boolean,
     selected: Boolean,
+    horizontal: Boolean = false,
+    showLabel: Boolean = expanded,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
     val bg = when {
         focused -> MaterialTheme.colorScheme.primary
-        selected -> MaterialTheme.colorScheme.surfaceVariant
+        selected -> MaterialTheme.colorScheme.primaryContainer
         else -> MaterialTheme.colorScheme.surface
     }
     val tint = if (focused) MaterialTheme.colorScheme.onPrimary
-    else if (selected) MaterialTheme.colorScheme.onSurface
+    else if (selected) MaterialTheme.colorScheme.onPrimaryContainer
     else MaterialTheme.colorScheme.onSurfaceVariant
 
     Row(
         Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .then(if (horizontal) Modifier else Modifier.fillMaxWidth().padding(horizontal = 12.dp))
+            .clip(FullTvChrome.controlShape)
             .background(bg)
-            .then(
-                if (focused) Modifier.border(2.dp, MaterialTheme.colorScheme.onPrimary, RoundedCornerShape(10.dp))
-                else Modifier,
+            .fullTvFocusRing(
+                focused = focused,
+                color = if (focused) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.primary,
             )
             .semantics {
                 contentDescription = label
@@ -453,15 +548,15 @@ private fun RailItem(
             }
             .onFocusChanged { focused = it.isFocused }
             .clickable(role = Role.Button, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
+            .padding(horizontal = if (horizontal) 12.dp else 14.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(icon, contentDescription = null, tint = tint)
-        if (expanded) {
+        if (showLabel) {
             Spacer(Modifier.width(14.dp))
             Text(
                 label,
-                style = MaterialTheme.typography.titleMedium,
+                style = if (horizontal) MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleMedium,
                 color = tint,
                 fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
                 maxLines = 1,

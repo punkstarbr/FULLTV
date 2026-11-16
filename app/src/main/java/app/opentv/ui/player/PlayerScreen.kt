@@ -22,7 +22,10 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -91,9 +94,13 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -127,7 +134,10 @@ import app.opentv.security.ParentalAuthorization
 import app.opentv.ui.RecordingBackgroundDialog
 import app.opentv.ui.RecordingBackgroundPrompt
 import app.opentv.ui.ParentalPinGate
+import app.opentv.ui.FullTvCard
+import app.opentv.ui.FullTvChrome
 import app.opentv.ui.NotificationPermissionPurpose
+import app.opentv.ui.fullTvFocusRing
 import app.opentv.ui.interfacePalette
 import app.opentv.ui.rememberNotificationPermissionGate
 import coil.compose.AsyncImage
@@ -158,7 +168,8 @@ import java.util.Locale
  * are selected explicitly — that is the fix for "captions on but nothing shows", which happens
  * when the renderer is merely enabled and left to guess a language.
  */
-@OptIn(UnstableApi::class)
+@kotlin.OptIn(ExperimentalLayoutApi::class)
+@OptIn(UnstableApi::class, ExperimentalLayoutApi::class)
 @Composable
 fun PlayerScreen(
     channelId: Long?,
@@ -167,6 +178,7 @@ fun PlayerScreen(
     val context = LocalContext.current
     val notificationPermissionGate = rememberNotificationPermissionGate()
     val view = LocalView.current
+    val isCompactViewport = LocalConfiguration.current.screenWidthDp < 1_100
     val graph = remember { ServiceLocator.get(context) }
     val settings = remember { graph.settings }
     val interfaceStyle by settings.interfaceStyle.collectAsState()
@@ -568,7 +580,7 @@ fun PlayerScreen(
         }
     }
 
-    Box(
+    BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .background(Color.Black)
@@ -590,8 +602,8 @@ fun PlayerScreen(
                     }
                     // With the top Info layout, vertical navigation crosses between the top tabs
                     // and lower player controls instead of zapping while the controls are visible.
-                    (event.key == Key.DirectionUp || event.key == Key.DirectionDown) &&
-                        controlsVisible && interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.PLAYER_INFO_TOP -> {
+                    (event.key == Key.DirectionUp || event.key == Key.DirectionDown) && controlsVisible &&
+                        (interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.PLAYER_INFO_TOP || isCompactViewport) -> {
                         interaction++
                         false
                     }
@@ -908,7 +920,11 @@ fun PlayerScreen(
                     Spacer(Modifier.height(12.dp))
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
                     if (controller.isSeekable) {
                         BarChip(
                             icon = Icons.Filled.FastRewind,
@@ -919,7 +935,6 @@ fun PlayerScreen(
                         ) {
                             controller.seekBackward(); interaction++
                         }
-                        Spacer(Modifier.width(10.dp))
                     }
                     BarChip(
                         icon = if (paused) Icons.Filled.PlayArrow else Icons.Filled.Pause,
@@ -934,7 +949,6 @@ fun PlayerScreen(
                         interaction++
                     }
                     if (controller.isSeekable) {
-                        Spacer(Modifier.width(10.dp))
                         BarChip(
                             icon = Icons.Filled.FastForward,
                             label = stringResource(R.string.player_forward),
@@ -945,8 +959,6 @@ fun PlayerScreen(
                             controller.seekForward(); interaction++
                         }
                     }
-
-                    Spacer(Modifier.width(20.dp))
                     BarChip(
                         icon = Icons.Filled.Subtitles,
                         label = stringResource(R.string.player_subtitles),
@@ -956,7 +968,6 @@ fun PlayerScreen(
                     ) {
                         panel = if (panel == Panel.SUBTITLES) Panel.NONE else Panel.SUBTITLES; interaction++
                     }
-                    Spacer(Modifier.width(10.dp))
                     BarChip(
                         icon = Icons.Filled.Translate,
                         label = stringResource(R.string.player_live_captions),
@@ -967,7 +978,6 @@ fun PlayerScreen(
                         panel = if (panel == Panel.LIVE_CAPTIONS) Panel.NONE else Panel.LIVE_CAPTIONS
                         interaction++
                     }
-                    Spacer(Modifier.width(10.dp))
                     BarChip(
                         icon = Icons.Filled.Audiotrack,
                         label = stringResource(R.string.player_audio),
@@ -978,7 +988,6 @@ fun PlayerScreen(
                         panel = if (panel == Panel.AUDIO) Panel.NONE else Panel.AUDIO; interaction++
                     }
                     if (variants.size > 1) {
-                        Spacer(Modifier.width(10.dp))
                         BarChip(
                             icon = Icons.Filled.HighQuality,
                             label = stringResource(R.string.player_quality),
@@ -989,7 +998,6 @@ fun PlayerScreen(
                             panel = if (panel == Panel.QUALITY) Panel.NONE else Panel.QUALITY; interaction++
                         }
                     }
-                    Spacer(Modifier.width(10.dp))
                     BarChip(
                         icon = Icons.Filled.AspectRatio,
                         label = stringResource(R.string.player_aspect),
@@ -999,7 +1007,6 @@ fun PlayerScreen(
                     ) {
                         panel = if (panel == Panel.ASPECT) Panel.NONE else Panel.ASPECT; interaction++
                     }
-                    Spacer(Modifier.width(10.dp))
                     val recordingThis = activeRecordings.any { it.channelId == currentId }
                     BarChip(
                         icon = Icons.Filled.FiberManualRecord,
@@ -1010,7 +1017,6 @@ fun PlayerScreen(
                         onAccentColor = controlOnAccent,
                     ) { toggleRecord() }
                     if (pipSupported) {
-                        Spacer(Modifier.width(10.dp))
                         BarChip(
                             icon = Icons.Filled.PictureInPictureAlt,
                             label = stringResource(R.string.player_pop_out),
@@ -1056,8 +1062,9 @@ fun PlayerScreen(
             Column(
                 Modifier
                     .fillMaxHeight()
-                    .width(
-                        if (interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.BOTTOM_INFO_DRAWER) 480.dp
+                    .fillMaxWidth(0.9f)
+                    .widthIn(
+                        max = if (interfaceStyle == app.opentv.core.AppSettings.InterfaceStyle.BOTTOM_INFO_DRAWER) 480.dp
                         else 380.dp,
                     )
                     .background(
@@ -1146,6 +1153,7 @@ private fun ChannelListRow(
     leadingLabel: String? = null,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val selectedDescription = stringResource(R.string.common_selected)
     val bg = when {
         focused -> MaterialTheme.colorScheme.primary
         playing -> MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
@@ -1157,8 +1165,13 @@ private fun ChannelListRow(
             .fillMaxWidth()
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { focused = it.isFocused }
+            .clip(FullTvChrome.controlShape)
             .background(bg)
-            .clickable(onClick = onClick)
+            .fullTvFocusRing(focused, Color.White, FullTvChrome.controlShape)
+            .semantics(mergeDescendants = true) {
+                if (playing) stateDescription = selectedDescription
+            }
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1245,14 +1258,13 @@ private fun OptionPanel(
         Panel.NONE -> ""
     }
 
-    Column(
-        Modifier
-            .widthIn(max = 460.dp)
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.Black.copy(alpha = 0.92f))
-            .padding(16.dp),
+    FullTvCard(
+        modifier = Modifier.widthIn(max = 460.dp),
+        containerColor = Color.Black.copy(alpha = 0.94f),
+        shape = FullTvChrome.cardShape,
     ) {
-        Text(title, style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = 0.7f))
+        Column(Modifier.padding(16.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, color = Color.White.copy(alpha = 0.7f))
         if (panel == Panel.LIVE_CAPTIONS) {
             Text(
                 liveCaptionStatusText(liveCaptionState),
@@ -1283,6 +1295,7 @@ private fun OptionPanel(
                     focusRequester = if (index == 0) firstFocus else null,
                 )
             }
+        }
         }
     }
 }
@@ -1444,6 +1457,7 @@ private fun OptionRow(
     focusRequester: FocusRequester?,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val selectedDescription = stringResource(R.string.common_selected)
     val bg = if (focused) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.08f)
     val fg = if (focused) MaterialTheme.colorScheme.onPrimary else Color.White
     Row(
@@ -1451,9 +1465,13 @@ private fun OptionRow(
             .fillMaxWidth()
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(10.dp))
+            .clip(FullTvChrome.controlShape)
             .background(bg)
-            .clickable(onClick = onClick)
+            .fullTvFocusRing(focused, Color.White, FullTvChrome.controlShape)
+            .semantics(mergeDescendants = true) {
+                if (selected) stateDescription = selectedDescription
+            }
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1473,21 +1491,20 @@ private fun ZappingChannelCard(
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val selectedDescription = stringResource(R.string.common_selected)
     Row(
         Modifier
             .width(166.dp)
             .height(72.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(FullTvChrome.controlShape)
             .background(if (selected) accent else Color.Black.copy(alpha = 0.72f))
-            .then(
-                if (focused || selected) Modifier.border(
-                    if (focused) 3.dp else 2.dp,
-                    if (focused) Color.White else accent,
-                    RoundedCornerShape(10.dp),
-                ) else Modifier,
-            )
+            .then(if (selected) Modifier.border(2.dp, accent, FullTvChrome.controlShape) else Modifier)
+            .fullTvFocusRing(focused, Color.White, FullTvChrome.controlShape)
             .onFocusChanged { focused = it.isFocused }
-            .clickable(onClick = onClick)
+            .semantics(mergeDescendants = true) {
+                if (selected) stateDescription = selectedDescription
+            }
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -1524,6 +1541,7 @@ private fun BarChip(
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val selectedDescription = stringResource(R.string.common_selected)
     val accent = accentColor ?: MaterialTheme.colorScheme.primary
     val onAccent = onAccentColor ?: MaterialTheme.colorScheme.onPrimary
     val container = when {
@@ -1537,17 +1555,17 @@ private fun BarChip(
         modifier = Modifier
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .onFocusChanged { focused = it.isFocused }
-            .clip(RoundedCornerShape(12.dp))
+            .clip(FullTvChrome.controlShape)
             .background(container)
-            .then(
-                if (focused) Modifier.border(2.dp, accent, RoundedCornerShape(12.dp))
-                else Modifier,
-            )
-            .clickable(onClick = onClick)
+            .fullTvFocusRing(focused, Color.White, FullTvChrome.controlShape)
+            .semantics(mergeDescendants = true) {
+                if (selected) stateDescription = selectedDescription
+            }
+            .clickable(role = Role.Button, onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, contentDescription = label, tint = if (focused) content else (iconTint ?: content))
+        Icon(icon, contentDescription = null, tint = if (focused) content else (iconTint ?: content))
         Spacer(Modifier.width(6.dp))
         Text(label, style = MaterialTheme.typography.labelLarge, color = content)
     }
