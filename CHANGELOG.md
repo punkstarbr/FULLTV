@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.11.48 (release pública autorizada) — 2026-11-21
+
+- **Canais em paisagem no celular:** em janelas curtas (até 480 dp), oculta o painel de prévia e interrompe o stream de preview para dar espaço à grade/lista; ao voltar para retrato, a prévia retorna.
+- **Grupos no Fire TV:** a faixa lateral de categorias não se recolhe quando o foco entra no guia, mantendo os grupos visíveis durante a navegação por D-pad.
+- **Compatibilidade:** `app.fulltv`, versionCode 60 e certificado legado verificado, para permitir atualização sobre instalações com a mesma assinatura.
+- **Escopo de publicação:** autorização pública única em 2026-11-21 para enviar à `main` o conjunto de alterações pendentes, criar a tag e GitHub Release `v0.11.48` e anexar os cinco APKs, checksums e notas de release; não autoriza versões futuras.
+- **Validação:** 287 testes Android (0 falhas/erros/ignorados), 16 testes Python das ferramentas e 10 do app; `lintVitalRelease` passou. Não havia Fire TV, celular ou emulador conectado, então o D-pad não foi testado fisicamente.
+- **APK universal:** 204.978.165 bytes; SHA-256 `babc2e55da91da8d09e90ca4510f725253e30db1f451cdaddf8745efd7244a2a`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. Todos os APKs e hashes estão em `FULLTV-artifacts/v0.11.48-live-tv-ux-local/`.
+
+## 0.11.47 (APK local; não publicado) — 2026-11-20
+
+- **Troca de canais por toque:** botão “Canais” nos controles do player abre a lista de canais em todos os estilos de interface; tocar em um item troca a reprodução.
+- **Compatibilidade:** `app.fulltv`, versionCode 59 e certificado legado verificado para atualização por cima de instalações com a mesma assinatura.
+- **Escopo autorizado:** somente APK local; sem commit, tag, push ou GitHub Release.
+- **Validação:** build release concluído; 287 testes Android, 16 testes das ferramentas Python e 10 testes Python de segurança passaram sem falhas; `lintVitalRelease` passou. Os cinco APKs passaram verificação de package/versão/certificado e alinhamento ZIP de 16 KiB. Não houve teste em aparelho físico.
+- **APK universal:** 204.978.165 bytes; SHA-256 `9efe071179e6d1d50d815337b38cad65e30d2d14a4e87a0ea0d8de47f032bcde`; certificado SHA-256 `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`. O hash de ARM64 e os outros APKs estão em `FULLTV-artifacts/v0.11.47-touch-channel-local/SHA256SUMS.txt`.
+
+## 0.11.46 (APK release local; não publicado) — 2026-11-20
+
+- **Prioridade EPG:** guias configuráveis por ordem, resolução determinística de conflitos por `epgChannelId` + início, fallback de horários ausentes, migração não destrutiva e preservação em backup criptografado.
+- **Compatibilidade:** `app.fulltv`, versionCode 58 e certificado legado verificado para permitir atualização manual por cima das versões anteriores assinadas com o mesmo certificado. Esta autorização cobre apenas gerar o APK local; não cobre commit, tag, push ou GitHub Release.
+- **Validação:** 287 testes Android em 56 classes (0 falhas/erros/ignorados), 16 testes Python de ferramentas/migração/queries e 10 testes de segurança passaram; `lintDebug`, `lintVitalRelease` e `assembleRelease` concluíram com sucesso.
+- **Artefatos:** cinco APKs release foram auditados com `aapt2`/`apksigner`; arm64-v8a e universal têm, respectivamente, SHA-256 `97ec3f3dfea9486d90368a0298a669ad16b2a093f8beb0e9f6faa318286192b4` e `72e14154f8611fa50ecc07a9db1979b8e7590778a026768985fbcdbee2e6f0c4`. A validação completa e todos os hashes estão em `FULLTV-artifacts/v0.11.46-epg-priority-local/`.
+- **Limitações:** build local não publicado e nenhum teste físico/emulador no Moto G84/Android 15. O fechamento com internet não foi reproduzido neste ambiente, portanto não afirmamos que a nova versão o resolveu.
+
+## 0.11.45 (APK local de hotfix; não publicado) — 2026-11-17
+
+> A prioridade EPG abaixo foi adicionada ao código-fonte depois de gerar o APK .45 local arquivado; aquele APK e os hashes existentes não contêm esta melhoria. Não foi gerado um novo APK de release para ela.
+
+- **Exceções/retry:** I/O transitório e HTTP 408/429/5xx podem usar o backoff do WorkManager. Cancelamento, falhas TLS, política HTTPS/SSRF e respostas HTTP permanentes não são repetidos às cegas; erros não recuperáveis retornam falha.
+- **Concorrência:** `SyncOperationGate` serializa importação de M3U/catálogo, VOD, busca de episódios e EPG no processo. Trabalhos concorrentes aguardam, reduzindo contenção de CPU/memória/Room; uma lista grande pode aumentar a espera pelo guia. Os limites M3U existentes seguem em 64 MiB, 100.000 canais e 16 KiB por linha.
+- **Prioridade entre guias:** cada feed EPG tem ordem editável por toque/D-pad. Em colisões exatas de `epgChannelId` + início, o guia ativo mais prioritário prevalece; os demais continuam preenchendo horários ausentes. Reordenar não baixa nem reescreve snapshots; a preferência também vai no backup criptografado.
+- **Logcat:** eventos de startup, fila/início/fim e duração de sync, mais falhas de rede/playback. Os novos diagnósticos omitem mensagens de exceção, URLs, query strings, credenciais, tokens, headers e User-Agent; não há telemetria nem upload de logs.
+- **Validação local:** 281 testes Android e 23 testes Python passaram; `assembleDebug`, `lintDebug`, `lintVitalRelease` e `assembleRelease` passaram. Cinco APKs verificados como `app.fulltv`, code57, minSdk24/targetSdk35, certificado legado esperado e sem `RECORD_AUDIO`.
+- **Alinhamento/limite:** as bibliotecas nativas têm offsets ZIP de 16 KiB. As 15 bibliotecas do APK arm64 têm segmentos ELF alinhados a 16 KiB; quatro libs em cada variante armeabi-v7a e x86 mantêm segmentos de 4 KiB, byte a byte idênticos às libs da release pública .44.
+- **Status e diagnóstico:** hotfix local v0.11.45/code57; não publicado, sem commit/tag/push. Não houve teste físico no Moto G84. O crash quando online continua sem causa confirmada; este pacote melhora contenção e diagnóstico, mas não promete resolvê-lo.
+
 ## 0.11.44 (release pública manual) — 2026-11-16
 
 - **Remodelação completa da interface:** unificar cartões, seções, espaçamento e anéis de foco; adaptar Live TV, portal, guia, mosaico, busca, formulários de fontes, player, gravações, VOD, configurações e gerenciamento para TV e celular, preservando ações existentes.

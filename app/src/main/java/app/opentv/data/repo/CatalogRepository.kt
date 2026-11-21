@@ -5,8 +5,10 @@
  */
 package app.opentv.data.repo
 
+import android.os.SystemClock
 import android.util.Log
 import app.opentv.core.AppSettings
+import app.opentv.core.SafeNetworkDiagnostics
 import app.opentv.data.db.CategoryDao
 import app.opentv.data.db.ChannelDao
 import app.opentv.data.db.EpisodeDao
@@ -155,7 +157,11 @@ class CatalogRepository(
             val seriesCount: Int,
         ) : SyncResult
 
-        data class Failed(val reason: String, val cause: Throwable?) : SyncResult
+        data class Failed(
+            val reason: String,
+            val cause: Throwable?,
+            val retryable: Boolean = false,
+        ) : SyncResult
     }
 
     fun observeChannels(sourceId: Long? = null, categoryId: String? = null): Flow<List<Channel>> =
@@ -651,9 +657,19 @@ class CatalogRepository(
     /** Series episodes are fetched lazily — panels are slow and most series are never opened. */
     suspend fun ensureEpisodes(source: Source, seriesId: String) {
         if (source.kind != SourceKind.XTREAM) return
-        runCatching { api.episodes(source, seriesId) }
-            .onSuccess { if (it.isNotEmpty()) episodeDao.upsertAll(it) }
-            .onFailure { Log.w(TAG, "Episode fetch failed (${it.javaClass.simpleName})") }
+        SyncOperationGate.withLock {
+            withContext(Dispatchers.IO) {
+                try {
+                    api.episodes(source, seriesId).let { episodes ->
+                        if (episodes.isNotEmpty()) episodeDao.upsertAll(episodes)
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    SafeNetworkDiagnostics.error(TAG, "episode-fetch", failure)
+                }
+            }
+        }
     }
 
     /**
@@ -670,49 +686,81 @@ class CatalogRepository(
             if (settings.liveEnabled.value) syncLive(source, nowUtcMillis)
             else SyncResult.Success(0, 0, 0)
         if (live is SyncResult.Success && source.kind == SourceKind.XTREAM) {
-            runCatching { syncXtreamVod(source, nowUtcMillis) }
-                .onFailure { Log.w(TAG, "VOD sync failed for source ${source.id} (${it.javaClass.simpleName})") }
+            syncVod(source, nowUtcMillis)
         }
         live
     }
 
     /** Live channels only — the fast path so the guide can show before VOD and the guide load. */
-    suspend fun syncLive(source: Source, nowUtcMillis: Long): SyncResult = withContext(Dispatchers.IO) {
-        val secureSource = source.copy(
-            url = HttpsUrlPolicy.withDefaultHttps(source.url),
-            epgUrl = source.epgUrl?.let(HttpsUrlPolicy::withDefaultHttps),
-        )
-        if (!HttpsUrlPolicy.isHttps(secureSource.url) ||
-            (!secureSource.epgUrl.isNullOrBlank() && !HttpsUrlPolicy.isHttps(secureSource.epgUrl))
-        ) {
-            return@withContext SyncResult.Failed(HttpsUrlPolicy.REQUIRED_RESULT, null)
-        }
-        NetworkDestinationPolicy.registerTrustedOrigin(secureSource.url)
-        secureSource.epgUrl?.let(NetworkDestinationPolicy::registerTrustedOrigin)
-        try {
-            when (secureSource.kind) {
-                SourceKind.XTREAM -> syncXtreamLive(secureSource, nowUtcMillis)
-                SourceKind.M3U -> syncM3u(secureSource, nowUtcMillis)
-                SourceKind.YOUTUBE_LIVE_SEARCH -> syncYouTubeLiveSearch(secureSource, nowUtcMillis)
-                SourceKind.STALKER -> syncStalkerLive(secureSource, nowUtcMillis)
+    suspend fun syncLive(source: Source, nowUtcMillis: Long): SyncResult {
+        val queuedAt = SystemClock.elapsedRealtime()
+        val kind = source.kind.name.lowercase()
+        Log.i(TAG, "event=catalogue_sync_queued kind=$kind")
+        return SyncOperationGate.withLock {
+          withContext(Dispatchers.IO) {
+            val startedAt = SystemClock.elapsedRealtime()
+            Log.i(TAG, "event=catalogue_sync_start kind=$kind gate_wait_ms=${startedAt - queuedAt}")
+            val secureSource = source.copy(
+                url = HttpsUrlPolicy.withDefaultHttps(source.url),
+                epgUrl = source.epgUrl?.let(HttpsUrlPolicy::withDefaultHttps),
+            )
+            if (!HttpsUrlPolicy.isHttps(secureSource.url) ||
+                (!secureSource.epgUrl.isNullOrBlank() && !HttpsUrlPolicy.isHttps(secureSource.epgUrl))
+            ) {
+                return@withContext SyncResult.Failed(HttpsUrlPolicy.REQUIRED_RESULT, null)
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            Log.w(TAG, "Catalogue sync failed for source ${source.id} (${e.javaClass.simpleName})")
-            SyncResult.Failed(e.message ?: "The catalogue could not be downloaded.", e)
+            NetworkDestinationPolicy.registerTrustedOrigin(secureSource.url)
+            secureSource.epgUrl?.let(NetworkDestinationPolicy::registerTrustedOrigin)
+            val result = try {
+                when (secureSource.kind) {
+                    SourceKind.XTREAM -> syncXtreamLive(secureSource, nowUtcMillis)
+                    SourceKind.M3U -> syncM3u(secureSource, nowUtcMillis)
+                    SourceKind.YOUTUBE_LIVE_SEARCH -> syncYouTubeLiveSearch(secureSource, nowUtcMillis)
+                    SourceKind.STALKER -> syncStalkerLive(secureSource, nowUtcMillis)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                SafeNetworkDiagnostics.error(TAG, "catalogue-sync-${secureSource.kind.name.lowercase()}", e)
+                SyncResult.Failed(
+                    e.message ?: "The catalogue could not be downloaded.",
+                    e,
+                    SafeNetworkDiagnostics.isRetryableNetworkFailure(e),
+                )
+            }
+            val duration = SystemClock.elapsedRealtime() - startedAt
+            when (result) {
+                is SyncResult.Success -> Log.i(
+                    TAG,
+                    "event=catalogue_sync_complete kind=$kind result=success channels=${result.channelCount} duration_ms=$duration",
+                )
+                is SyncResult.Failed -> Log.w(
+                    TAG,
+                    "event=catalogue_sync_complete kind=$kind result=failed duration_ms=$duration",
+                )
+            }
+            result
+          }
         }
     }
 
     /** Movies + series — best-effort, meant to run in the background so a huge VOD list never
      * blocks live TV. Silent on failure: an account with no VOD is normal, not an error. */
-    suspend fun syncVod(source: Source, nowUtcMillis: Long) = withContext(Dispatchers.IO) {
-        val secureSource = source.copy(url = HttpsUrlPolicy.withDefaultHttps(source.url))
-        if (!HttpsUrlPolicy.isHttps(secureSource.url)) return@withContext
-        NetworkDestinationPolicy.registerTrustedOrigin(secureSource.url)
-        runCatching { if (secureSource.kind == SourceKind.XTREAM) syncXtreamVod(secureSource, nowUtcMillis) }
-            .onFailure { Log.w(TAG, "VOD sync failed for source ${source.id} (${it.javaClass.simpleName})") }
-    }
+    suspend fun syncVod(source: Source, nowUtcMillis: Long) =
+        SyncOperationGate.withLock {
+          withContext(Dispatchers.IO) {
+            val secureSource = source.copy(url = HttpsUrlPolicy.withDefaultHttps(source.url))
+            if (!HttpsUrlPolicy.isHttps(secureSource.url)) return@withContext
+            NetworkDestinationPolicy.registerTrustedOrigin(secureSource.url)
+            try {
+                if (secureSource.kind == SourceKind.XTREAM) syncXtreamVod(secureSource, nowUtcMillis)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                SafeNetworkDiagnostics.error(TAG, "vod-sync", failure)
+            }
+          }
+        }
 
     private suspend fun syncXtreamLive(source: Source, nowUtcMillis: Long): SyncResult {
         // Authenticate first so a wrong password produces a clear message rather than
@@ -817,7 +865,11 @@ class CatalogRepository(
 
         val downloaded = http.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
-                return SyncResult.Failed("Playlist download failed (HTTP ${response.code}).", null)
+                return SyncResult.Failed(
+                    "Playlist download failed (HTTP ${response.code}).",
+                    null,
+                    SafeNetworkDiagnostics.isRetryableHttpStatus(response.code),
+                )
             }
             val stream = response.body?.byteStream()
                 ?: return SyncResult.Failed("The playlist was empty.", null)

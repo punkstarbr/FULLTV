@@ -202,6 +202,8 @@ data class EpgFeed(
     val lastSyncMillis: Long = 0,
     /** Human-readable outcome of the last sync attempt, shown in settings. */
     val lastResult: String = "",
+    /** Lower values win when enabled guides contain the same XMLTV channel and start time. */
+    @ColumnInfo(defaultValue = "0") val priority: Int = 0,
 )
 
 /**
@@ -232,6 +234,7 @@ data class EpgChannelAlias(
     tableName = "programmes",
     indices = [
         Index(value = ["feedId", "epgChannelId", "startUtcMillis"], unique = true),
+        Index(value = ["epgChannelId", "startUtcMillis"]),
         Index(value = ["endUtcMillis"]),
         Index(value = ["epgChannelId"]),
     ],

@@ -26,6 +26,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
+import app.opentv.core.SafeNetworkDiagnostics
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -260,6 +261,7 @@ class PlayerController(
                 }
 
                 override fun onPlayerError(error: PlaybackException) {
+                    SafeNetworkDiagnostics.error("PlayerController", "player-playback", error)
                     consecutiveFailures++
                     val request = current
                     _state.value = State.Error(
@@ -296,7 +298,14 @@ class PlayerController(
         switchJob = scope.launch {
             if (debounce) delay(switchDebounceMillis)
 
-            if (!isSafeMediaUrl(request.url) || !isSafeUserAgent(request.userAgent)) {
+            val mediaUrlAllowed = isSafeMediaUrl(request.url)
+            val userAgentAllowed = isSafeUserAgent(request.userAgent)
+            if (!mediaUrlAllowed || !userAgentAllowed) {
+                SafeNetworkDiagnostics.error(
+                    "PlayerController",
+                    if (!mediaUrlAllowed) "media-url-policy-rejected" else "user-agent-policy-rejected",
+                    IllegalArgumentException("Media request rejected by local security policy"),
+                )
                 player.stop()
                 player.clearMediaItems()
                 _state.value = State.Error(

@@ -71,7 +71,7 @@ class Converters {
         SeriesRule::class,
         Reminder::class,
     ],
-    version = 12,
+    version = 13,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -279,6 +279,23 @@ abstract class OpenTvDatabase : RoomDatabase() {
             }
         }
 
+        /** v12 → v13: explicit EPG priority and an index for cross-feed programme conflicts. */
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `epg_feeds` ADD COLUMN `priority` INTEGER NOT NULL DEFAULT 0")
+                // Existing feed IDs are a stable approximation of the old insertion order.
+                db.execSQL(
+                    "UPDATE `epg_feeds` SET `priority` = (" +
+                        "SELECT COUNT(*) - 1 FROM `epg_feeds` AS older " +
+                        "WHERE older.`id` <= `epg_feeds`.`id`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_programmes_epgChannelId_startUtcMillis` " +
+                        "ON `programmes` (`epgChannelId`, `startUtcMillis`)"
+                )
+            }
+        }
+
         fun build(context: Context): OpenTvDatabase =
             Room.databaseBuilder(context, OpenTvDatabase::class.java, "opentv.db")
                 // WAL keeps guide writes from blocking guide reads, so a background EPG
@@ -287,7 +304,7 @@ abstract class OpenTvDatabase : RoomDatabase() {
                 .addMigrations(
                     MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
                     MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11,
-                    MIGRATION_11_12,
+                    MIGRATION_11_12, MIGRATION_12_13,
                 )
                 // Deliberately omit fallbackToDestructiveMigration: an unknown upgrade path must
                 // fail visibly rather than erase profiles, favourites, recordings, and history.

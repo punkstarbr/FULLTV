@@ -49,6 +49,7 @@ class BackupTransfer(
         require(passphrase.length >= BackupCryptography.MIN_NEW_PASSPHRASE_LENGTH) {
             "Choose a passphrase with at least 12 characters."
         }
+        val epgRows = graph.database.epgFeeds().all()
         val bundle = FullTvBackup(
             createdAtMillis = System.currentTimeMillis(),
             sources = graph.database.sources().all().map { source ->
@@ -63,9 +64,13 @@ class BackupTransfer(
                     userAgent = source.userAgent,
                     liveFormat = source.liveFormat.name,
                     enabled = source.enabled,
+                    providerEpgPriority = epgRows.firstOrNull { it.providerSourceId == source.id }?.priority,
+                    playlistEpgPriorities = epgRows
+                        .filter { it.playlistSourceId == source.id && it.url != null }
+                        .associate { it.url.orEmpty() to it.priority },
                 )
             },
-            epgFeeds = graph.database.epgFeeds().all()
+            epgFeeds = epgRows
                 .filter { it.url != null && it.providerSourceId == null && it.playlistSourceId == null }
                 .map { feed ->
                     BackupEpgFeed(
@@ -73,6 +78,7 @@ class BackupTransfer(
                         url = feed.url.orEmpty(),
                         enabled = feed.enabled,
                         builtIn = feed.builtIn,
+                        priority = feed.priority,
                     )
                 },
             settings = graph.settings.toBackupSettings(),
@@ -153,6 +159,18 @@ class BackupTransfer(
 
         graph.epgRepository.ensureFeeds()
         val feedDao = graph.database.epgFeeds()
+        val restoredSourcesByKey = sourceDao.all().associateBy { sourceKey(it.kind, it.url) }
+        for (savedSource in backup.sources) {
+            val kind = SourceKind.valueOf(savedSource.kind)
+            val normalizedUrl = SourceRepository.normaliseUrl(savedSource.url, kind)
+            val source = restoredSourcesByKey[sourceKey(kind, normalizedUrl)] ?: continue
+            savedSource.providerEpgPriority?.let { priority ->
+                feedDao.forProvider(source.id)?.let { feedDao.setPriority(it.id, priority) }
+            }
+            for ((url, priority) in savedSource.playlistEpgPriorities) {
+                feedDao.byUrlForPlaylist(url, source.id)?.let { feedDao.setPriority(it.id, priority) }
+            }
+        }
         var feedsImported = 0
         for (saved in backup.epgFeeds) {
             var feed = feedDao.byGlobalUrl(saved.url)
@@ -162,6 +180,7 @@ class BackupTransfer(
             }
             if (feed != null) {
                 feedDao.setEnabled(feed.id, saved.enabled)
+                saved.priority?.let { feedDao.setPriority(feed.id, it) }
                 feedsImported++
             }
         }
@@ -195,11 +214,26 @@ class BackupTransfer(
                 source.macAddress.orEmpty().length <= MAX_MAC_LENGTH &&
                 source.userAgent.length <= MAX_USER_AGENT_LENGTH
             ) { "Source credentials or User-Agent exceed the safety limit." }
+            require(source.providerEpgPriority == null || source.providerEpgPriority in 0..MAX_EPG_PRIORITY) {
+                "Invalid provider EPG priority in backup."
+            }
+            require(source.playlistEpgPriorities.size <= MAX_FEEDS) {
+                "Backup contains too many playlist EPG priorities."
+            }
+            source.playlistEpgPriorities.forEach { (url, priority) ->
+                require(url.length <= MAX_URL_LENGTH && priority in 0..MAX_EPG_PRIORITY) {
+                    "Invalid playlist EPG priority in backup."
+                }
+                HttpsUrlPolicy.requireHttps(url)
+            }
             source.epgUrl?.let(HttpsUrlPolicy::requireHttps)
         }
         backup.epgFeeds.forEach { feed ->
             require(feed.name.length <= 200 && feed.url.length <= MAX_URL_LENGTH) {
                 "Invalid EPG feed in backup."
+            }
+            require(feed.priority == null || feed.priority in 0..MAX_EPG_PRIORITY) {
+                "Invalid EPG feed priority in backup."
             }
             HttpsUrlPolicy.requireHttps(feed.url)
         }
@@ -310,6 +344,7 @@ class BackupTransfer(
     private companion object {
         const val MAX_SOURCES = 100
         const val MAX_FEEDS = 500
+        const val MAX_EPG_PRIORITY = 1_000_000
         const val MAX_URL_LENGTH = 8_192
         const val MAX_CREDENTIAL_LENGTH = 4_096
         const val MAX_MAC_LENGTH = 64

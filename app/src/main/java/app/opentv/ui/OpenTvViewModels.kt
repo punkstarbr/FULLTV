@@ -837,6 +837,10 @@ class EpgViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun moveFeed(feedId: Long, direction: Int) {
+        viewModelScope.launch { graph.epgRepository.moveFeed(feedId, direction) }
+    }
+
     fun addCustom(name: String, url: String) {
         viewModelScope.launch {
             try {
@@ -852,7 +856,10 @@ class EpgViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun remove(feed: EpgFeed) {
-        viewModelScope.launch { graph.epgRepository.removeFeed(feed) }
+        viewModelScope.launch {
+            graph.epgRepository.removeFeed(feed)
+            graph.epgRepository.runMatcher()
+        }
     }
 
     fun disableDiscoveredFeedsAndClearData() {

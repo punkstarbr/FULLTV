@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.FastForward
 import androidx.compose.material.icons.filled.FastRewind
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.HighQuality
+import androidx.compose.material.icons.filled.List
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PictureInPictureAlt
 import androidx.compose.material.icons.filled.PlayArrow
@@ -925,6 +926,19 @@ fun PlayerScreen(
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
+                    if (queue.isNotEmpty()) {
+                        BarChip(
+                            icon = Icons.Filled.List,
+                            label = stringResource(R.string.common_channels),
+                            selected = channelListVisible,
+                            accentColor = controlAccent,
+                            onAccentColor = controlOnAccent,
+                        ) {
+                            panel = Panel.NONE
+                            channelListVisible = true
+                            reveal()
+                        }
+                    }
                     if (controller.isSeekable) {
                         BarChip(
                             icon = Icons.Filled.FastRewind,
@@ -1048,10 +1062,9 @@ fun PlayerScreen(
             }
         }
 
-        // Left-side transparent channel list — d-pad Left opens it, pick a channel to switch.
+        // Shared channel picker, opened by the touch control or by d-pad Left.
         AnimatedVisibility(
-            visible = channelListVisible && !inPip &&
-                interfaceStyle != app.opentv.core.AppSettings.InterfaceStyle.PLAYER_ZAPPING,
+            visible = channelListVisible && !inPip,
             enter = fadeIn(),
             exit = fadeOut(),
             modifier = Modifier.align(Alignment.CenterStart),

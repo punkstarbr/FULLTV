@@ -80,14 +80,15 @@ mid-sync, or the XML is truncated, the user is left with an empty guide — and 
 anyone can give is "reinstall the app", which appears to help because it restarts the sync from
 scratch. It fixes nothing. The next refresh fails the same way.
 
-`EpgRepository` never deletes before it has the replacement:
+`EpgRepository` never deletes a feed's snapshot before it has a complete replacement:
 
-1. Programmes are **upserted in batches of 500** as they stream out of the parser. The unique
-   index on `(sourceId, epgChannelId, startUtcMillis)` makes this idempotent, so a sync that
-   dies at 60% leaves 60% of a *fresher* guide — strictly better than what was there.
-2. Pruning happens **by age** (`deleteEndedBefore`), never by source, and only **after** a sync
-   reports success.
-3. A failed sync leaves the previous guide completely intact and returns the reason.
+1. Programmes and channel aliases are **staged under a private negative feed id** in batches of
+   500. The public guide queries ignore staging rows.
+2. Only after the complete download and parse succeeds does one Room transaction delete that
+   feed's old rows and move the staged snapshot into place. Other feeds keep their snapshots.
+3. A failed or cancelled sync discards only staging rows; the previous snapshot for that feed
+   remains authoritative. Pruning is by the configured time window and occurs after successful
+   feed synchronization.
 
 The future cutoff is user-configurable from 2 to 14 days (2 days by default). The same setting is
 used while parsing and pruning, so series rules can reserve matching airings as far ahead as the
@@ -132,6 +133,29 @@ bounded budget of 128 HTTPS origins, so a large media catalogue cannot consume t
 Explicit GitHub `/raw` and `/blob` guide URLs are canonicalized to `raw.githubusercontent.com`;
 the first M3U guide is fetched as a guide URL rather than through the Xtream same-origin API path,
 and arbitrary cross-origin redirects are still blocked.
+
+### EPG feed priority and duplicate programme resolution
+
+Every feed has a persisted integer priority; lower numbers appear first in Settings and win
+conflicts. The v12→v13 Room migration initializes existing feeds in their stable ID order, so
+upgrading does not delete guide data. Up/down controls reorder the rows in one transaction and do
+not trigger downloads. The encrypted backup carries these priorities for provider, playlist-owned
+and global feeds.
+
+Timetable, search, now/upcoming and channel-matching queries consider only enabled feeds; internal
+staging and per-feed maintenance reads remain scoped to their feed. For an exact `(epgChannelId,
+startUtcMillis)` collision, the active feed with the smallest priority wins; the feed ID breaks
+priority ties deterministically. Lower-priority sources still fill times absent from higher-ranked
+guides. Rows remain stored per feed, so changing order is reversible and never rewrites snapshots.
+The app does not combine conflicting titles or times, nor does it merge different XMLTV IDs just
+because their names resemble one another; `EpgMatcher` continues to reject ambiguous name matches.
+
+Catalogue/M3U, VOD, episode-detail and EPG synchronization share a process-wide `SyncOperationGate`.
+Concurrent WorkManager, startup and user-triggered jobs wait their turn instead of parsing a large
+playlist while XMLTV is being staged or written to Room. This trades some refresh latency for lower
+peak CPU, memory, network and database contention. The M3U parser retains its existing input bounds:
+64 MiB per playlist, 100,000 channels and 16 KiB per line. The gate reduces overlapping work; it is
+not a guarantee against every device-specific memory failure.
 
 **Times are stored as UTC epoch millis, always.** `XmltvParser.parseXmltvTime` normalises the
 `+0100`-style offsets that XMLTV uses, treats a missing offset as UTC rather than guessing the

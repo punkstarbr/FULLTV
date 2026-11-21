@@ -14,13 +14,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.focusGroup
 import androidx.compose.material3.Button
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -38,6 +38,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import app.opentv.R
@@ -57,9 +59,9 @@ import androidx.compose.ui.ExperimentalComposeUiApi
  *
  * Three kinds of feed share the list — the provider's own guide, the curated free sources
  * shipped with the app (off by default; enabling one is one click), and any XMLTV URL the
- * user adds. Every enabled feed merges into a single guide, and each row shows its last
- * sync outcome, because "the guide silently didn't update" is the failure this whole app
- * exists to avoid.
+ * user adds. Snapshots stay separate; enabled feeds are resolved by their explicit priority
+ * when they repeat a programme. Each row shows its last sync outcome, because "the guide silently
+ * didn't update" is the failure this whole app exists to avoid.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -120,6 +122,13 @@ fun EpgSettingsScreen(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.widthIn(max = 720.dp),
         )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            stringResource(R.string.epg_priority_desc),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.widthIn(max = 720.dp),
+        )
         Spacer(Modifier.height(16.dp))
 
         LazyColumn(
@@ -168,11 +177,16 @@ fun EpgSettingsScreen(
                 }
             }
 
-            items(ui.feeds, key = { it.id }) { feed ->
+            itemsIndexed(ui.feeds, key = { _, feed -> feed.id }) { index, feed ->
                 FeedRow(
                     feed = feed,
+                    priorityPosition = index + 1,
+                    canMoveUp = index > 0,
+                    canMoveDown = index < ui.feeds.lastIndex,
                     onToggle = { enabled -> viewModel.setEnabled(feed, enabled) },
                     onRemove = { viewModel.remove(feed) },
+                    onMoveUp = { viewModel.moveFeed(feed.id, -1) },
+                    onMoveDown = { viewModel.moveFeed(feed.id, 1) },
                 )
             }
 
@@ -245,37 +259,62 @@ fun EpgSettingsScreen(
 @Composable
 private fun FeedRow(
     feed: EpgFeed,
+    priorityPosition: Int,
+    canMoveUp: Boolean,
+    canMoveDown: Boolean,
     onToggle: (Boolean) -> Unit,
     onRemove: () -> Unit,
+    onMoveUp: () -> Unit,
+    onMoveDown: () -> Unit,
 ) {
     FullTvCard(containerColor = MaterialTheme.colorScheme.surfaceVariant) {
-        Row(
+        Column(
             Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Column(Modifier.weight(1f)) {
-                Text(feed.name, style = MaterialTheme.typography.titleMedium)
-                // The last sync outcome, verbatim — success counts or the actual error.
-                // A guide that fails must say so where the user can see it.
-                if (feed.lastResult.isNotEmpty()) {
-                    Text(
-                        if (feed.lastResult == EpgRepository.HTTPS_REQUIRED_RESULT) {
-                            stringResource(R.string.epg_https_required)
-                        } else feed.lastResult,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text(feed.name, style = MaterialTheme.typography.titleMedium)
+                    // The last sync outcome, verbatim — success counts or the actual error.
+                    // A guide that fails must say so where the user can see it.
+                    if (feed.lastResult.isNotEmpty()) {
+                        Text(
+                            if (feed.lastResult == EpgRepository.HTTPS_REQUIRED_RESULT) {
+                                stringResource(R.string.epg_https_required)
+                            } else feed.lastResult,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                Switch(checked = feed.enabled, onCheckedChange = onToggle)
+            }
+            Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    stringResource(R.string.epg_priority_position, priorityPosition),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f),
+                )
+                val moveUpLabel = stringResource(R.string.epg_move_higher)
+                val moveDownLabel = stringResource(R.string.epg_move_lower)
+                IconButton(
+                    onClick = onMoveUp,
+                    enabled = canMoveUp,
+                    modifier = Modifier.semantics { contentDescription = moveUpLabel },
+                ) { Text("▲") }
+                IconButton(
+                    onClick = onMoveDown,
+                    enabled = canMoveDown,
+                    modifier = Modifier.semantics { contentDescription = moveDownLabel },
+                ) { Text("▼") }
+                // User-added feeds can be removed; provider and built-in ones only toggled.
+                if (!feed.builtIn && feed.providerSourceId == null) {
+                    TextButton(onClick = onRemove) { Text(stringResource(R.string.common_remove)) }
                 }
             }
-
-            // User-added feeds can be removed; provider and built-in ones only toggled.
-            if (!feed.builtIn && feed.providerSourceId == null) {
-                TextButton(onClick = onRemove) { Text(stringResource(R.string.common_remove)) }
-                Spacer(Modifier.width(4.dp))
-            }
-            Switch(checked = feed.enabled, onCheckedChange = onToggle)
         }
     }
 }

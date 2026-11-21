@@ -440,6 +440,10 @@
     <string name="epg_add_guide">Add guide</string>
     <string name="epg_add_failed">Could not add this guide.</string>
     <string name="epg_multiple_guides_note">Guide URLs are detected anywhere in an M3U. Every unique guide found is added and enabled automatically. Playlists with many regions can use substantial network and storage; pause feeds you do not need in Settings. Plain HTTP guide URLs are blocked for privacy; use HTTPS where available.</string>
+    <string name="epg_priority_desc">Move guides to set precedence. Among enabled feeds, the first guide wins when the same XMLTV channel ID and start time appear more than once; lower-priority guides still fill programmes the higher-priority guide does not contain.</string>
+    <string name="epg_priority_position">Priority %1$d</string>
+    <string name="epg_move_higher">Raise guide priority</string>
+    <string name="epg_move_lower">Lower guide priority</string>
     <string name="epg_https_required">This guide does not use HTTPS, which FullTV requires. Change it to an HTTPS URL; the previous guide stays available until a successful update.</string>
     <string name="epg_pause_extra_guides">Pause extra playlist guides</string>
     <string name="epg_pause_extra_confirm_title">Pause and clear extra M3U guides?</string>

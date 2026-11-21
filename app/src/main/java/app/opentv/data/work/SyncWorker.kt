@@ -17,9 +17,11 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import app.opentv.core.SafeNetworkDiagnostics
 import app.opentv.core.ServiceLocator
 import app.opentv.core.VodRefreshPolicy
 import app.opentv.data.repo.CatalogRepository
+import kotlinx.coroutines.CancellationException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -35,11 +37,31 @@ class SyncWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
 
-    override suspend fun doWork(): Result {
+    override suspend fun doWork(): Result = try {
+        executeWork()
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (failure: Exception) {
+        SafeNetworkDiagnostics.error(TAG, "sync-worker", failure)
+        if (SafeNetworkDiagnostics.isRetryableNetworkFailure(failure)) {
+            Log.w(TAG, "event=sync_worker_result action=retry reason=transient_io")
+            Result.retry()
+        } else {
+            Log.e(TAG, "event=sync_worker_result action=failure reason=non_retryable")
+            Result.failure()
+        }
+    }
+
+    private suspend fun executeWork(): Result {
+        val startupEpgOnly = inputData.getBoolean(KEY_STARTUP_EPG_ONLY, false)
+        Log.i(
+            TAG,
+            "event=sync_worker_start mode=${if (startupEpgOnly) "startup_epg_only" else "catalogue_and_guide"}",
+        )
         val graph = ServiceLocator.get(applicationContext)
         val now = System.currentTimeMillis()
         val force = inputData.getBoolean(KEY_FORCE, false)
-        if (inputData.getBoolean(KEY_STARTUP_EPG_ONLY, false)) {
+        if (startupEpgOnly) {
             if (!graph.settings.catalogAutoRefresh.value) return Result.success()
             val intervalMillis = TimeUnit.HOURS.toMillis(
                 graph.settings.catalogRefreshIntervalHours.value.toLong(),
@@ -54,13 +76,30 @@ class SyncWorker(
                 "Startup guide: ${summary.programmesWritten} programmes from " +
                     "${summary.feedsSucceeded} feed(s), ${summary.channelsMatched}/${summary.channelsTotal} channels matched",
             )
-            runCatching { graph.recordingEngine.rescanSeriesRules() }
-            return if (summary.feedsFailed > 0) Result.retry() else Result.success()
+            try {
+                graph.recordingEngine.rescanSeriesRules()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                SafeNetworkDiagnostics.error(TAG, "startup-series-rescan", failure)
+            }
+            return when {
+                summary.retryableFailures > 0 -> {
+                    Log.w(TAG, "event=sync_worker_result action=retry reason=transient_epg_io")
+                    Result.retry()
+                }
+                summary.feedsFailed > 0 -> {
+                    Log.w(TAG, "event=sync_worker_result action=failure reason=non_retryable_epg")
+                    Result.failure()
+                }
+                else -> Result.success()
+            }
         }
         val sources = graph.sourceRepository.enabled()
         if (sources.isEmpty()) return Result.success()
 
         var anyFailed = false
+        var anyRetryableFailure = false
         // A periodic worker must never download a potentially huge VOD catalogue just because
         // the device is online. Manual refresh can fetch it when stale; opening Movies/Shows
         // also performs the same TTL check on demand.
@@ -77,7 +116,13 @@ class SyncWorker(
                 is CatalogRepository.SyncResult.Success ->
                     Log.i(TAG, "Catalogue for source ${source.id}: ${result.channelCount} channels")
                 is CatalogRepository.SyncResult.Failed -> {
-                    anyFailed = true
+                    if (result.retryable ||
+                        result.cause?.let(SafeNetworkDiagnostics::isRetryableNetworkFailure) == true
+                    ) {
+                        anyRetryableFailure = true
+                    } else {
+                        anyFailed = true
+                    }
                     Log.w(TAG, "Catalogue sync failed for source ${source.id}")
                 }
             }
@@ -94,6 +139,7 @@ class SyncWorker(
         // free sources and user URLs merge into a single guide, then the matcher runs.
         val summary = graph.epgRepository.syncAll(now, force = force)
         if (summary.feedsFailed > 0) anyFailed = true
+        if (summary.retryableFailures > 0) anyRetryableFailure = true
         Log.i(
             TAG,
             "Guide: ${summary.programmesWritten} programmes from ${summary.feedsSucceeded} " +
@@ -101,10 +147,26 @@ class SyncWorker(
         )
 
         // Book any newly-revealed series-link airings from this fresh guide.
-        runCatching { graph.recordingEngine.rescanSeriesRules() }
+        try {
+            graph.recordingEngine.rescanSeriesRules()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            SafeNetworkDiagnostics.error(TAG, "series-rescan", failure)
+        }
 
         // A partial failure is still a retry — but the user keeps everything already on disk.
-        return if (anyFailed) Result.retry() else Result.success()
+        return when {
+            anyRetryableFailure -> {
+                Log.w(TAG, "event=sync_worker_result action=retry reason=transient_io")
+                Result.retry()
+            }
+            anyFailed -> {
+                Log.w(TAG, "event=sync_worker_result action=failure reason=non_retryable_sync")
+                Result.failure()
+            }
+            else -> Result.success()
+        }
     }
 
     companion object {

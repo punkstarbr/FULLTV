@@ -6,9 +6,11 @@
 package app.opentv.data.repo
 
 import android.os.StatFs
+import android.os.SystemClock
 import android.util.Log
 import androidx.room.withTransaction
 import app.opentv.core.AppSettings
+import app.opentv.core.SafeNetworkDiagnostics
 import app.opentv.data.db.OpenTvDatabase
 import app.opentv.data.db.ChannelDao
 import app.opentv.data.db.EpgChannelAliasDao
@@ -56,9 +58,10 @@ private const val M3U_FILTER_STATUS_SUFFIX = " (M3U channels only)"
  *
  * Guide data can come from three places at once — the provider's own XMLTV (usually thin or
  * empty), the curated free sources shipped with the app, and URLs the user adds. Each is an
- * [EpgFeed] row; every enabled feed is downloaded and merged into one guide. After a sync,
- * [EpgMatcher] joins provider channels to guide channels by normalised name, which is what
- * makes a free national guide light up channels named `UK| BBC ONE FHD`.
+     * [EpgFeed] row; every enabled feed keeps its own snapshot. Read queries resolve duplicate
+     * channel/start pairs by explicit feed priority, while lower-priority feeds fill schedule gaps.
+     * [EpgMatcher] joins provider channels to guide channels by normalised name, which is what
+     * makes a free national guide light up channels named `UK| BBC ONE FHD`.
  *
  * ## The failure this class exists to prevent
  *
@@ -108,6 +111,7 @@ class EpgRepository(
         val programmesWritten: Int,
         val channelsMatched: Int,
         val channelsTotal: Int,
+        val retryableFailures: Int = 0,
     )
 
     // ---- Reads -----------------------------------------------------------------------------
@@ -151,7 +155,7 @@ class EpgRepository(
         val trimmed = HttpsUrlPolicy.withDefaultHttps(url)
         if (trimmed.isEmpty() || feedDao.byGlobalUrl(trimmed) != null) return
         HttpsUrlPolicy.requireHttps(trimmed)
-        feedDao.insert(
+        insertFeedAtEnd(
             EpgFeed(name = name.trim().ifBlank { trimmed }, url = trimmed, enabled = true),
         )
     }
@@ -193,7 +197,7 @@ class EpgRepository(
             }
             // A URL shared by M3Us gets a separate feed row for each source. A manual/built-in
             // global feed with the same URL also remains untouched; both scopes may download it.
-            feedDao.insert(
+            insertFeedAtEnd(
                 EpgFeed(
                     name = feedName(source, url),
                     url = url,
@@ -215,7 +219,25 @@ class EpgRepository(
         return if (host.isBlank()) source.name else "${source.name} — $host"
     }
 
-    suspend fun setFeedEnabled(id: Long, enabled: Boolean) = feedDao.setEnabled(id, enabled)
+    suspend fun setFeedEnabled(id: Long, enabled: Boolean) {
+        feedDao.setEnabled(id, enabled)
+        if (!enabled) runMatcher()
+    }
+
+    /** Moves a feed in the shared precedence list without downloading or replacing any snapshot. */
+    suspend fun moveFeed(id: Long, direction: Int) {
+        require(direction == -1 || direction == 1) { "Direction must be -1 or 1." }
+        database.withTransaction {
+            EpgFeedPriority.reorderedPriorities(feedDao.all(), id, direction)
+                .forEach { (feedId, priority) -> feedDao.setPriority(feedId, priority) }
+        }
+    }
+
+    private suspend fun insertFeedAtEnd(feed: EpgFeed) {
+        database.withTransaction {
+            feedDao.insert(feed.copy(priority = feedDao.nextPriority()))
+        }
+    }
 
     /** Explicit bulk action: pause playlist-discovered feeds and remove their stored guide rows. */
     suspend fun disableDiscoveredFeedsAndClearData(): Int {
@@ -225,6 +247,7 @@ class EpgRepository(
             programmeDao.deleteForFeed(feed.id)
             aliasDao.deleteForFeed(feed.id)
         }
+        runMatcher()
         return discovered.size
     }
 
@@ -243,7 +266,7 @@ class EpgRepository(
     suspend fun ensureFeeds() {
         for (source in sourceDao.enabled()) {
             if (feedDao.forProvider(source.id) == null) {
-                feedDao.insert(
+                insertFeedAtEnd(
                     EpgFeed(
                         name = "${source.name} (provider guide)",
                         providerSourceId = source.id,
@@ -257,21 +280,26 @@ class EpgRepository(
                 // Off by default: shipping a switched-on 20 MB download for a country the
                 // user may not live in would be rude. The EPG settings screen makes
                 // enabling one a single click.
-                feedDao.insert(EpgFeed(name = name, url = url, builtIn = true, enabled = false))
+                insertFeedAtEnd(EpgFeed(name = name, url = url, builtIn = true, enabled = false))
             }
         }
     }
 
     // ---- Sync ------------------------------------------------------------------------------
 
-    /** Downloads every enabled feed, merges, prunes, and re-runs the matcher. */
+    /** Syncs enabled feed snapshots in priority order, prunes the retained window, and rematches. */
     suspend fun syncAll(
         nowUtcMillis: Long,
         force: Boolean = false,
         refreshIfSnapshotEmpty: Boolean = false,
         minimumFeedRefreshIntervalMillis: Long = REFRESH_INTERVAL_MILLIS,
-    ): SyncSummary =
-        withContext(Dispatchers.IO) {
+    ): SyncSummary {
+        val queuedAt = SystemClock.elapsedRealtime()
+        Log.i(TAG, "event=epg_sync_queued force=$force")
+        return SyncOperationGate.withLock {
+          val startedAt = SystemClock.elapsedRealtime()
+          Log.i(TAG, "event=epg_sync_start gate_wait_ms=${startedAt - queuedAt}")
+          withContext(Dispatchers.IO) {
           syncMutex.withLock {
             cleanupAbandonedFilteredXmltvFiles()
             // A process death can leave private staging rows behind. They are never displayed;
@@ -291,6 +319,7 @@ class EpgRepository(
 
             var succeeded = 0
             var failed = 0
+            var retryableFailed = 0
             var written = 0
 
             for (feed in feedDao.enabled()) {
@@ -318,6 +347,7 @@ class EpgRepository(
                     }
                     is FeedResult.Failed -> {
                         failed++
+                        if (result.retryable) retryableFailed++
                         // The stamp is NOT advanced on failure, so the next sync retries
                         // rather than waiting out the interval on a feed that never landed.
                         feedDao.markSynced(feed.id, feed.lastSyncMillis, result.reason)
@@ -335,9 +365,19 @@ class EpgRepository(
             }
 
             val (matched, total) = runMatcher()
-            SyncSummary(succeeded, failed, written, matched, total)
+            val summary = SyncSummary(succeeded, failed, written, matched, total, retryableFailed)
+            Log.i(
+                TAG,
+                    "event=epg_sync_complete feeds_succeeded=${summary.feedsSucceeded} " +
+                    "feeds_failed=${summary.feedsFailed} retryable_failures=${summary.retryableFailures} " +
+                    "programmes=${summary.programmesWritten} " +
+                    "duration_ms=${SystemClock.elapsedRealtime() - startedAt}",
+            )
+            summary
           }
         }
+        }
+    }
 
     private sealed interface FeedResult {
         data class Success(
@@ -345,7 +385,7 @@ class EpgRepository(
             val channels: Int,
             val playlistScoped: Boolean,
         ) : FeedResult
-        data class Failed(val reason: String) : FeedResult
+        data class Failed(val reason: String, val retryable: Boolean = false) : FeedResult
     }
 
     private suspend fun syncFeed(
@@ -495,9 +535,11 @@ class EpgRepository(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            SafeNetworkDiagnostics.error(TAG, "epg-feed-sync", e)
             return FeedResult.Failed(
                 if (e is app.opentv.data.remote.HttpsRequiredException) HTTPS_REQUIRED_RESULT
                 else "Guide download or parsing failed; the previous guide was kept.",
+                SafeNetworkDiagnostics.isRetryableNetworkFailure(e),
             )
         } finally {
             temporaryXmltvFile?.delete()
@@ -733,7 +775,7 @@ class EpgRepository(
      * Returns (channels with a working guide id, total channels).
      */
     suspend fun runMatcher(): Pair<Int, Int> {
-        val aliases = aliasDao.all()
+        val aliases = aliasDao.allEnabled()
         val index = EpgMatcher.buildIndex(aliases.map { it.epgId to it.displayName })
         // Only ids that actually have programmes count as "working" — a match against a
         // channel the guide lists but never fills is a guide that looks broken.

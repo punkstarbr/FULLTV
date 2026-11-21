@@ -77,12 +77,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.viewmodel.compose.viewModel
 import android.content.Intent
+import android.content.res.Configuration
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.compose.ui.window.Dialog
@@ -153,11 +155,17 @@ fun HomeScreen(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val configuration = LocalConfiguration.current
+    // On short phone landscape windows, the 224–300 dp preview card can consume the entire
+    // guide viewport. Keep the channel grid/list as the primary content; TV layouts are unchanged.
+    val compactLandscape = !isTelevision &&
+        configuration.orientation == Configuration.ORIENTATION_LANDSCAPE &&
+        configuration.screenHeightDp <= 480
     val notificationPermissionGate = rememberNotificationPermissionGate()
     val graph = remember { ServiceLocator.get(context) }
     val settings = remember { graph.settings }
     val previewEnabled by settings.guidePreviewVideo.collectAsState()
-    val previewEnabledForLayout = previewEnabled && interfaceStyle !in setOf(
+    val previewEnabledForLayout = previewEnabled && !compactLandscape && interfaceStyle !in setOf(
         AppSettings.InterfaceStyle.CLASSIC_EPG,
         AppSettings.InterfaceStyle.EPG_FULLSCREEN,
     )
@@ -277,10 +285,10 @@ fun HomeScreen(
         )
     }
 
-    // ---- Category rail collapse (Change 2) ---------------------------------------------------
-    // The rail is full-width while focus is on it, then slides shut once focus moves into the
-    // guide (onFocusRow) so the grid gets the whole width. Pressing d-pad LEFT from the guide's
-    // leftmost (channel) column slides it back and drops focus on the selected category.
+    // ---- Category rail focus and optional collapse ------------------------------------------
+    // Keep the group rail visible on TV so users can move back to it and switch categories
+    // without first reopening a hidden panel. EPG_FULLSCREEN still starts collapsed; LEFT from
+    // the guide's leftmost channel element reveals it and restores focus to the selected group.
     var railExpanded by remember(interfaceStyle) {
         mutableStateOf(interfaceStyle != AppSettings.InterfaceStyle.EPG_FULLSCREEN)
     }
@@ -491,7 +499,7 @@ fun HomeScreen(
                         SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(Date(windowStart))
                     }
                 }
-                if (interfaceStyle !in setOf(
+                if (!compactLandscape && interfaceStyle !in setOf(
                         AppSettings.InterfaceStyle.CLASSIC_EPG,
                         AppSettings.InterfaceStyle.EPG_FULLSCREEN,
                     )
@@ -514,13 +522,12 @@ fun HomeScreen(
                         interfaceStyle = interfaceStyle,
                     )
                 }
-                // Shared by both layouts: focus follows the highlight and collapses the rail; LEFT
-                // from the leftmost element reopens the rail (consumed only when it was hidden).
+                // Focus follows the highlighted channel. On TV the rail stays visible; LEFT from
+                // the leftmost channel element opens it only for the EPG_FULLSCREEN preset.
                 val onFocusChannel: (ChannelsViewModel.Row) -> Unit = {
                     highlightedRow = it
                     previewArmed = true
                     pendingRailFocus = false
-                    if (isTelevision) railExpanded = false
                 }
                 val onExitLeftChannel: () -> Boolean = {
                     if (isTelevision && !railExpanded) {
@@ -564,7 +571,7 @@ fun HomeScreen(
                         modifier = Modifier.weight(1f).padding(start = 12.dp, end = 12.dp),
                     )
                 }
-                if (interfaceStyle == AppSettings.InterfaceStyle.CLASSIC_EPG) {
+                if (!compactLandscape && interfaceStyle == AppSettings.InterfaceStyle.CLASSIC_EPG) {
                     GuidePreview(
                         row = highlightedRow,
                         nowMillis = nowMillis,

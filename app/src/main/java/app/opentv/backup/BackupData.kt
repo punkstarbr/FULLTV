@@ -36,6 +36,10 @@ data class BackupSource(
     val userAgent: String,
     val liveFormat: String,
     val enabled: Boolean,
+    /** Precedence of this source's provider guide, if one exists. */
+    val providerEpgPriority: Int? = null,
+    /** Playlist-discovered guide URL to priority; both are inside the encrypted backup. */
+    val playlistEpgPriorities: Map<String, Int> = emptyMap(),
 )
 
 /** Non-provider feeds are identified by URL; local Room ids and sync stamps are deliberately absent. */
@@ -45,6 +49,8 @@ data class BackupEpgFeed(
     val url: String,
     val enabled: Boolean,
     val builtIn: Boolean,
+    /** Null in backups created before EPG ordering was introduced. */
+    val priority: Int? = null,
 )
 
 /** Portable app choices. SAF tree grants, device ids, local paths and the last channel are excluded. */

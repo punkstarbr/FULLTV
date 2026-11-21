@@ -421,6 +421,10 @@
     <string name="epg_add_guide">Adicionar guia</string>
     <string name="epg_add_failed">Não foi possível adicionar este guia.</string>
     <string name="epg_multiple_guides_note">As URLs dos guias são detectadas em qualquer linha da M3U. Todos os guias exclusivos encontrados são adicionados e ativados automaticamente. Listas com muitas regiões podem consumir bastante rede e armazenamento; pause os guias que não usa em Configurações. URLs HTTP sem criptografia são bloqueadas por segurança; prefira HTTPS.</string>
+    <string name="epg_priority_desc">Reordene os guias para definir a prioridade. Entre os guias ativos, o primeiro prevalece quando mais de um informa o mesmo ID de canal XMLTV e horário de início. Os guias seguintes ainda preenchem programas que os anteriores não têm.</string>
+    <string name="epg_priority_position">Prioridade %1$d</string>
+    <string name="epg_move_higher">Aumentar prioridade do guia</string>
+    <string name="epg_move_lower">Diminuir prioridade do guia</string>
     <string name="epg_https_required">Este guia não usa HTTPS, exigido pelo FullTV. Troque para uma URL HTTPS; os dados atuais são mantidos até uma atualização válida.</string>
     <string name="sync_backup_scope_note">O backup inclui configurações e metadados de reprodução, não os arquivos de vídeo. Gravações locais/USB precisam ser copiadas separadamente; as gravações no NAS continuam no próprio NAS. Escolha novamente a pasta USB depois de restaurar.</string>
     <string name="epg_pause_extra_guides">Pausar guias extras das listas</string>

@@ -352,14 +352,20 @@ data class CategoryChannelCount(val sourceId: Long, val categoryId: String, val 
 
 @Dao
 interface EpgFeedDao {
-    @Query("SELECT * FROM epg_feeds ORDER BY builtIn DESC, id")
+    @Query("SELECT * FROM epg_feeds ORDER BY priority, id")
     fun observeAll(): Flow<List<EpgFeed>>
 
-    @Query("SELECT * FROM epg_feeds")
+    @Query("SELECT * FROM epg_feeds ORDER BY priority, id")
     suspend fun all(): List<EpgFeed>
 
-    @Query("SELECT * FROM epg_feeds WHERE enabled = 1")
+    @Query("SELECT * FROM epg_feeds WHERE enabled = 1 ORDER BY priority, id")
     suspend fun enabled(): List<EpgFeed>
+
+    @Query("SELECT COALESCE(MAX(priority), -1) + 1 FROM epg_feeds")
+    suspend fun nextPriority(): Int
+
+    @Query("UPDATE epg_feeds SET priority = :priority WHERE id = :id")
+    suspend fun setPriority(id: Long, priority: Int)
 
     @Query("SELECT * FROM epg_feeds WHERE providerSourceId = :sourceId")
     suspend fun forProvider(sourceId: Long): EpgFeed?
@@ -394,6 +400,13 @@ interface EpgChannelAliasDao {
     @Query("SELECT * FROM epg_channels WHERE feedId > 0")
     suspend fun all(): List<EpgChannelAlias>
 
+    @Query(
+        "SELECT aliases.* FROM epg_channels AS aliases " +
+            "INNER JOIN epg_feeds AS feeds ON feeds.id = aliases.feedId " +
+            "WHERE feeds.enabled = 1 ORDER BY feeds.priority, feeds.id, aliases.epgId",
+    )
+    suspend fun allEnabled(): List<EpgChannelAlias>
+
     @Query("SELECT COUNT(*) FROM epg_channels WHERE feedId > 0")
     suspend fun count(): Int
 
@@ -425,11 +438,21 @@ interface ProgrammeDao {
      */
     @Query(
         """
-        SELECT * FROM programmes
-        WHERE feedId > 0
-          AND endUtcMillis > :fromUtcMillis
-          AND startUtcMillis < :toUtcMillis
-        ORDER BY epgChannelId, startUtcMillis
+        SELECT p.* FROM programmes AS p
+        INNER JOIN epg_feeds AS f ON f.id = p.feedId AND f.enabled = 1
+        WHERE p.feedId > 0
+          AND p.endUtcMillis > :fromUtcMillis
+          AND p.startUtcMillis < :toUtcMillis
+          AND NOT EXISTS (
+              SELECT 1 FROM programmes AS preferred
+              INNER JOIN epg_feeds AS preferredFeed ON preferredFeed.id = preferred.feedId
+              WHERE preferredFeed.enabled = 1
+                AND preferred.epgChannelId = p.epgChannelId
+                AND preferred.startUtcMillis = p.startUtcMillis
+                AND (preferredFeed.priority < f.priority
+                     OR (preferredFeed.priority = f.priority AND preferred.feedId < p.feedId))
+          )
+        ORDER BY p.epgChannelId, p.startUtcMillis
         """
     )
     fun observeWindow(fromUtcMillis: Long, toUtcMillis: Long): Flow<List<Programme>>
@@ -440,16 +463,26 @@ interface ProgrammeDao {
      */
     @Query(
         """
-        SELECT * FROM programmes
-        WHERE feedId > 0
-          AND endUtcMillis > :fromUtcMillis
-          AND startUtcMillis < :toUtcMillis
+        SELECT p.* FROM programmes AS p
+        INNER JOIN epg_feeds AS f ON f.id = p.feedId AND f.enabled = 1
+        WHERE p.feedId > 0
+          AND p.endUtcMillis > :fromUtcMillis
+          AND p.startUtcMillis < :toUtcMillis
           AND (
-              title LIKE '%' || :query || '%'
-              OR description LIKE '%' || :query || '%'
-              OR category LIKE '%' || :query || '%'
+              p.title LIKE '%' || :query || '%'
+              OR p.description LIKE '%' || :query || '%'
+              OR p.category LIKE '%' || :query || '%'
           )
-        ORDER BY startUtcMillis, title, epgChannelId, id
+          AND NOT EXISTS (
+              SELECT 1 FROM programmes AS preferred
+              INNER JOIN epg_feeds AS preferredFeed ON preferredFeed.id = preferred.feedId
+              WHERE preferredFeed.enabled = 1
+                AND preferred.epgChannelId = p.epgChannelId
+                AND preferred.startUtcMillis = p.startUtcMillis
+                AND (preferredFeed.priority < f.priority
+                     OR (preferredFeed.priority = f.priority AND preferred.feedId < p.feedId))
+          )
+        ORDER BY p.startUtcMillis, p.title, p.epgChannelId, p.id
         LIMIT :limit
         """
     )
@@ -463,17 +496,38 @@ interface ProgrammeDao {
     /** What is on right now, for the channel list's "now playing" line. */
     @Query(
         """
-        SELECT * FROM programmes
-        WHERE feedId > 0 AND startUtcMillis <= :nowUtcMillis AND endUtcMillis > :nowUtcMillis
+        SELECT p.* FROM programmes AS p
+        INNER JOIN epg_feeds AS f ON f.id = p.feedId AND f.enabled = 1
+        WHERE p.feedId > 0 AND p.startUtcMillis <= :nowUtcMillis AND p.endUtcMillis > :nowUtcMillis
+          AND NOT EXISTS (
+              SELECT 1 FROM programmes AS preferred
+              INNER JOIN epg_feeds AS preferredFeed ON preferredFeed.id = preferred.feedId
+              WHERE preferredFeed.enabled = 1
+                AND preferred.epgChannelId = p.epgChannelId
+                AND preferred.startUtcMillis = p.startUtcMillis
+                AND (preferredFeed.priority < f.priority
+                     OR (preferredFeed.priority = f.priority AND preferred.feedId < p.feedId))
+          )
+        ORDER BY p.epgChannelId
         """
     )
     fun observeNow(nowUtcMillis: Long): Flow<List<Programme>>
 
     @Query(
         """
-        SELECT * FROM programmes
-        WHERE feedId > 0 AND epgChannelId = :channelId AND endUtcMillis > :nowUtcMillis
-        ORDER BY startUtcMillis LIMIT :limit
+        SELECT p.* FROM programmes AS p
+        INNER JOIN epg_feeds AS f ON f.id = p.feedId AND f.enabled = 1
+        WHERE p.feedId > 0 AND p.epgChannelId = :channelId AND p.endUtcMillis > :nowUtcMillis
+          AND NOT EXISTS (
+              SELECT 1 FROM programmes AS preferred
+              INNER JOIN epg_feeds AS preferredFeed ON preferredFeed.id = preferred.feedId
+              WHERE preferredFeed.enabled = 1
+                AND preferred.epgChannelId = p.epgChannelId
+                AND preferred.startUtcMillis = p.startUtcMillis
+                AND (preferredFeed.priority < f.priority
+                     OR (preferredFeed.priority = f.priority AND preferred.feedId < p.feedId))
+          )
+        ORDER BY p.startUtcMillis, f.priority, p.feedId LIMIT :limit
         """
     )
     suspend fun upcoming(channelId: String, nowUtcMillis: Long, limit: Int): List<Programme>
@@ -483,16 +537,20 @@ interface ProgrammeDao {
 
     @Query(
         """
-        SELECT COUNT(*) FROM programmes
-        WHERE feedId > 0
-          AND endUtcMillis > :fromUtcMillis
-          AND startUtcMillis < :toUtcMillis
+        SELECT COUNT(*) FROM programmes AS p
+        INNER JOIN epg_feeds AS f ON f.id = p.feedId AND f.enabled = 1
+        WHERE p.feedId > 0
+          AND p.endUtcMillis > :fromUtcMillis
+          AND p.startUtcMillis < :toUtcMillis
         """
     )
     suspend fun countInWindow(fromUtcMillis: Long, toUtcMillis: Long): Int
 
     /** Distinct guide channels that actually have programmes — the match report's baseline. */
-    @Query("SELECT DISTINCT epgChannelId FROM programmes WHERE feedId > 0")
+    @Query(
+        "SELECT DISTINCT p.epgChannelId FROM programmes AS p " +
+            "INNER JOIN epg_feeds AS f ON f.id = p.feedId WHERE p.feedId > 0 AND f.enabled = 1",
+    )
     suspend fun channelIdsWithProgrammes(): List<String>
 
     @Query("SELECT DISTINCT epgChannelId FROM programmes WHERE feedId = :feedId")

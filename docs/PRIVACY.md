@@ -81,6 +81,15 @@ manages ML Kit translation models, which may not be included in FullTV's app-pri
 measurement. Small Vosk models can use roughly 300 MB of memory while loaded, so FullTV does not
 offer this mode on Android low-RAM devices or devices reporting an app memory class below 256 MB.
 
+## Diagnostic logs
+
+The v0.11.45 hotfix adds local Logcat events for startup, catalogue/EPG sync timing and playback
+failures. These structured entries omit exception messages, provider URLs, query parameters,
+credentials, tokens and request headers; they may include a stage name, exception class names and
+stack frames. FullTV does not upload these logs and adds no analytics or crash-reporting service.
+Android bug reports can contain other system/application data, so review and redact a report before
+sharing it. This logging policy does not change HTTPS-only or SSRF protections.
+
 ## Cleartext HTTP
 
 The app rejects plain HTTP (`usesCleartextTraffic="false"`) and requires provider, EPG, logo,
@@ -105,7 +114,8 @@ Automatic Android backup is disabled. If you explicitly export a `.fulltv` trans
 contents (including provider and NAS credentials) are encrypted with AES-256-GCM using a
 passphrase-derived key before they are written to the destination you choose. New exports use a
 stronger PBKDF2 work factor and authenticate the format/KDF header; legacy backups remain readable.
-FullTV does not upload that file or the passphrase.
+The backup includes EPG source order and, when applicable, the URLs of playlist-discovered guides so
+the preference can be restored on another device. FullTV does not upload that file or the passphrase.
 The passphrase cannot be recovered if lost. Video recording files and device-specific USB folder
 permissions are not included; choose the USB folder again on the receiving device.
 

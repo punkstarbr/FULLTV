@@ -9,6 +9,7 @@ import android.app.Application
 import android.content.Context
 import android.util.Log
 import app.opentv.core.LocaleUtils
+import app.opentv.core.SafeNetworkDiagnostics
 import app.opentv.core.ServiceLocator
 import app.opentv.data.repo.CatalogRepository
 import app.opentv.data.work.SyncWorker
@@ -20,13 +21,19 @@ import coil.memory.MemoryCache
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 class OpenTvApp : Application(), ImageLoaderFactory {
     private val startupErrorHandler = CoroutineExceptionHandler { _, error ->
-        Log.e(TAG, "Background startup task failed (${error.javaClass.simpleName}); continuing app startup")
+        if (error is CancellationException) return@CoroutineExceptionHandler
+        SafeNetworkDiagnostics.error(TAG, "unhandled-app-coroutine", error)
+        if (error is Error) {
+            val thread = Thread.currentThread()
+            thread.uncaughtExceptionHandler?.uncaughtException(thread, error) ?: throw error
+        }
     }
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO + startupErrorHandler)
 
@@ -66,10 +73,24 @@ class OpenTvApp : Application(), ImageLoaderFactory {
 
     override fun onCreate() {
         super.onCreate()
+        Log.i(TAG, "event=application_start")
         val processStartedAtMillis = System.currentTimeMillis()
-        val graph = ServiceLocator.get(this)
-        runCatching { SyncWorker.schedule(this) }
-            .onFailure { Log.e(TAG, "Could not schedule background refresh (${it.javaClass.simpleName})") }
+        val graph = try {
+            ServiceLocator.get(this)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            SafeNetworkDiagnostics.error(TAG, "service-locator-init", failure)
+            throw failure
+        }
+        Log.i(TAG, "event=service_graph_ready")
+        try {
+            SyncWorker.schedule(this)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            SafeNetworkDiagnostics.error(TAG, "schedule-background-refresh", failure)
+        }
         appScope.launch {
             runCatching {
                 File(filesDir, "ai-models/whisper").deleteRecursively()
@@ -176,7 +197,15 @@ class OpenTvApp : Application(), ImageLoaderFactory {
         // watch history and NAS recordings. Fire-and-forget and fully guarded: a blank or unreachable
         // NAS returns a result rather than throwing, so a bad launch never costs the user anything.
         if (graph.settings.nasAutoSync.value) {
-            appScope.launch { runCatching { app.opentv.sync.NasSync(graph).sync() } }
+            appScope.launch {
+                try {
+                    app.opentv.sync.NasSync(graph).sync()
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (failure: Exception) {
+                    SafeNetworkDiagnostics.error(TAG, "startup-nas-sync", failure)
+                }
+            }
         }
 
         appScope.launch {
