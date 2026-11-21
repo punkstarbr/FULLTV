@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.49 (APK local; não publicado) — 2026-11-21
+
+- **Navegação Fire TV/D-pad:** restaurado o recolhimento da faixa de grupos ao entrar no guia Live TV; **Esquerda** na coluna do canal reabre a faixa e solicita foco no grupo selecionado, sem depender apenas da busca espacial automática do Compose.
+- **Funções preservadas:** mudança de foco localizada em `HomeScreen.kt`; os arquivos de prioridade/mesclagem EPG não foram alterados, e as funções existentes foram mantidas.
+- **Compatibilidade:** `app.fulltv`, versionName `0.11.49`, versionCode 61, minSdk 24, targetSdk 35 e certificado legado esperado (`01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91`).
+- **Validação:** 287 testes Android, 16 testes Python das ferramentas e 10 do app passaram; `lintVitalRelease` e `assembleRelease` passaram. Os cinco APKs passaram auditoria de versão, certificado e alinhamento ZIP de 16 KiB. Não havia Fire TV/emulador para validar fisicamente o D-pad.
+- **APK universal:** 204.964.193 bytes; SHA-256 `4cf80bd5841dc3a631eee75c23b39c8eac8fcc7a8319b9e57c15425b50d61bbb`. Os demais hashes estão em `FULLTV-artifacts/v0.11.49-firetv-dpad-local/SHA256SUMS.txt`.
+- **Escopo:** em 2026-11-21, foi autorizado o commit/push do código-fonte .49 para `main`; essa autorização não inclui tag, GitHub Release nem upload dos APKs. A v0.11.48 continua sendo a release pública.
+
 ## 0.11.48 (release pública autorizada) — 2026-11-21
 
 - **Canais em paisagem no celular:** em janelas curtas (até 480 dp), oculta o painel de prévia e interrompe o stream de preview para dar espaço à grade/lista; ao voltar para retrato, a prévia retorna.

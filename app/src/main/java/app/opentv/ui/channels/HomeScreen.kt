@@ -286,9 +286,9 @@ fun HomeScreen(
     }
 
     // ---- Category rail focus and optional collapse ------------------------------------------
-    // Keep the group rail visible on TV so users can move back to it and switch categories
-    // without first reopening a hidden panel. EPG_FULLSCREEN still starts collapsed; LEFT from
-    // the guide's leftmost channel element reveals it and restores focus to the selected group.
+    // Restore the original TV flow: the rail is visible while choosing a group, then collapses
+    // when focus enters the guide. LEFT from the channel column reopens it and explicitly restores
+    // focus to the selected group instead of relying only on spatial focus search.
     var railExpanded by remember(interfaceStyle) {
         mutableStateOf(interfaceStyle != AppSettings.InterfaceStyle.EPG_FULLSCREEN)
     }
@@ -522,12 +522,14 @@ fun HomeScreen(
                         interfaceStyle = interfaceStyle,
                     )
                 }
-                // Focus follows the highlighted channel. On TV the rail stays visible; LEFT from
-                // the leftmost channel element opens it only for the EPG_FULLSCREEN preset.
+                // Focus follows the highlighted channel. On TV, collapse the rail as in the
+                // original flow; LEFT from the channel column then reopens it and restores the
+                // selected group's focus.
                 val onFocusChannel: (ChannelsViewModel.Row) -> Unit = {
                     highlightedRow = it
                     previewArmed = true
                     pendingRailFocus = false
+                    if (isTelevision) railExpanded = false
                 }
                 val onExitLeftChannel: () -> Boolean = {
                     if (isTelevision && !railExpanded) {

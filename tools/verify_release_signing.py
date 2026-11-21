@@ -2,11 +2,11 @@
 """Validate explicit release-signing inputs without silently falling back to debug signing.
 
 The compatibility exceptions are the owner-approved v0.11.25 through v0.11.37 bridge releases, the
-local test builds v0.11.38/code50, v0.11.40/code52 and v0.11.45/code57 through v0.11.47/code59, and
-the one-time owner-authorized public v0.11.39/code51 and v0.11.41/code53 through v0.11.44/code56 and
-v0.11.48/code60 releases, signed with the exact legacy certificate already used by public FullTV
-installations. They are opt-in, version-scoped, and remain a non-production signing identity. This
-script never creates or reads a private key.
+local test builds v0.11.38/code50, v0.11.40/code52, v0.11.45/code57 through v0.11.47/code59 and
+v0.11.49/code61, and the one-time owner-authorized public v0.11.39/code51 and v0.11.41/code53
+through v0.11.44/code56 and v0.11.48/code60 releases, signed with the exact legacy certificate
+already used by public FullTV installations. They are opt-in, version-scoped, and remain a
+non-production signing identity. This script never creates or reads a private key.
 """
 from __future__ import annotations
 
@@ -50,6 +50,7 @@ LEGACY_COMPAT_RELEASES = {
     ("0.11.46", 58),
     ("0.11.47", 59),
     ("0.11.48", 60),
+    ("0.11.49", 61),
 }
 LEGACY_ANDROID_DEBUG_CERT_SHA256 = "01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91"
 LEGACY_COMPAT_OPT_IN = "FULLTV_ALLOW_LEGACY_COMPAT_SIGNING"
@@ -97,8 +98,8 @@ def main() -> int:
                 "the explicitly authorized local test build v0.11.40/code52, and the one-time "
                 "authorized public releases v0.11.41/code53, v0.11.42/code54, v0.11.43/code55 "
                 "and v0.11.44/code56, plus the explicitly authorized local test builds "
-                "v0.11.45/code57, v0.11.46/code58 and v0.11.47/code59, and the one-time "
-                "explicitly authorized public v0.11.48/code60 release."
+                "v0.11.45/code57, v0.11.46/code58, v0.11.47/code59 and v0.11.49/code61, "
+                "and the one-time explicitly authorized public v0.11.48/code60 release."
             )
         print(
             f"WARNING: v{args.version} (code {args.version_code}) is using the legacy Android Debug certificate for upgrade "
@@ -115,8 +116,9 @@ def main() -> int:
             "v0.11.38/code50, the one-time authorized public v0.11.39/code51 release, the "
             "authorized local test build v0.11.40/code52, and the one-time authorized public "
             "releases v0.11.41/code53, v0.11.42/code54, v0.11.43/code55 and v0.11.44/code56, "
-            "plus the explicitly authorized local test builds v0.11.45/code57, v0.11.46/code58 "
-            "and v0.11.47/code59, and the one-time authorized public v0.11.48/code60 release, "
+            "plus the explicitly authorized local test builds v0.11.45/code57, v0.11.46/code58, "
+            "v0.11.47/code59 and v0.11.49/code61, and the one-time authorized public "
+            "v0.11.48/code60 release, "
             "with the exact legacy Android Debug "
             "certificate."
         )
