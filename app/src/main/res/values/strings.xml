@@ -22,6 +22,23 @@
     <string name="common_keep_typing">Keep typing…</string>
     <string name="common_channels">Channels</string>
     <string name="common_try_again">Try again</string>
+    <string name="player_error_no_signal">No signal — check your internet connection and try again.</string>
+    <string name="player_saved_channel_missing">The saved channel is no longer available. Opening another channel.</string>
+    <string name="player_error_server_timeout">The server is not responding. Check your connection and try again.</string>
+    <string name="player_error_not_a_stream">This address did not return a playable stream. Check the channel source.</string>
+    <string name="player_error_malformed_stream">The provider sent an invalid stream. Refresh the channel list or try another quality.</string>
+    <string name="player_error_unsupported_format">This device cannot play the stream format. Try another quality or channel.</string>
+    <string name="player_error_live_window">The live stream fell behind. Try the channel again.</string>
+    <string name="player_error_generic">The channel could not be played. Check your connection and try again.</string>
+    <string name="player_error_http_401">The provider rejected the login. Check the source username and password.</string>
+    <string name="player_error_http_403">The provider refused this stream. Another device may be using the connection, or the provider may be blocking this app.</string>
+    <string name="player_error_http_404">This channel is no longer available. Refresh the channel list.</string>
+    <string name="player_error_http_405">The provider rejected the request. Check the source type and channel link.</string>
+    <string name="player_error_http_429">The provider is receiving too many requests. Wait a moment and try again.</string>
+    <string name="player_error_http_451">This stream is not available in this region.</string>
+    <string name="player_error_http_5xx">The provider is having a server problem (%1$d). Try again in a moment.</string>
+    <string name="player_error_http_generic">The provider could not play this channel. Check the source and try again.</string>
+    <string name="player_error_policy_rejected">FullTV blocked this address for your safety. Check the channel source.</string>
     <string name="startup_refresh_title">Update channels and guide?</string>
     <string name="startup_refresh_message">FullTV can reload the saved playlists and all enabled EPGs now. Your sources, favourites, recordings and settings stay saved.</string>
     <string name="startup_refresh_now">Update now</string>
@@ -308,6 +325,8 @@
     <string name="parental_enter_pin">Enter PIN</string>
     <string name="parental_wrong_pin">Wrong PIN.</string>
     <string name="parental_unlock">Unlock</string>
+    <string name="parental_pin_backspace">Delete last digit</string>
+    <string name="parental_pin_clear">Clear PIN</string>
 
     <!-- ============================ Profiles ============================ -->
     <string name="profiles_new_heading">New profile name</string>
@@ -609,6 +628,8 @@
     <string name="channels_hidden">Hidden</string>
     <string name="channels_showing">Showing</string>
     <string name="channels_show">Show</string>
+    <string name="channels_move_up">Move channel up</string>
+    <string name="channels_move_down">Move channel down</string>
 
     <!-- ============================ Search ============================ -->
     <string name="search_type_name">Type a name</string>

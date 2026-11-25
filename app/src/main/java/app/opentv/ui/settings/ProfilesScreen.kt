@@ -5,6 +5,8 @@
  */
 package app.opentv.ui.settings
 
+import androidx.activity.compose.BackHandler
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.focusGroup
@@ -33,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -42,6 +45,7 @@ import app.opentv.ui.ProfilesViewModel
 import app.opentv.ui.FullTvCard
 import app.opentv.ui.FullTvChrome
 import app.opentv.ui.FullTvSectionHeader
+import app.opentv.ui.fullTvFocusRing
 import androidx.compose.ui.ExperimentalComposeUiApi
 import app.opentv.ui.channels.OnScreenKeyboard
 
@@ -60,6 +64,9 @@ fun ProfilesScreen(
 
     // null = list; NEW = adding; a positive id = renaming that profile.
     var editing by remember { mutableStateOf<Long?>(null) }
+    BackHandler {
+        if (editing != null) editing = null else onBack()
+    }
 
     editing?.let { target ->
         NameEntry(
@@ -87,8 +94,8 @@ fun ProfilesScreen(
         FullTvSectionHeader(
             title = stringResource(R.string.profiles_title),
             trailingContent = {
-                Button(onClick = { editing = NEW }) { Text(stringResource(R.string.profiles_add)) }
-                OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_done)) }
+                ProfileActionButton(stringResource(R.string.profiles_add), onClick = { editing = NEW })
+                ProfileActionButton(stringResource(R.string.common_done), onClick = onBack, outlined = true)
             },
         )
 
@@ -117,14 +124,14 @@ fun ProfilesScreen(
                         }
                         if (compactLayout) {
                             Column(horizontalAlignment = Alignment.End) {
-                                if (!active) TextButton(onClick = { viewModel.select(profile.id) }) { Text(stringResource(R.string.profiles_use)) }
-                                TextButton(onClick = { editing = profile.id }) { Text(stringResource(R.string.profiles_rename)) }
-                                if (profile.id != 1L) TextButton(onClick = { viewModel.remove(profile.id) }) { Text(stringResource(R.string.common_remove)) }
+                                if (!active) ProfileTextAction(stringResource(R.string.profiles_use)) { viewModel.select(profile.id) }
+                                ProfileTextAction(stringResource(R.string.profiles_rename)) { editing = profile.id }
+                                if (profile.id != 1L) ProfileTextAction(stringResource(R.string.common_remove)) { viewModel.remove(profile.id) }
                             }
                         } else {
-                            if (!active) TextButton(onClick = { viewModel.select(profile.id) }) { Text(stringResource(R.string.profiles_use)) }
-                            TextButton(onClick = { editing = profile.id }) { Text(stringResource(R.string.profiles_rename)) }
-                            if (profile.id != 1L) TextButton(onClick = { viewModel.remove(profile.id) }) { Text(stringResource(R.string.common_remove)) }
+                            if (!active) ProfileTextAction(stringResource(R.string.profiles_use)) { viewModel.select(profile.id) }
+                            ProfileTextAction(stringResource(R.string.profiles_rename)) { editing = profile.id }
+                            if (profile.id != 1L) ProfileTextAction(stringResource(R.string.common_remove)) { viewModel.remove(profile.id) }
                         }
                     }
                 }
@@ -132,6 +139,35 @@ fun ProfilesScreen(
         }
         }
     }
+}
+
+@Composable
+private fun ProfileActionButton(
+    label: String,
+    onClick: () -> Unit,
+    outlined: Boolean = false,
+    enabled: Boolean = true,
+) {
+    var focused by remember { mutableStateOf(false) }
+    val modifier = Modifier
+        .onFocusChanged { focused = it.isFocused }
+        .fullTvFocusRing(focused, MaterialTheme.colorScheme.primary)
+    if (outlined) {
+        OutlinedButton(onClick = onClick, modifier = modifier, enabled = enabled) { Text(label) }
+    } else {
+        Button(onClick = onClick, modifier = modifier, enabled = enabled) { Text(label) }
+    }
+}
+
+@Composable
+private fun ProfileTextAction(label: String, onClick: () -> Unit) {
+    var focused by remember(label) { mutableStateOf(false) }
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier
+            .onFocusChanged { focused = it.isFocused }
+            .fullTvFocusRing(focused, MaterialTheme.colorScheme.primary),
+    ) { Text(label) }
 }
 
 @Composable
@@ -156,9 +192,17 @@ private fun NameEntry(
                 color = MaterialTheme.colorScheme.primary,
             )
             Spacer(Modifier.weight(1f))
-            Button(enabled = name.isNotBlank(), onClick = { onSave(name) }) { Text(stringResource(R.string.common_save)) }
+            ProfileActionButton(
+                label = stringResource(R.string.common_save),
+                onClick = { onSave(name) },
+                enabled = name.isNotBlank(),
+            )
             Spacer(Modifier.width(12.dp))
-            OutlinedButton(onClick = onCancel) { Text(stringResource(R.string.common_cancel)) }
+            ProfileActionButton(
+                label = stringResource(R.string.common_cancel),
+                onClick = onCancel,
+                outlined = true,
+            )
         }
         Spacer(Modifier.height(24.dp))
         OnScreenKeyboard(

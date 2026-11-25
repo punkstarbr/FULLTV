@@ -28,10 +28,13 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.StarOutline
 import androidx.compose.material3.Icon
@@ -79,6 +82,7 @@ import app.opentv.ui.FullTvChrome
 import app.opentv.ui.FullTvSectionHeader
 import app.opentv.ui.ParentalPinGate
 import app.opentv.ui.fullTvFocusRing
+import app.opentv.ui.isChannelSearchReady
 import coil.compose.AsyncImage
 import kotlinx.coroutines.delay
 
@@ -124,7 +128,9 @@ fun ChannelManagerScreen(
         runCatching { railFocusRequester.requestFocus() }.isSuccess
     }
 
-    BackHandler { onBack() }
+    BackHandler(enabled = pendingUnhide == null) {
+        if (searchMode) searchMode = false else onBack()
+    }
 
     fun toggleHidden(row: ChannelsViewModel.Row, hidden: Boolean) {
         val showing = !hidden
@@ -231,6 +237,7 @@ fun ChannelManagerScreen(
                             onExitLeft = onExitLeftToRail,
                             onToggleHidden = ::toggleHidden,
                             onToggleFavourite = { viewModel.toggleFavourite(it) },
+                            onMoveRow = viewModel::moveManagerRow,
                         )
                     }
                 }
@@ -313,6 +320,7 @@ fun ChannelManagerScreen(
                                 onExitLeft = onExitLeftToRail,
                                 onToggleHidden = ::toggleHidden,
                                 onToggleFavourite = { viewModel.toggleFavourite(it) },
+                                onMoveRow = viewModel::moveManagerRow,
                             )
                         }
                     }
@@ -471,7 +479,7 @@ private fun SearchResults(
 ) {
     when {
         query.isBlank() -> Hint(stringResource(R.string.channels_manager_search_hint))
-        query.trim().length < 2 -> Hint(stringResource(R.string.common_keep_typing))
+        !isChannelSearchReady(query.trim()) -> Hint(stringResource(R.string.common_keep_typing))
         results.isEmpty() -> Hint(stringResource(R.string.channels_manager_no_match, query))
         else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(FullTvChrome.cardGap)) {
             items(results, key = { it.key }) { row ->
@@ -496,6 +504,7 @@ private fun BrowsePane(
     onExitLeft: () -> Boolean,
     onToggleHidden: (ChannelsViewModel.Row, Boolean) -> Unit,
     onToggleFavourite: (ChannelsViewModel.Row) -> Unit,
+    onMoveRow: (ChannelsViewModel.Row, Int) -> Unit,
 ) {
     when {
         !hasCategories -> Hint(stringResource(R.string.channels_manager_no_channels))
@@ -505,13 +514,17 @@ private fun BrowsePane(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(FullTvChrome.cardGap),
         ) {
-            items(rows, key = { it.key }) { row ->
+            itemsIndexed(rows, key = { _, row -> row.key }) { index, row ->
                 val hidden = row.variants.all { it.hidden }
                 ManagerRow(
                     row = row,
                     hidden = hidden,
                     onToggleHidden = { onToggleHidden(row, hidden) },
                     onToggleFavourite = { onToggleFavourite(row) },
+                    canMoveUp = rows.getOrNull(index - 1)?.primary?.sourceId == row.primary.sourceId && index > 0,
+                    canMoveDown = rows.getOrNull(index + 1)?.primary?.sourceId == row.primary.sourceId,
+                    onMoveUp = { onMoveRow(row, -1) },
+                    onMoveDown = { onMoveRow(row, 1) },
                     // LEFT from the row's leftmost control (the star) hops back to the category
                     // picker; from the switch it first steps left to the star, as usual.
                     leftEdgeModifier = Modifier.onPreviewKeyEvent { e ->
@@ -612,13 +625,21 @@ private fun ManagerRow(
     hidden: Boolean,
     onToggleHidden: () -> Unit,
     onToggleFavourite: () -> Unit,
+    canMoveUp: Boolean = false,
+    canMoveDown: Boolean = false,
+    onMoveUp: () -> Unit = {},
+    onMoveDown: () -> Unit = {},
     leftEdgeModifier: Modifier = Modifier,
 ) {
     val alpha = if (hidden) 0.62f else 1f
     var favouriteFocused by remember(row.key) { mutableStateOf(false) }
     var visibilityFocused by remember(row.key) { mutableStateOf(false) }
+    var moveUpFocused by remember(row.key) { mutableStateOf(false) }
+    var moveDownFocused by remember(row.key) { mutableStateOf(false) }
     val visibilityDescription = stringResource(R.string.channels_show)
     val visibilityState = stringResource(if (hidden) R.string.channels_hidden else R.string.channels_showing)
+    val moveUpDescription = stringResource(R.string.channels_move_up)
+    val moveDownDescription = stringResource(R.string.channels_move_down)
 
     FullTvCard(
         modifier = Modifier.fillMaxWidth(),
@@ -650,40 +671,73 @@ private fun ManagerRow(
                 )
             }
 
-            // The star is the row's leftmost focusable, so it carries the LEFT-to-picker handler.
-            IconButton(
-                onClick = onToggleFavourite,
-                modifier = leftEdgeModifier
-                    .onFocusChanged { favouriteFocused = it.isFocused }
-                    .fullTvFocusRing(favouriteFocused, MaterialTheme.colorScheme.primary),
-            ) {
-                Icon(
-                    imageVector = if (row.primary.favourite) Icons.Filled.Star else Icons.Outlined.StarOutline,
-                    contentDescription = if (row.primary.favourite) stringResource(R.string.common_remove_favourite)
-                    else stringResource(R.string.common_favourite),
-                    tint = if (row.primary.favourite) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            Spacer(Modifier.width(4.dp))
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    stringResource(R.string.channels_show),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                )
-                // Checked = visible; off = hidden. TalkBack receives an explicit state as well.
-                Switch(
-                    checked = !hidden,
-                    onCheckedChange = { onToggleHidden() },
-                    modifier = Modifier
-                        .onFocusChanged { visibilityFocused = it.isFocused }
-                        .fullTvFocusRing(visibilityFocused, MaterialTheme.colorScheme.primary)
-                        .semantics {
-                            contentDescription = visibilityDescription
-                            stateDescription = visibilityState
-                        },
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // The star is the row's leftmost focusable, so LEFT returns to the category rail.
+                    IconButton(
+                        onClick = onToggleFavourite,
+                        modifier = leftEdgeModifier
+                            .onFocusChanged { favouriteFocused = it.isFocused }
+                            .fullTvFocusRing(favouriteFocused, MaterialTheme.colorScheme.primary),
+                    ) {
+                        Icon(
+                            imageVector = if (row.primary.favourite) Icons.Filled.Star else Icons.Outlined.StarOutline,
+                            contentDescription = if (row.primary.favourite) stringResource(R.string.common_remove_favourite)
+                            else stringResource(R.string.common_favourite),
+                            tint = if (row.primary.favourite) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            stringResource(R.string.channels_show),
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                        )
+                        // Checked = visible; off = hidden. TalkBack receives an explicit state as well.
+                        Switch(
+                            checked = !hidden,
+                            onCheckedChange = { onToggleHidden() },
+                            modifier = Modifier
+                                .onFocusChanged { visibilityFocused = it.isFocused }
+                                .fullTvFocusRing(visibilityFocused, MaterialTheme.colorScheme.primary)
+                                .semantics {
+                                    contentDescription = visibilityDescription
+                                    stateDescription = visibilityState
+                                },
+                        )
+                    }
+                }
+                Row {
+                    IconButton(
+                        onClick = onMoveUp,
+                        enabled = canMoveUp,
+                        modifier = leftEdgeModifier
+                            .onFocusChanged { moveUpFocused = it.isFocused }
+                            .fullTvFocusRing(moveUpFocused, MaterialTheme.colorScheme.primary),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.ArrowUpward,
+                            contentDescription = moveUpDescription,
+                            tint = if (canMoveUp) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                        )
+                    }
+                    IconButton(
+                        onClick = onMoveDown,
+                        enabled = canMoveDown,
+                        modifier = Modifier
+                            .onFocusChanged { moveDownFocused = it.isFocused }
+                            .fullTvFocusRing(moveDownFocused, MaterialTheme.colorScheme.primary),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.ArrowDownward,
+                            contentDescription = moveDownDescription,
+                            tint = if (canMoveDown) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f),
+                        )
+                    }
+                }
             }
         }
     }

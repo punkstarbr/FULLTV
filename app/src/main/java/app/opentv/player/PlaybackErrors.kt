@@ -5,72 +5,135 @@
  */
 package app.opentv.player
 
+import android.content.Context
 import androidx.annotation.OptIn
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.HttpDataSource
+import app.opentv.R
+import java.io.IOException
+import java.net.ConnectException
+import java.net.NoRouteToHostException
+import java.net.SocketException
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
+import java.util.Collections
+import java.util.IdentityHashMap
 
-/**
- * Turns a [PlaybackException] into something a person can act on.
- *
- * "ERROR_CODE_IO_BAD_HTTP_STATUS" tells a user nothing. Worse, the habit of showing a raw
- * error code on screen is what led one player to *remove* its 403 display entirely as a
- * "fix" — hiding the symptom while the stream still failed. The right answer is to say what
- * probably went wrong and what to try.
- */
+/** Turns player failures into localized, actionable messages and retry decisions. */
 @OptIn(UnstableApi::class)
 object PlaybackErrors {
 
-    fun describe(error: PlaybackException): String {
-        (error.cause as? HttpDataSource.InvalidResponseCodeException)?.let {
-            return describeHttpStatus(it.responseCode)
-        }
-        if (error.cause is UnknownHostException) {
-            return "Can't reach the server. Check this device is online and the address is right."
-        }
-        if (error.cause is SocketTimeoutException) {
-            return "The server stopped responding. It may be overloaded — try again in a moment."
-        }
+    fun describe(context: Context, error: PlaybackException): String {
+        val causes = causesOf(error).toList()
+        val httpStatus = causes
+            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+            .firstOrNull()
+            ?.responseCode
+        if (httpStatus != null) return describeHttpStatus(context, httpStatus)
 
-        return when (error.errorCode) {
-            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
-            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
-                "Lost connection to the server."
-
-            PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE ->
-                "The server sent a web page instead of a stream. The link may have expired."
-
-            PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
-            PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED ->
-                "This stream is malformed and can't be played."
-
-            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
-            PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED ->
-                "This device has no decoder for that format."
-
-            PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ->
-                "This device can't decode that video format. A different quality may work."
-
-            PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW ->
-                "Playback fell too far behind the live edge. Reloading."
-
-            else -> "Playback failed (${error.errorCodeName})."
+        return when {
+            causes.any { it is UnknownHostException || it is ConnectException || it is NoRouteToHostException } ->
+                context.getString(R.string.player_error_no_signal)
+            causes.any { it is SocketTimeoutException || it is SocketException } ->
+                context.getString(R.string.player_error_server_timeout)
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+                error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ->
+                context.getString(R.string.player_error_no_signal)
+            error.errorCode == PlaybackException.ERROR_CODE_IO_INVALID_HTTP_CONTENT_TYPE ->
+                context.getString(R.string.player_error_not_a_stream)
+            error.errorCode == PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED ||
+                error.errorCode == PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED ->
+                context.getString(R.string.player_error_malformed_stream)
+            error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+                error.errorCode == PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED ||
+                error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ->
+                context.getString(R.string.player_error_unsupported_format)
+            error.errorCode == PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW ->
+                context.getString(R.string.player_error_live_window)
+            else -> context.getString(R.string.player_error_generic)
         }
     }
 
-    fun describeHttpStatus(code: Int): String = when (code) {
-        401 -> "The server rejected these credentials. Check the username and password."
-        403 -> "The server refused this stream (403). Often this means the account is already " +
-            "streaming on another device, or the provider is blocking this app's User-Agent — " +
-            "you can change it in the source's advanced settings."
-        404 -> "That channel no longer exists on the server. Refresh the channel list."
-        405 -> "The server rejected the request (405). The stream address looks wrong for this " +
-            "provider — try switching the source between Xtream and playlist mode."
-        429 -> "Too many requests. The provider is rate-limiting this device."
-        451 -> "Blocked for legal reasons in this region."
-        in 500..599 -> "The provider's server is having problems ($code)."
-        else -> "The server returned HTTP $code."
+    fun describeHttpStatus(context: Context, code: Int): String = when (code) {
+        401 -> context.getString(R.string.player_error_http_401)
+        403 -> context.getString(R.string.player_error_http_403)
+        404, 410 -> context.getString(R.string.player_error_http_404)
+        405 -> context.getString(R.string.player_error_http_405)
+        408 -> context.getString(R.string.player_error_server_timeout)
+        429 -> context.getString(R.string.player_error_http_429)
+        451 -> context.getString(R.string.player_error_http_451)
+        in 500..599 -> context.getString(R.string.player_error_http_5xx, code)
+        else -> context.getString(R.string.player_error_http_generic)
     }
+
+    /** Network failures worth automatically retrying after a short, bounded backoff. */
+    fun shouldAutomaticallyRetry(error: PlaybackException): Boolean {
+        val causes = causesOf(error).toList()
+        val httpStatus = causes
+            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+            .firstOrNull()
+            ?.responseCode
+        if (httpStatus != null) return shouldAutomaticallyRetryHttpStatus(httpStatus)
+
+        return error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+            causes.any {
+                it is UnknownHostException || it is SocketTimeoutException ||
+                    it is ConnectException || it is NoRouteToHostException || it is SocketException
+            }
+    }
+
+    /** A bounded restart decision shared by player errors and playback timeouts. */
+    fun shouldScheduleAutomaticRetry(
+        error: PlaybackException,
+        failuresSoFar: Int,
+        maximumRestarts: Int,
+    ): Boolean =
+        shouldRetryAfterTransientFailure(
+            isTransient = shouldAutomaticallyRetry(error),
+            failuresSoFar = failuresSoFar,
+            maximumRestarts = maximumRestarts,
+        )
+
+    /** Timeout failures are transient by definition here, but still obey the same finite budget. */
+    fun shouldRetryAfterTransientFailure(
+        isTransient: Boolean,
+        failuresSoFar: Int,
+        maximumRestarts: Int,
+    ): Boolean = isTransient && maximumRestarts > 0 && failuresSoFar < maximumRestarts
+
+    fun shouldAutomaticallyRetryHttpStatus(code: Int): Boolean =
+        code in RETRYABLE_HTTP_STATUS || code in 500..599
+
+    /** Used by the connectivity observer to resume only failures attributable to lost service. */
+    fun isNetworkFailure(error: PlaybackException): Boolean {
+        val causes = causesOf(error).toList()
+        val httpStatus = causes
+            .filterIsInstance<HttpDataSource.InvalidResponseCodeException>()
+            .firstOrNull()
+            ?.responseCode
+        if (httpStatus != null) return isNetworkHttpStatus(httpStatus)
+
+        return error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED ||
+            error.errorCode == PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT ||
+            causes.any {
+                it is UnknownHostException || it is SocketTimeoutException ||
+                    it is ConnectException || it is NoRouteToHostException || it is SocketException ||
+                    (it is IOException && it !is java.io.FileNotFoundException)
+            }
+    }
+
+    fun isNetworkHttpStatus(code: Int): Boolean = code == 408 || code == 429 || code in 500..599
+
+    private fun causesOf(error: Throwable): Sequence<Throwable> = sequence {
+        val seen = Collections.newSetFromMap(IdentityHashMap<Throwable, Boolean>())
+        var current: Throwable? = error
+        while (current != null && seen.add(current)) {
+            yield(current)
+            current = current.cause
+        }
+    }
+
+    private val RETRYABLE_HTTP_STATUS = setOf(403, 405, 408, 429)
 }

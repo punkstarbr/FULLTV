@@ -26,6 +26,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
+import app.opentv.R
 import app.opentv.core.SafeNetworkDiagnostics
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -107,8 +108,13 @@ class PlayerController(
         data object Idle : State
         data class Buffering(val title: String) : State
         data class Playing(val title: String) : State
-        /** Playback stopped and retries are exhausted. [message] is written for humans. */
-        data class Error(val title: String, val message: String, val canRetry: Boolean) : State
+        /** Playback stopped or timed out. [message] is localized and [networkFailure] is recoverable. */
+        data class Error(
+            val title: String,
+            val message: String,
+            val canRetry: Boolean,
+            val networkFailure: Boolean = false,
+        ) : State
     }
 
     data class Request(
@@ -132,8 +138,16 @@ class PlayerController(
     val subtitleCueTexts: StateFlow<List<String>> = _subtitleCueTexts.asStateFlow()
 
     private var switchJob: Job? = null
+    private var automaticRetryJob: Job? = null
+    private var bufferingTimeoutJob: Job? = null
+    private var firstFrameTimeoutJob: Job? = null
     private var current: Request? = null
+    private var externalRecoveryAction: (() -> Unit)? = null
     private var consecutiveFailures = 0
+    private var networkAvailable: Boolean? = null
+    private var tuneGeneration = 0L
+    private var videoTrackPresent = false
+    private var renderedVideoFrame = false
 
     /**
      * Held so the User-Agent can be swapped per source before each tune.
@@ -240,6 +254,23 @@ class PlayerController(
             addListener(object : Player.Listener {
                 override fun onTracksChanged(tracks: Tracks) {
                     _tracks.value = tracks
+                    videoTrackPresent = tracks.groups.any { it.type == C.TRACK_TYPE_VIDEO && it.length > 0 }
+                    if (videoTrackPresent && !renderedVideoFrame && _state.value is State.Playing) {
+                        val request = current ?: return
+                        _state.value = State.Buffering(request.title)
+                        startFirstFrameTimeout(request, tuneGeneration)
+                    }
+                }
+
+                override fun onRenderedFirstFrame() {
+                    renderedVideoFrame = true
+                    firstFrameTimeoutJob?.cancel()
+                    firstFrameTimeoutJob = null
+                    val request = current ?: return
+                    if (player.playbackState == Player.STATE_READY) {
+                        bufferingTimeoutJob?.cancel()
+                        _state.value = State.Playing(request.title)
+                    }
                 }
 
                 override fun onCues(cueGroup: CueGroup) {
@@ -249,10 +280,21 @@ class PlayerController(
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     val title = current?.title.orEmpty()
                     _state.value = when (playbackState) {
-                        Player.STATE_BUFFERING -> State.Buffering(title)
+                        Player.STATE_BUFFERING -> {
+                            val request = current
+                            if (request != null) startBufferingTimeout(request, tuneGeneration)
+                            State.Buffering(title)
+                        }
                         Player.STATE_READY -> {
-                            consecutiveFailures = 0
-                            State.Playing(title)
+                            bufferingTimeoutJob?.cancel()
+                            bufferingTimeoutJob = null
+                            val request = current
+                            if (request != null && videoTrackPresent && !renderedVideoFrame) {
+                                startFirstFrameTimeout(request, tuneGeneration)
+                                State.Buffering(title)
+                            } else {
+                                State.Playing(title)
+                            }
                         }
                         Player.STATE_IDLE -> _state.value
                         Player.STATE_ENDED -> State.Idle
@@ -263,20 +305,24 @@ class PlayerController(
                 override fun onPlayerError(error: PlaybackException) {
                     SafeNetworkDiagnostics.error("PlayerController", "player-playback", error)
                     consecutiveFailures++
-                    val request = current
+                    val request = current?.let(::retainPlaybackPosition)
+                    if (request != null) current = request
+                    val canScheduleRetry = request != null && PlaybackErrors.shouldScheduleAutomaticRetry(
+                        error = error,
+                        failuresSoFar = consecutiveFailures,
+                        maximumRestarts = MAX_AUTO_RESTARTS,
+                    )
                     _state.value = State.Error(
                         title = request?.title.orEmpty(),
-                        message = PlaybackErrors.describe(error),
-                        canRetry = consecutiveFailures < MAX_AUTO_RESTARTS,
+                        message = PlaybackErrors.describe(appContext, error),
+                        canRetry = canScheduleRetry,
+                        networkFailure = PlaybackErrors.isNetworkFailure(error),
                     )
-                    // One silent restart covers the common case of a provider dropping the
-                    // connection when another device on the account starts streaming.
-                    if (consecutiveFailures < MAX_AUTO_RESTARTS && request != null) {
-                        scope.launch {
-                            delay(AUTO_RESTART_DELAY_MILLIS)
-                            if (current == request) play(request, debounce = false)
-                        }
-                    }
+                    bufferingTimeoutJob?.cancel()
+                    firstFrameTimeoutJob?.cancel()
+                    // Retry only transient failures. This job preserves the failure budget: calling
+                    // play() here would reset it before every attempt and could loop forever.
+                    if (canScheduleRetry) scheduleAutomaticRestart(request, tuneGeneration)
                 }
             })
         }
@@ -292,58 +338,165 @@ class PlayerController(
         // reaches the player, so we never stack prepares.
         liveAudioTap?.clearBufferedAudio()
         switchJob?.cancel()
+        automaticRetryJob?.cancel()
+        bufferingTimeoutJob?.cancel()
+        firstFrameTimeoutJob?.cancel()
+        tuneGeneration++
+        val generation = tuneGeneration
         current = request
+        externalRecoveryAction = null
+        consecutiveFailures = 0
+        videoTrackPresent = false
+        renderedVideoFrame = false
         _subtitleCueTexts.value = emptyList()
 
         switchJob = scope.launch {
             if (debounce) delay(switchDebounceMillis)
+            if (tuneGeneration == generation && current == request) prepareRequest(request, generation)
+        }
+    }
 
-            val mediaUrlAllowed = isSafeMediaUrl(request.url)
-            val userAgentAllowed = isSafeUserAgent(request.userAgent)
-            if (!mediaUrlAllowed || !userAgentAllowed) {
-                SafeNetworkDiagnostics.error(
-                    "PlayerController",
-                    if (!mediaUrlAllowed) "media-url-policy-rejected" else "user-agent-policy-rejected",
-                    IllegalArgumentException("Media request rejected by local security policy"),
-                )
-                player.stop()
-                player.clearMediaItems()
-                _state.value = State.Error(
-                    request.title,
-                    "This media URL is not allowed by FullTV's security policy.",
-                    canRetry = false,
-                )
-                return@launch
+    private fun prepareRequest(request: Request, generation: Long) {
+        if (tuneGeneration != generation || current != request) return
+        val mediaUrlAllowed = isSafeMediaUrl(request.url)
+        val userAgentAllowed = isSafeUserAgent(request.userAgent)
+        if (!mediaUrlAllowed || !userAgentAllowed) {
+            SafeNetworkDiagnostics.error(
+                "PlayerController",
+                if (!mediaUrlAllowed) "media-url-policy-rejected" else "user-agent-policy-rejected",
+                IllegalArgumentException("Media request rejected by local security policy"),
+            )
+            player.stop()
+            player.clearMediaItems()
+            _state.value = State.Error(
+                request.title,
+                appContext.getString(R.string.player_error_policy_rejected),
+                canRetry = false,
+            )
+            return
+        }
+
+        httpFactory.setDefaultRequestProperties(mapOf("User-Agent" to request.userAgent))
+        _state.value = State.Buffering(request.title)
+        videoTrackPresent = false
+        renderedVideoFrame = false
+
+        val mediaItem = MediaItem.Builder()
+            .setUri(request.url)
+            .apply {
+                if (request.isLive) {
+                    setLiveConfiguration(
+                        MediaItem.LiveConfiguration.Builder()
+                            .setTargetOffsetMs(LIVE_TARGET_OFFSET_MILLIS)
+                            .build(),
+                    )
+                }
             }
+            .build()
 
-            consecutiveFailures = 0
-            httpFactory.setDefaultRequestProperties(mapOf("User-Agent" to request.userAgent))
-            _state.value = State.Buffering(request.title)
+        with(player) {
+            // stop() rather than release(): keeps the codec and the surface alive.
+            stop()
+            clearMediaItems()
+            setMediaItem(mediaItem)
+            if (!request.isLive && request.startPositionMillis > 0) seekTo(request.startPositionMillis)
+            playWhenReady = true
+            prepare()
+        }
+    }
 
-            val mediaItem = MediaItem.Builder()
-                .setUri(request.url)
-                .apply {
-                    // Only meaningful for live streams; setting it on VOD skews seeking.
-                    if (request.isLive) {
-                        setLiveConfiguration(
-                            MediaItem.LiveConfiguration.Builder()
-                                .setTargetOffsetMs(LIVE_TARGET_OFFSET_MILLIS)
-                                .build(),
-                        )
-                    }
+    private fun startBufferingTimeout(request: Request, generation: Long) {
+        bufferingTimeoutJob?.cancel()
+        bufferingTimeoutJob = scope.launch {
+            delay(BUFFERING_TIMEOUT_MILLIS)
+            if (tuneGeneration == generation && current == request && player.playbackState == Player.STATE_BUFFERING) {
+                reportTransientTimeout(request, generation)
+            }
+        }
+    }
+
+    private fun startFirstFrameTimeout(request: Request, generation: Long) {
+        firstFrameTimeoutJob?.cancel()
+        firstFrameTimeoutJob = scope.launch {
+            delay(FIRST_FRAME_TIMEOUT_MILLIS)
+            if (tuneGeneration == generation && current == request &&
+                videoTrackPresent && !renderedVideoFrame && player.playbackState == Player.STATE_READY
+            ) {
+                reportTransientTimeout(request, generation)
+            }
+        }
+    }
+
+    private fun reportTransientTimeout(request: Request, generation: Long) {
+        if (tuneGeneration != generation || current != request) return
+        val retryRequest = retainPlaybackPosition(request)
+        current = retryRequest
+        consecutiveFailures++
+        val canRetry = PlaybackErrors.shouldRetryAfterTransientFailure(
+            isTransient = true,
+            failuresSoFar = consecutiveFailures,
+            maximumRestarts = MAX_AUTO_RESTARTS,
+        )
+        _state.value = State.Error(
+            title = request.title,
+            message = appContext.getString(R.string.player_error_no_signal),
+            canRetry = canRetry,
+            networkFailure = true,
+        )
+        if (canRetry) scheduleAutomaticRestart(retryRequest, generation)
+    }
+
+    private fun retainPlaybackPosition(request: Request): Request =
+        if (request.isLive) request else request.copy(
+            startPositionMillis = maxOf(request.startPositionMillis, player.currentPosition.coerceAtLeast(0L)),
+        )
+
+    private fun scheduleAutomaticRestart(request: Request, generation: Long) {
+        automaticRetryJob?.cancel()
+        automaticRetryJob = scope.launch {
+            delay(AUTO_RESTART_DELAY_MILLIS)
+            if (tuneGeneration == generation && current == request) {
+                prepareRequest(request, generation)
+            }
+        }
+    }
+
+    /** Called by the lifecycle-owned connectivity observer; a restored network gets one fresh tune. */
+    fun onNetworkAvailabilityChanged(available: Boolean) {
+        val wasAvailable = networkAvailable
+        networkAvailable = available
+        if (!available || wasAvailable != false) return
+
+        val stateNow = _state.value
+        val request = current
+        if (request == null) {
+            if (stateNow is State.Error && stateNow.networkFailure) {
+                val recover = externalRecoveryAction ?: return
+                val generation = tuneGeneration
+                externalRecoveryAction = null
+                scope.launch {
+                    delay(NETWORK_RECOVERY_DELAY_MILLIS)
+                    if (tuneGeneration == generation && current == null && _state.value == stateNow) recover()
                 }
-                .build()
+            }
+            return
+        }
+        val shouldRecover = when (stateNow) {
+            is State.Error -> stateNow.networkFailure
+            is State.Buffering -> player.playWhenReady
+            else -> false
+        }
+        if (!shouldRecover || (stateNow is State.Buffering && player.isPlaying)) return
 
-            with(player) {
-                // stop() rather than release(): keeps the codec and the surface alive.
-                stop()
-                clearMediaItems()
-                setMediaItem(mediaItem)
-                if (!request.isLive && request.startPositionMillis > 0) {
-                    seekTo(request.startPositionMillis)
-                }
-                playWhenReady = true
-                prepare()
+        val generation = tuneGeneration
+        val retryRequest = retainPlaybackPosition(request)
+        current = retryRequest
+        automaticRetryJob?.cancel()
+        automaticRetryJob = scope.launch {
+            delay(NETWORK_RECOVERY_DELAY_MILLIS)
+            if (tuneGeneration == generation && current == retryRequest) {
+                consecutiveFailures = 0
+                prepareRequest(retryRequest, generation)
             }
         }
     }
@@ -395,9 +548,14 @@ class PlayerController(
         value.length <= MAX_USER_AGENT_CHARS && value.none { it == '\r' || it == '\n' || it.code == 0x7f }
 
     /** Stops the previous tune and keeps the normal buffering UI visible while a URL is resolved. */
-    fun beginExternalResolution(title: String) {
+    fun beginExternalResolution(title: String, onNetworkRecovery: (() -> Unit)? = null) {
         switchJob?.cancel()
+        automaticRetryJob?.cancel()
+        bufferingTimeoutJob?.cancel()
+        firstFrameTimeoutJob?.cancel()
+        tuneGeneration++
         current = null
+        externalRecoveryAction = onNetworkRecovery
         _subtitleCueTexts.value = emptyList()
         consecutiveFailures = 0
         player.stop()
@@ -406,10 +564,10 @@ class PlayerController(
     }
 
     /** Reports a resolver failure; the owning screen is responsible for retrying the resolution. */
-    fun failExternalResolution(title: String, message: String) {
+    fun failExternalResolution(title: String, message: String, networkFailure: Boolean = false) {
         switchJob?.cancel()
         current = null
-        _state.value = State.Error(title, message, canRetry = true)
+        _state.value = State.Error(title, message, canRetry = true, networkFailure = networkFailure)
     }
 
     /**
@@ -469,7 +627,12 @@ class PlayerController(
 
     fun stop() {
         switchJob?.cancel()
+        automaticRetryJob?.cancel()
+        bufferingTimeoutJob?.cancel()
+        firstFrameTimeoutJob?.cancel()
+        tuneGeneration++
         current = null
+        externalRecoveryAction = null
         _subtitleCueTexts.value = emptyList()
         player.stop()
         player.clearMediaItems()
@@ -478,6 +641,12 @@ class PlayerController(
 
     fun release() {
         switchJob?.cancel()
+        automaticRetryJob?.cancel()
+        bufferingTimeoutJob?.cancel()
+        firstFrameTimeoutJob?.cancel()
+        tuneGeneration++
+        current = null
+        externalRecoveryAction = null
         player.release()
         liveAudioTap?.close()
     }
@@ -497,6 +666,9 @@ class PlayerController(
         const val MAX_MEDIA_URL_CHARS = 16_384
         const val MAX_USER_AGENT_CHARS = 1_024
         const val AUTO_RESTART_DELAY_MILLIS = 1_500L
+        const val NETWORK_RECOVERY_DELAY_MILLIS = 750L
+        const val BUFFERING_TIMEOUT_MILLIS = 30_000L
+        const val FIRST_FRAME_TIMEOUT_MILLIS = 20_000L
 
         /**
          * Larger than ExoPlayer's defaults. IPTV sources are much twitchier than a CDN, and a

@@ -60,6 +60,7 @@ import app.opentv.ui.FullTvCard
 import app.opentv.ui.FullTvChrome
 import app.opentv.ui.FullTvSectionHeader
 import app.opentv.ui.VodViewModel
+import app.opentv.ui.isChannelSearchReady
 import app.opentv.ui.fullTvFocusRing
 import coil.compose.AsyncImage
 import java.text.SimpleDateFormat
@@ -274,7 +275,7 @@ private fun SearchResultsPane(
     ) {
         when {
             query.isBlank() -> Hint(Modifier.fillMaxSize(), stringResource(R.string.search_start_hint))
-            query.trim().length < 2 -> Hint(Modifier.fillMaxSize(), stringResource(R.string.common_keep_typing))
+            !isChannelSearchReady(query.trim()) -> Hint(Modifier.fillMaxSize(), stringResource(R.string.common_keep_typing))
             !anyResults -> Hint(
                 Modifier.fillMaxSize(),
                 stringResource(R.string.search_no_results, query),

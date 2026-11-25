@@ -124,6 +124,7 @@ import app.opentv.player.LiveCaptionEngine
 import app.opentv.player.LiveCaptionError
 import app.opentv.player.LiveCaptionPhase
 import app.opentv.player.LiveCaptionState
+import app.opentv.player.NetworkConnectivityObserver
 import app.opentv.player.PlaybackQueue
 import app.opentv.player.PlayerController
 import app.opentv.player.ProvidedSubtitleTranslationEngine
@@ -150,8 +151,10 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.io.IOException
 import java.net.URI
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -215,6 +218,10 @@ fun PlayerScreen(
             liveAudioTap = liveAudioTap,
         )
     }
+    val connectivityObserver = remember(context) { NetworkConnectivityObserver(context) }
+    LaunchedEffect(connectivityObserver, controller) {
+        connectivityObserver.observe().collect(controller::onNetworkAvailabilityChanged)
+    }
     val state by controller.state.collectAsState()
     val tracks by controller.tracks.collectAsState()
     val detectedAudioLanguage = remember(tracks) { selectedAudioTrackSpeechLanguage(tracks) }
@@ -262,12 +269,22 @@ fun PlayerScreen(
     var nextProgramme by remember { mutableStateOf<Programme?>(null) }
     var infoClockMillis by remember { mutableStateOf(System.currentTimeMillis()) }
     var tuneJob by remember { mutableStateOf<Job?>(null) }
+    var selectionGeneration by remember { mutableStateOf(0L) }
+    var pendingChannelId by remember { mutableStateOf<Long?>(null) }
     // The channel we were on before this one — powers the "Last channel" recall in the list.
     var previousId by remember { mutableStateOf<Long?>(null) }
     // Digits typed on the remote accumulate here, then jump to that channel number after a beat.
     var numberEntry by remember { mutableStateOf("") }
     var paused by remember { mutableStateOf(false) }
     var resizeMode by remember { mutableIntStateOf(settings.playerResizeMode.value) }
+
+    LaunchedEffect(state, pendingChannelId, currentChannel?.id) {
+        val channelIdToSave = pendingChannelId ?: return@LaunchedEffect
+        if (state is PlayerController.State.Playing && currentChannel?.id == channelIdToSave) {
+            settings.lastChannelId = channelIdToSave
+            pendingChannelId = null
+        }
+    }
 
     var controlsVisible by remember { mutableStateOf(true) }
     var panel by remember { mutableStateOf(Panel.NONE) }
@@ -366,87 +383,106 @@ fun PlayerScreen(
     }
 
     fun tuneTo(channel: Channel) {
+        val generation = selectionGeneration + 1L
+        selectionGeneration = generation
+        pendingChannelId = channel.id
         liveCaptionEngine.stop()
         tuneJob?.cancel()
         tuneJob = scope.launch {
-            val hiddenCategoryIds = ParentalAuthorization.hiddenCategoryIds(
-                graph.catalogRepository.liveCategories(),
-                settings.hiddenCategories.value,
-            )
-            val allowed = ParentalAuthorization.mayStartPlayback(
-                channel = channel,
-                hiddenCategoryIds = hiddenCategoryIds,
-                pinIsSet = settings.pinIsSet.value,
-                hiddenUnlocked = settings.hiddenUnlocked.value,
-            )
-            if (!allowed && !settings.pinIsSet.value) {
-                // With no configured PIN, the existing parental screen treats the unlock as a
-                // normal session preference rather than an authentication event.
-                settings.setHiddenUnlocked(true)
-            } else if (!allowed) {
-                // No route, reminder, resume request or numeric entry may start a protected stream
-                // before the same parental authorization used by the guide has been satisfied.
-                controller.stop()
-                pendingParentalChannel = channel
-                return@launch
-            }
-            currentId = channel.id
-            currentChannel = channel
-            paused = false
-            settings.lastChannelId = channel.id
-            val source = graph.sourceRepository.byId(channel.sourceId)
-            val youtubeLiveUrl = YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl)
-            if (youtubeLiveUrl != null) {
-                controller.beginExternalResolution(channel.shownName)
-                try {
-                    val resolved = graph.streamlinkResolver.resolveBest(youtubeLiveUrl)
-                    controller.play(
-                        PlayerController.Request(
-                            url = resolved.url,
-                            title = channel.shownName,
-                            userAgent = resolved.userAgent,
-                            isLive = true,
-                        ),
-                        debounce = false,
-                    )
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (_: Exception) {
-                    controller.failExternalResolution(
-                        channel.shownName,
-                        context.getString(R.string.player_youtube_unavailable),
-                    )
+            try {
+                val hiddenCategoryIds = ParentalAuthorization.hiddenCategoryIds(
+                    graph.catalogRepository.liveCategories(),
+                    settings.hiddenCategories.value,
+                )
+                val allowed = ParentalAuthorization.mayStartPlayback(
+                    channel = channel,
+                    hiddenCategoryIds = hiddenCategoryIds,
+                    pinIsSet = settings.pinIsSet.value,
+                    hiddenUnlocked = settings.hiddenUnlocked.value,
+                )
+                if (generation != selectionGeneration) return@launch
+                if (!allowed && !settings.pinIsSet.value) {
+                    // With no configured PIN, the existing parental screen treats the unlock as a
+                    // normal session preference rather than an authentication event.
+                    settings.setHiddenUnlocked(true)
+                } else if (!allowed) {
+                    // No route, reminder, resume request or numeric entry may start a protected stream
+                    // before the same parental authorization used by the guide has been satisfied.
+                    controller.stop()
+                    pendingChannelId = null
+                    pendingParentalChannel = channel
+                    return@launch
                 }
-            } else {
-                // Xtream/M3U carry ready media URLs; a Stalker URL is minted here from its cmd.
-                val url = graph.catalogRepository.resolvePlaybackUrl(channel, source)
-                controller.play(
+
+                currentId = channel.id
+                currentChannel = channel
+                paused = false
+                // Stop the previous feed before any DNS/provider/stream resolver wait. A stale
+                // resolver is cancelled by tuneJob and cannot overwrite a newer channel choice.
+                controller.beginExternalResolution(channel.shownName) { tuneTo(channel) }
+                val source = graph.sourceRepository.byId(channel.sourceId)
+                val youtubeLiveUrl = YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl)
+                val request = if (youtubeLiveUrl != null) {
+                    val resolved = graph.streamlinkResolver.resolveBest(youtubeLiveUrl)
+                    PlayerController.Request(
+                        url = resolved.url,
+                        title = channel.shownName,
+                        userAgent = resolved.userAgent,
+                        isLive = true,
+                    )
+                } else {
+                    // Xtream/M3U carry ready media URLs; a Stalker URL is minted at tune time.
+                    val url = graph.catalogRepository.resolvePlaybackUrl(channel, source)
                     PlayerController.Request(
                         url = url,
                         title = channel.shownName,
                         userAgent = source?.userAgent ?: "OpenTV/0.1 (Android)",
                         isLive = true,
-                    ),
-                    debounce = false,
+                    )
+                }
+                if (generation == selectionGeneration) controller.play(request, debounce = false)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                if (generation != selectionGeneration) return@launch
+                val youtube = YouTubeChannelUrl.asLiveUrlOrNull(channel.streamUrl) != null
+                val message = when {
+                    youtube -> context.getString(R.string.player_youtube_unavailable)
+                    error is IOException -> context.getString(R.string.player_error_no_signal)
+                    else -> context.getString(R.string.player_error_generic)
+                }
+                controller.failExternalResolution(
+                    title = channel.shownName,
+                    message = message,
+                    networkFailure = error is IOException,
                 )
             }
         }
     }
 
     fun playChannelId(id: Long) {
-        // Remember where we came from so "Last channel" can bounce straight back. Quality switches
-        // go through tuneTo directly, so they never count as a channel change here.
-        currentId?.let { if (it != id) previousId = it }
+        // Use the last queued selection as the base, so holding channel-up advances through every
+        // press even while the previous provider URL is still resolving.
+        val fromId = pendingChannelId ?: currentId
+        if (fromId != null && fromId != id) previousId = fromId
+        val generation = selectionGeneration + 1L
+        selectionGeneration = generation
+        pendingChannelId = id
+        tuneJob?.cancel()
         scope.launch {
             val channel = graph.catalogRepository.channel(id) ?: return@launch
-            variants = graph.catalogRepository.variants(channel)
+            if (generation != selectionGeneration) return@launch
+            val loadedVariants = graph.catalogRepository.variants(channel)
+            if (generation != selectionGeneration) return@launch
+            variants = loadedVariants
             tuneTo(variants.firstOrNull { it.id == channel.id } ?: channel)
         }
     }
 
     fun zapBy(delta: Int) {
         if (queue.isEmpty()) return
-        val cur = queue.indexOfFirst { it.id == currentId }.let { if (it < 0) 0 else it }
+        val baseId = pendingChannelId ?: currentId
+        val cur = queue.indexOfFirst { it.id == baseId }.let { if (it < 0) 0 else it }
         val next = (cur + delta).coerceIn(0, queue.size - 1)
         if (next != cur) playChannelId(queue[next].id)
     }
@@ -496,8 +532,19 @@ fun PlayerScreen(
     }
 
     LaunchedEffect(channelId) {
-        val id = channelId ?: return@LaunchedEffect
-        val channel = graph.catalogRepository.channel(id) ?: return@LaunchedEffect
+        val id = channelId ?: if (settings.resumeLastChannel.value) settings.lastChannelId else 0L
+        if (id == 0L) return@LaunchedEffect
+        val requested = graph.catalogRepository.channel(id)
+        val channel = requested ?: queue.firstOrNull { it.id != id }
+            ?.let { graph.catalogRepository.channel(it.id) }
+            ?: graph.catalogRepository.observeChannels(null).first().firstOrNull()
+        if (channel == null) {
+            pendingChannelId = null
+            return@LaunchedEffect
+        }
+        if (requested == null) {
+            Toast.makeText(context, R.string.player_saved_channel_missing, Toast.LENGTH_LONG).show()
+        }
         variants = graph.catalogRepository.variants(channel)
         tuneTo(variants.firstOrNull { it.id == channel.id } ?: channel)
     }

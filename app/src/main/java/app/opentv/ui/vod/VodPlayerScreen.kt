@@ -100,11 +100,13 @@ import app.opentv.ui.FullTvCard
 import app.opentv.ui.FullTvChrome
 import app.opentv.ui.fullTvFocusRing
 import app.opentv.player.PlayerController
+import app.opentv.player.NetworkConnectivityObserver
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -147,6 +149,10 @@ fun VodPlayerScreen(
                 app.opentv.player.GrowingRecordingDataSource.Factory(context.applicationContext),
             liveRecording = growingRec,
         )
+    }
+    val connectivityObserver = remember(context) { NetworkConnectivityObserver(context) }
+    LaunchedEffect(connectivityObserver, controller) {
+        connectivityObserver.observe().collect(controller::onNetworkAvailabilityChanged)
     }
     // Skip forward/back within the recorded portion. For a growing recording ExoPlayer won't report
     // the item as seekable (no fixed length), so we seek directly, clamped to what's on disk.

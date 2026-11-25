@@ -145,7 +145,12 @@ interface ChannelDao {
         """
         SELECT * FROM channels
         WHERE hidden = 0
-          AND (displayName LIKE '%' || :query || '%' OR name LIKE '%' || :query || '%')
+          AND (
+              displayName LIKE '%' || :query || '%'
+              OR name LIKE '%' || :query || '%'
+              OR customName LIKE '%' || :query || '%'
+              OR (CAST(number AS TEXT) LIKE :query || '%' AND :query NOT GLOB '*[^0-9]*')
+          )
         ORDER BY favourite DESC, sourceId, sortIndex, id
         LIMIT :limit
         """
@@ -156,7 +161,12 @@ interface ChannelDao {
     @Query(
         """
         SELECT * FROM channels
-        WHERE (displayName LIKE '%' || :query || '%' OR name LIKE '%' || :query || '%')
+        WHERE (
+              displayName LIKE '%' || :query || '%'
+              OR name LIKE '%' || :query || '%'
+              OR customName LIKE '%' || :query || '%'
+              OR (CAST(number AS TEXT) LIKE :query || '%' AND :query NOT GLOB '*[^0-9]*')
+          )
         ORDER BY hidden, favourite DESC, sourceId, sortIndex, id
         LIMIT :limit
         """

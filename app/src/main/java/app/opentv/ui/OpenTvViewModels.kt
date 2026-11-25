@@ -76,6 +76,22 @@ internal data class ProgrammeSearchMatch(
     val variants: List<Channel>,
 )
 
+internal data class CurrentAndNextProgramme(val current: Programme?, val next: Programme?)
+
+/** Channel names need two characters to stay responsive; a single digit is useful for number entry. */
+internal fun isChannelSearchReady(query: String): Boolean =
+    query.length >= 2 || (query.length == 1 && query[0].isDigit())
+
+/** Re-evaluates now/next from an already-loaded programme list as the clock advances. */
+internal fun selectCurrentAndNextProgramme(
+    programmes: List<Programme>,
+    nowUtcMillis: Long,
+): CurrentAndNextProgramme {
+    val current = programmes.firstOrNull { it.isLiveAt(nowUtcMillis) }
+    val next = programmes.firstOrNull { it.startUtcMillis >= (current?.endUtcMillis ?: nowUtcMillis) }
+    return CurrentAndNextProgramme(current, next)
+}
+
 /**
  * Pure programme-search policy. It deliberately starts from the bounded programme result set,
  * then resolves EPG ids through every [Channel.epgCandidates] entry while retaining logical
@@ -471,10 +487,9 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
                 // Combine the (per-category) channel list with the shared, already-grouped
                 // programme index. Switching category rebuilds only the channel→row grouping;
                 // the heavy programme grouping happened once and is reused, so a tap is quick.
-                // Deliberately NOT combined with the minute tick: building "All channels" (20k
-                // rows) can take longer than 60s, and a tick landing mid-build would cancel and
-                // restart it via flatMapLatest so it would never finish. "Now" is captured per
-                // build instead; the guide's live progress bars advance off the screen's clock.
+                // Build the channel/EPG rows only when their data changes. The minute tick below
+                // re-evaluates now/next from each row's already-loaded schedule without restarting
+                // the expensive catalogue grouping.
                 combine(channelFlow, programmeIndex) { channels, byEpgChannel ->
                     val now = System.currentTimeMillis()
                     // Scope to the chosen provider. The "All" branch already fetched only this source
@@ -494,6 +509,12 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
                     if (firstBuild) StatusBus.set(sizeMessage(visible.size), 0f)
                     buildRows(visible, byEpgChannel, now, reportProgress = firstBuild)
                 }
+                    .combine(nowTick) { builtRows, now ->
+                        builtRows.map { row ->
+                            val schedule = selectCurrentAndNextProgramme(row.programmes, now)
+                            row.copy(now = schedule.current, next = schedule.next)
+                        }
+                    }
             }
             // Grouping thousands of channels against a 12-hour, all-feeds programme window is heavy
             // enough to freeze the UI for a big provider — a category tap that took minutes. Run the
@@ -547,11 +568,12 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
 
+            val schedule = selectCurrentAndNextProgramme(list, now)
             Row(
                 primary = primary,
                 variants = variants,
-                now = list.firstOrNull { it.isLiveAt(now) },
-                next = list.firstOrNull { it.startUtcMillis > now },
+                now = schedule.current,
+                next = schedule.next,
                 programmes = list,
             )
         }
@@ -581,10 +603,11 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
                 .flatten()
                 .distinct()
                 .sortedWith(compareBy<Programme> { it.startUtcMillis }.thenBy { it.title })
+            val schedule = selectCurrentAndNextProgramme(rowProgrammes, now)
             ProgrammeResult(
                 row = base.copy(
-                    now = rowProgrammes.firstOrNull { it.isLiveAt(now) },
-                    next = rowProgrammes.firstOrNull { it.startUtcMillis > now },
+                    now = schedule.current,
+                    next = schedule.next,
                     programmes = rowProgrammes,
                 ),
                 programme = match.programme,
@@ -652,7 +675,7 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
             .debounce(200)
             .distinctUntilChanged()
             .flatMapLatest { (q, hidden) ->
-                if (q.length < 2 || !hidden.ready) flowOf(emptyList())
+                if (!isChannelSearchReady(q) || !hidden.ready) flowOf(emptyList())
                 else graph.catalogRepository.searchChannels(q)
                     // No EPG here — group channels into rows with no now/next. Finding and
                     // playing the channel is the job; guide detail would cost the slow query.
@@ -712,7 +735,7 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
             .debounce(200)
             .distinctUntilChanged()
             .flatMapLatest { q ->
-                if (q.length < 2) flowOf(emptyList())
+                if (!isChannelSearchReady(q)) flowOf(emptyList())
                 else graph.catalogRepository.searchChannelsIncludingHidden(q)
                     .map { channels -> buildRows(channels, emptyMap(), System.currentTimeMillis()) }
             }
@@ -791,6 +814,30 @@ class ChannelsViewModel(app: Application) : AndroidViewModel(app) {
             // so the choice survives switching quality.
             val target = !row.primary.favourite
             row.variants.forEach { graph.catalogRepository.setChannelFavourite(it.id, target) }
+        }
+    }
+
+    /** Move one logical channel one slot within the currently browsed category. */
+    fun moveManagerRow(row: Row, direction: Int) {
+        if (direction != -1 && direction != 1) return
+        val rows = managerRows.value
+        val index = rows.indexOfFirst { it.key == row.key }
+        if (index < 0) return
+        val neighbour = rows.getOrNull(index + direction) ?: return
+        if (row.primary.sourceId != neighbour.primary.sourceId) return
+
+        val rowOrder = row.variants.minOfOrNull { it.sortIndex } ?: row.primary.sortIndex
+        val neighbourOrder = neighbour.variants.minOfOrNull { it.sortIndex } ?: neighbour.primary.sortIndex
+        viewModelScope.launch {
+            if (rowOrder == neighbourOrder) {
+                // Some providers assign the same position to adjacent variants. Nudge only the
+                // moved logical row; the next sync will keep this custom sortIndex as user state.
+                val movedOrder = if (direction < 0) neighbourOrder - 1 else neighbourOrder + 1
+                row.variants.forEach { graph.catalogRepository.setChannelSortIndex(it.id, movedOrder) }
+            } else {
+                row.variants.forEach { graph.catalogRepository.setChannelSortIndex(it.id, neighbourOrder) }
+                neighbour.variants.forEach { graph.catalogRepository.setChannelSortIndex(it.id, rowOrder) }
+            }
         }
     }
 
