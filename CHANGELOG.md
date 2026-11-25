@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.11.50 (release pública autorizada) — 2026-11-25
+
+- **Marca:** removido o texto “FORA DO AR”; o nome exibido do aplicativo continua “FullTV”.
+- **R8 / investigação API 25:** mantida separada `androidx.work.impl.WorkDatabase_Impl$1` para evitar fusão com helper ML Kit que referencia `java.nio.file.FileAttribute`. O mapping do APK confirma a separação; isso não remove todas as referências NIO do ML Kit nem prova compatibilidade de execução em Android 7.1.
+- **Compatibilidade e assinatura:** `app.fulltv`, versionName `0.11.50`, versionCode 62, minSdk 24, targetSdk 35 e quatro ABIs; certificado SHA-256 legado `01ad68a30d48753a4909ce350ddfd98ec5a30af684c2efd54955184caac69b91` verificado no APK.
+- **Validação:** 287 testes Android passaram sem falhas/erros/ignorados; `lintVitalRelease`, minificação R8 e `assembleRelease` passaram. O APK universal passou verificação de metadados, assinatura e alinhamento ZIP 16 KiB. Não houve teste físico/emulador API 25 nem Fire TV; não se declara este APK seguro para o TV Box.
+- **APK universal publicado:** 205.148.866 bytes; SHA-256 `6f0e6929c750c1021a6c3a023c17cd5522f13f51b3405c3e70ae6522b47a1193`; asset acompanhado por `SHA256SUMS.txt`. O relatório API 25 permanece local.
+- **Escopo:** publicação pública específica autorizada em 2026-11-25, limitada ao commit/push do código-fonte, tag/GitHub Release `v0.11.50` e APK universal com checksum; esta autorização não se estende a versões futuras. Nenhuma função de tradução ou resolução Python/YouTube foi desativada.
+
+## 0.11.49 (APK local; não publicado) — 2026-11-21
+
 ## 0.11.49 (APK local; não publicado) — 2026-11-21
 
 - **Navegação Fire TV/D-pad:** restaurado o recolhimento da faixa de grupos ao entrar no guia Live TV; **Esquerda** na coluna do canal reabre a faixa e solicita foco no grupo selecionado, sem depender apenas da busca espacial automática do Compose.

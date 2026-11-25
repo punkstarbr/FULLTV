@@ -46,6 +46,10 @@
 -dontwarn org.bouncycastle.**
 -dontwarn org.openjsse.**
 
+# R8 merged this generated WorkManager callback with an ML Kit helper whose method signature
+# references java.nio.file.FileAttribute. Keep it isolated so WorkManager can load on API 25.
+-keep class androidx.work.impl.WorkDatabase_Impl$1 { *; }
+
 # SMBJ (NAS recording) and its transitive deps. It uses reflection (mbassador event bus) and
 # pulls optional bits R8 would otherwise trip over. Keep its classes and silence the warnings so
 # the shrunk release still connects to a NAS.

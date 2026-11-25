@@ -1,3 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
 <!--
   ~ This file is part of OpenTV.
   ~ Copyright (C) 2026 The OpenTV Contributors
@@ -8,18 +9,26 @@
     android:height="48dp"
     android:viewportWidth="48"
     android:viewportHeight="48">
-    <!-- A TV showing colour bars: the classic "off air" test pattern. -->
     <path
         android:fillColor="#00000000"
         android:strokeColor="#FF8A3D"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:pathData="M17,9 L13,5 M31,9 L35,5" />
+    <path
+        android:fillColor="#FF17243A"
+        android:strokeColor="#FF8A3D"
         android:strokeWidth="2.6"
-        android:pathData="M7.5,7.5 L40.5,7.5 A4,4 0 0 1 44.5,11.5 L44.5,31 A4,4 0 0 1 40.5,35 L7.5,35 A4,4 0 0 1 3.5,31 L3.5,11.5 A4,4 0 0 1 7.5,7.5 Z" />
-    <path android:fillColor="#FFF2F2F2" android:pathData="M7,12 h5 v18 h-5 z" />
-    <path android:fillColor="#FFF2E600" android:pathData="M13,12 h5 v18 h-5 z" />
-    <path android:fillColor="#FF00E2E2" android:pathData="M19,12 h5 v18 h-5 z" />
-    <path android:fillColor="#FF00D03A" android:pathData="M25,12 h5 v18 h-5 z" />
-    <path android:fillColor="#FFE200E2" android:pathData="M31,12 h5 v18 h-5 z" />
-    <path android:fillColor="#FFE22020" android:pathData="M37,12 h4 v18 h-4 z" />
-    <path android:fillColor="#FF8A3D" android:pathData="M21,36 h6 v4 h-6 z" />
-    <path android:fillColor="#FF8A3D" android:pathData="M15,40 h18 v3 h-18 z" />
+        android:pathData="M8.5,10.5 L39.5,10.5 A4,4 0 0 1 43.5,14.5 L43.5,30.5 A4,4 0 0 1 39.5,34.5 L8.5,34.5 A4,4 0 0 1 4.5,30.5 L4.5,14.5 A4,4 0 0 1 8.5,10.5 Z" />
+    <path
+        android:fillColor="#FF0B1220"
+        android:pathData="M10,14 L38,14 L38,30 L10,30 Z" />
+    <path
+        android:fillColor="#FFFFF1E5"
+        android:pathData="M20,17 L20,27 L29,22 Z" />
+    <path
+        android:fillColor="#FFE6474F"
+        android:pathData="M35,15 A1.5,1.5 0 1 0 35,18 A1.5,1.5 0 1 0 35,15 Z" />
+    <path android:fillColor="#FF8A3D" android:pathData="M21,35 L27,35 L27,39 L21,39 Z" />
+    <path android:fillColor="#FF8A3D" android:pathData="M15,40 L33,40 L33,43 L15,43 Z" />
 </vector>

@@ -106,6 +106,7 @@ class ReleaseSigningVerifierTest(unittest.TestCase):
                 ("0.11.47", 59),
                 ("0.11.48", 60),
                 ("0.11.49", 61),
+                ("0.11.50", 62),
             ):
                 values = self.base_values(keystore.name, LEGACY_CERT)
                 values[LEGACY_OPT_IN] = "1"
@@ -125,7 +126,7 @@ class ReleaseSigningVerifierTest(unittest.TestCase):
         with tempfile.NamedTemporaryFile() as keystore:
             values = self.base_values(keystore.name, LEGACY_CERT)
             values[LEGACY_OPT_IN] = "1"
-            result = self.run_verifier(values, "0.11.50", 62)
+            result = self.run_verifier(values, "0.11.51", 63)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("blocked by default", result.stderr)
 
