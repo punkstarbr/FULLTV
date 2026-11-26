@@ -522,9 +522,8 @@ fun HomeScreen(
                         interfaceStyle = interfaceStyle,
                     )
                 }
-                // Focus follows the highlighted channel. On TV, collapse the rail as in the
-                // original flow; LEFT from the channel column then reopens it and restores the
-                // selected group's focus.
+                // Focus follows the highlighted channel. On TV, collapse the rail while browsing;
+                // LEFT from any focused control in a channel row reopens it and focuses its group.
                 val onFocusChannel: (ChannelsViewModel.Row) -> Unit = {
                     highlightedRow = it
                     previewArmed = true
@@ -532,7 +531,7 @@ fun HomeScreen(
                     if (isTelevision) railExpanded = false
                 }
                 val onExitLeftChannel: () -> Boolean = {
-                    if (isTelevision && !railExpanded) {
+                    if (isTelevision) {
                         railExpanded = true
                         pendingRailFocus = true
                         true

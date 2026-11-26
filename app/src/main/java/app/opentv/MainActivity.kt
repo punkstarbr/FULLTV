@@ -147,20 +147,19 @@ class MainActivity : ComponentActivity() {
 
     // ---- Picture-in-picture ------------------------------------------------------------------
 
-    /** Home pressed while a programme is playing → shrink to a floating window instead of stopping. */
+    /** Leaving full-screen playback pauses; PiP continues only if the user opened it explicitly. */
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        maybeEnterPip()
+        if (app.opentv.core.PipState.eligible && app.opentv.core.PipState.isPlaying &&
+            !app.opentv.core.PipState.inPip.value
+        ) {
+            app.opentv.core.PipState.requestPauseOnLeave()
+        }
     }
 
     private fun supportsPip(): Boolean =
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
-
-    fun maybeEnterPip() {
-        if (!app.opentv.core.PipState.eligible || !app.opentv.core.PipState.isPlaying) return
-        enterPipNow()
-    }
 
     /** Explicit request from the player's PiP button — no eligibility guard, the user asked. */
     fun enterPipNow() {

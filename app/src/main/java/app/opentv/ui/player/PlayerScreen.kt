@@ -294,8 +294,8 @@ fun PlayerScreen(
     // battery optimisation, so the capture survives the screen sleeping. Never blocks recording.
     var showBackgroundPrompt by remember { mutableStateOf(false) }
 
-    // Picture-in-picture. While the player is on it is "eligible" to shrink to a floating window
-    // (pressing Home does it, handled in MainActivity); [inPip] drives hiding all the chrome.
+    // Picture-in-picture is entered explicitly from the player controls; [inPip] hides chrome there.
+    // Pressing Home from full-screen playback requests a pause through MainActivity.
     val inPip by app.opentv.core.PipState.inPip.collectAsState()
     val pipSupported = remember {
         android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O &&
@@ -309,6 +309,13 @@ fun PlayerScreen(
             app.opentv.core.PipState.eligible = false
             app.opentv.core.PipState.isPlaying = false
         }
+    }
+    DisposableEffect(controller) {
+        app.opentv.core.PipState.setPauseOnLeaveHandler {
+            paused = true
+            controller.player.playWhenReady = false
+        }
+        onDispose { app.opentv.core.PipState.setPauseOnLeaveHandler(null) }
     }
     LaunchedEffect(paused) { app.opentv.core.PipState.isPlaying = !paused }
     LaunchedEffect(inPip) {

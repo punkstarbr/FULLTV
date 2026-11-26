@@ -275,7 +275,6 @@ private fun ChannelListRow(
     palette: InterfacePalette,
 ) {
     var focused by remember { mutableStateOf(false) }
-    var channelCellDirectlyFocused by remember { mutableStateOf(false) }
     val nowProg = row.now
     val channelAccessibility = stringResource(
         R.string.guide_channel_accessibility,
@@ -295,16 +294,13 @@ private fun ChannelListRow(
                 contentDescription = channelAccessibility
                 if (isHighlighted) stateDescription = previewState
             }
-            // LEFT from a row reopens the collapsed rail, exactly like the grid's channel column.
+            // LEFT from any focus inside a row reopens the collapsed rail and selects its group.
             .onPreviewKeyEvent { e ->
-                if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionLeft &&
-                    channelCellDirectlyFocused
-                ) onExitLeft() else false
+                if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionLeft) onExitLeft() else false
             }
             .onFocusChanged {
                 // The nested favourite button is a separate focus target. Track focus anywhere
                 // inside the channel cell so the highlighted row and preview do not go stale.
-                channelCellDirectlyFocused = it.isFocused
                 focused = it.hasFocus
                 if (it.hasFocus) onFocus()
             }
@@ -450,7 +446,6 @@ private fun GuideRow(
 ) {
     // The highlighted row drives the live preview; OK opens its action menu.
     var focused by remember { mutableStateOf(false) }
-    var channelCellDirectlyFocused by remember { mutableStateOf(false) }
     val channelAccessibility = stringResource(
         R.string.guide_channel_accessibility,
         row.primary.shownName,
@@ -477,19 +472,13 @@ private fun GuideRow(
                     contentDescription = channelAccessibility
                     if (isHighlighted) stateDescription = previewState
                 }
-                // LEFT from this leftmost column asks the host to reopen the collapsed category
-                // rail; onExitLeft consumes the key only when it handled it (rail was hidden), so
-                // moving left onto programme blocks and into an already-visible rail still works.
+                // LEFT from any focus inside this channel cell asks the host to reopen the group rail.
                 .onPreviewKeyEvent { e ->
-                    if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionLeft &&
-                        channelCellDirectlyFocused
-                    ) onExitLeft()
-                    else false
+                    if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionLeft) onExitLeft() else false
                 }
                 .onFocusChanged {
                     // A favourite IconButton is nested in this cell; its focus must still update
                     // the row highlight and the live preview.
-                    channelCellDirectlyFocused = it.isFocused
                     focused = it.hasFocus
                     if (it.hasFocus) onFocus()
                 }
